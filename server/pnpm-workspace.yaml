@@ -1,0 +1,11 @@
+# 让 server/ 成为独立 pnpm 工作区根，与仓库根目录的前端工作区隔离，
+# 后端在此目录生成独立的 node_modules 与 pnpm-lock.yaml。
+#
+# allowBuilds：放行这些依赖的安装期构建脚本（Prisma 需要下载/准备查询引擎）。
+allowBuilds:
+  prisma: true
+  "@prisma/client": true
+  "@prisma/engines": true
+  "@nestjs/core": true
+  "@scarf/scarf": true
+  esbuild: true

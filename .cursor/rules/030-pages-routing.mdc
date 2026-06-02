@@ -1,0 +1,28 @@
+---
+description: 页面、路由和跳转规则
+alwaysApply: true
+globs: src/app/**/*.{ts,tsx}
+---
+
+页面对应关系：
+- 首页：`src/app/App.tsx` 中的 home 页面逻辑
+- 顶部导航：`src/app/NavBar.tsx`
+- 模型社区：`src/app/ModelCommunity.tsx`
+- 模型库列表：`src/app/ModelLibrary.tsx`
+- 关于我们：`src/app/AboutUs.tsx`
+- 联系我们：`src/app/ContactPage.tsx`
+- 注册登录：`src/app/AuthPage.tsx`
+- 模型数据：`src/app/communityData.ts`
+
+路由/页面状态规则：
+- 当前原型可能使用 `page` 状态切换页面，后续正式开发可迁移为 React Router。
+- 迁移路由前不要破坏现有页面跳转逻辑。
+- 顶部导航按钮必须能跳转到对应页面。
+- “浏览模型”进入模型库列表页。
+- “模型社区”进入社区页。
+- “联系我们”进入联系页。
+- “注册/登录”进入 AuthPage。
+
+详情页规则：
+- 模型详情页应接收模型 ID。
+- 没有找到模型时必须有“模型不存在/返回列表”的空状态。

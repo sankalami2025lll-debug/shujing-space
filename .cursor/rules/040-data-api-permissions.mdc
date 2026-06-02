@@ -1,0 +1,31 @@
+---
+description: 数据结构、后端接口和权限规则
+alwaysApply: true
+globs: src/**/*.{ts,tsx}
+---
+
+数据与接口规则：
+- 前端初期可继续使用 `communityData.ts` 假数据，但每个字段要对应未来数据库字段。
+- 后端接口命名要 RESTful，禁止临时拼接混乱接口。
+- 所有表单提交都要有 loading、success、error 三种状态。
+- 文件上传必须校验：文件类型、大小、名称、模型分类、发布权限。
+
+建议接口：
+- `GET /api/models` 获取模型列表
+- `GET /api/models/:id` 获取模型详情
+- `POST /api/models` 发布模型
+- `POST /api/upload` 上传模型文件或封面
+- `POST /api/training-applications` 提交训练数据服务申请
+- `POST /api/contact-messages` 提交联系表单
+- `POST /api/auth/login` 登录
+- `POST /api/auth/register` 注册
+- `GET /api/users/me` 获取个人信息
+
+权限规则：
+- 游客：浏览首页、模型社区、模型库、关于我们、联系我们
+- 注册用户：上传模型、收藏模型、管理自己的模型
+- 管理员：审核模型、管理用户、处理申请、处理联系表单
+
+安全规则：
+- 不要在前端写死密钥、Token、数据库连接串。
+- 不要把 Supabase、云存储、邮箱服务密钥提交到仓库。

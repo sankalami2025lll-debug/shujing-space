@@ -1,0 +1,7 @@
+/**
+ * 数境空间 Next.js 全局样式入口（与 Vite src/styles/index.css 对齐）。
+ * 链式引入：fonts → tailwind（@source 扫描）→ theme（shadcn 变量 + @layer base）。
+ */
+@import '../styles/fonts.css';
+@import '../styles/tailwind.css';
+@import '../styles/theme.css';

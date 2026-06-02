@@ -1,0 +1,33 @@
+---
+description: React/Vite/Tailwind 前端开发规范
+alwaysApply: true
+globs: src/**/*.{ts,tsx,css}
+---
+
+技术栈阶段说明（最终已确定，详见 `docs/backend-architecture-plan.md`）：
+- 当前阶段：基于 **Vite + React 原型** 维护 UI，它是视觉/文案/交互的还原基准，本规则的 `globs: src/**` 即针对此原型生效。
+- 最终生产前端：**Next.js**（迁移后保持现有 UI/文案/交互一致，不得改变设计基调）。
+- 后端：**Node.js + NestJS**（TypeScript）。
+- 数据库：**PostgreSQL**；对象存储：**Cloudflare R2**；CDN/DNS/SSL/安全：**Cloudflare**。
+- 部署：**Ubuntu 22.04 + 1Panel + Docker / Docker Compose**，前后端分离。
+- 迁移到 Next.js 前，Vite 原型不得删除，仍为验收基准。
+
+前端技术栈规则（当前 Vite 原型阶段）：
+- 使用 React + TypeScript + Vite。
+- UI 基础组件优先复用 `src/app/components/ui/` 下的 shadcn/ui 组件。
+- 图标优先使用 `lucide-react`。
+- 样式优先使用 Tailwind CSS，不要引入新的 UI 框架。
+- 保持黑白灰高级科技感，只允许少量冰蓝色作为交互高光。
+- 不要大面积蓝色渐变、过度发光、廉价科幻风。
+- 上述组件/样式约定在迁移至 Next.js 后继续沿用（shadcn/ui + Tailwind + lucide-react）。
+
+代码结构规则：
+- 页面组件保持单一职责。
+- 可复用的卡片、弹窗、表单、筛选器应拆成组件。
+- 表单字段必须有明确类型和校验说明。
+- 页面状态必须命名清晰，例如 `selectedModel`、`isUploadModalOpen`、`activeCategory`。
+
+注释要求：
+- 每个页面顶部写明“页面用途”。
+- 每个主要区域写中文注释，例如：顶部导航、Hero 区、模型分类区、模型列表区、上传弹窗、联系表单。
+- 关键交互必须写注释，例如：点击模型卡片进入详情、提交表单、切换分类、关闭弹窗。

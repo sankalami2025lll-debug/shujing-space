@@ -1,0 +1,279 @@
+// 数境空间官网 Prisma Schema
+//
+// 本文件为「开发顺序第 3 步：数据库建模与种子」的数据模型定义。
+// 依据：docs/backend-architecture-plan.md 第四节（共 10 张表）。
+//
+// 红线：
+// - 数据库只存文件 URL / R2 object key / 业务信息，不存任何二进制。
+// - 模型文件、封面图、视频实体一律落 Cloudflare R2；本表只记录可访问 URL 与 r2_key。
+// - 枚举一律用 Prisma enum（角色 / 状态 / 可见性 / viewerType / 文件类型 / 验证码场景）。
+//
+// 字段映射（前端 communityData.ts → 本 schema）：
+// - color / pattern 为纯前端卡片视觉效果，不属于业务数据，故不入库。
+// - views("2.1k") → models.viewsCount(Int)；time("3天前") → models.createdAt(Timestamptz)，由 seed 清洗。
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================== 枚举定义 ==============================
+
+// 系统权限角色：普通用户 / 管理员
+enum UserRole {
+  user
+  admin
+}
+
+// 账号状态：启用 / 禁用
+enum UserStatus {
+  active
+  disabled
+}
+
+// 模型查看器来源类型：iframe 内嵌 / Sketchfab / 原生查看器 / 无在线查看器
+enum ViewerType {
+  iframe
+  sketchfab
+  native
+  none
+}
+
+// 模型可见性：公开 / 仅自己 / 审核后公开
+enum ModelVisibility {
+  public
+  private
+  review
+}
+
+// 模型审核状态：草稿 / 待审核 / 已发布 / 已驳回
+enum ModelStatus {
+  draft
+  pending
+  published
+  rejected
+}
+
+// 上传文件用途：模型文件 / 封面图 / 视频
+enum FileKind {
+  model
+  cover
+  video
+}
+
+// 训练数据服务申请状态流转
+enum TrainingStatus {
+  submitted
+  contacted
+  evaluating
+  quoted
+  closed
+}
+
+// 联系线索状态流转
+enum LeadStatus {
+  new
+  contacted
+  qualified
+  quoted
+  won
+  lost
+}
+
+// 验证码用途场景：注册 / 登录 / 找回密码
+enum VerificationScene {
+  register
+  login
+  reset
+}
+
+// ============================== 数据表 ==============================
+
+/// users：用户 / 账号表
+model User {
+  id           BigInt     @id @default(autoincrement())
+  phone        String?    @unique @db.VarChar(20) // 手机号
+  email        String?    @unique @db.VarChar(120) // 邮箱
+  passwordHash String?    @map("password_hash") @db.VarChar(255) // bcrypt 哈希；验证码注册可空
+  nickname     String     @db.VarChar(60) // 显示名
+  company      String?    @db.VarChar(120) // 公司
+  roleType     String?    @map("role_type") @db.VarChar(40) // 注册表单填写的角色/需求类型
+  role         UserRole   @default(user) // 系统权限
+  avatarUrl    String?    @map("avatar_url") @db.VarChar(255) // 头像（R2 URL）
+  status       UserStatus @default(active) // 账号状态
+  createdAt    DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime   @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  // 关系
+  models               Model[]
+  modelFiles           ModelFile[]
+  favorites            Favorite[]
+  likes                Like[]
+  trainingApplications TrainingApplication[]
+
+  @@map("users")
+}
+
+/// categories：模型分类表（后台分类管理 + 前端筛选）
+model Category {
+  id        BigInt   @id @default(autoincrement())
+  name      String   @unique @db.VarChar(40) // 实景三维 / BIM 模型 / 构件级模型 / 具身智能机器人训练场景
+  slug      String   @unique @db.VarChar(40) // 英文标识
+  sort      Int      @default(0) // 排序权重
+  isActive  Boolean  @default(true) @map("is_active") // 是否启用
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  models Model[]
+
+  @@map("categories")
+}
+
+/// models：模型主表（核心）
+model Model {
+  id             BigInt          @id @default(autoincrement())
+  userId         BigInt          @map("user_id") // 发布者
+  categoryId     BigInt?         @map("category_id") // 分类
+  type           String          @db.VarChar(40) // 冗余类型名（与分类一致，兼容原型展示）
+  title          String          @db.VarChar(120) // 标题
+  tags           Json            @default("[]") // 标签数组
+  scenes         Json            @default("[]") // 应用场景多选
+  description    String          @default("") @db.Text // 简介
+  coverUrl       String          @default("") @map("cover_url") @db.VarChar(255) // 封面图 R2 URL（不存二进制）
+  modelUrl       String?         @map("model_url") @db.VarChar(255) // 模型资源 / 外部 Viewer 地址 → 前端 viewerUrl
+  viewerType     ViewerType      @default(none) @map("viewer_type") // 查看器来源
+  allowIframe    Boolean         @default(true) @map("allow_iframe") // 是否允许 iframe 内嵌（兜底用）
+  fileFormat     String?         @map("file_format") @db.VarChar(20) // glb/gltf/ifc/3dtiles/点云
+  viewsCount     Int             @default(0) @map("views_count") // 浏览量
+  likesCount     Int             @default(0) @map("likes_count") // 点赞量
+  favoritesCount Int             @default(0) @map("favorites_count") // 收藏量
+  visibility     ModelVisibility @default(public) // 可见性
+  status         ModelStatus     @default(draft) // 审核状态
+  rejectReason   String?         @map("reject_reason") @db.Text // 驳回原因（后台审核）
+  createdAt      DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime        @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  // 关系
+  user      User       @relation(fields: [userId], references: [id])
+  category  Category?  @relation(fields: [categoryId], references: [id])
+  favorites Favorite[]
+  likes     Like[]
+
+  @@index([type, status])
+  @@index([status, createdAt])
+  @@index([userId])
+  @@map("models")
+}
+
+/// model_files：上传文件登记表（指向 R2，只存 URL / object key，不存二进制）
+model ModelFile {
+  id           BigInt   @id @default(autoincrement())
+  userId       BigInt   @map("user_id") // 上传者
+  kind         FileKind // 文件用途：model / cover / video
+  originalName String   @map("original_name") @db.VarChar(255) // 原始文件名
+  r2Key        String   @map("r2_key") @db.VarChar(255) // R2 对象 key
+  url          String   @db.VarChar(255) // 可访问 URL（R2 公共域 / CDN 域）
+  size         BigInt // 字节
+  mime         String   @db.VarChar(80) // MIME 类型
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@map("model_files")
+}
+
+/// favorites：收藏表
+model Favorite {
+  id        BigInt   @id @default(autoincrement())
+  userId    BigInt   @map("user_id")
+  modelId   BigInt   @map("model_id")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user  User  @relation(fields: [userId], references: [id])
+  model Model @relation(fields: [modelId], references: [id])
+
+  @@unique([userId, modelId]) // 防重复收藏
+  @@map("favorites")
+}
+
+/// likes：点赞表
+model Like {
+  id        BigInt   @id @default(autoincrement())
+  userId    BigInt   @map("user_id")
+  modelId   BigInt   @map("model_id")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user  User  @relation(fields: [userId], references: [id])
+  model Model @relation(fields: [modelId], references: [id])
+
+  @@unique([userId, modelId]) // 防重复点赞
+  @@map("likes")
+}
+
+/// training_applications：具身智能机器人训练场景 数据服务申请表
+model TrainingApplication {
+  id          BigInt         @id @default(autoincrement())
+  userId      BigInt?        @map("user_id") // 登录则记录
+  contactName String         @map("contact_name") @db.VarChar(60) // 联系人
+  contactWay  String         @map("contact_way") @db.VarChar(120) // 手机/微信
+  company     String         @db.VarChar(120) // 公司
+  robotType   String         @map("robot_type") @db.VarChar(40) // 机器人类型
+  trainTasks  Json           @default("[]") @map("train_tasks") // 训练任务多选
+  sceneDesc   String         @map("scene_desc") @db.Text // 场景需求描述
+  status      TrainingStatus @default(submitted) // 申请状态
+  createdAt   DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  user User? @relation(fields: [userId], references: [id])
+
+  @@index([status, createdAt])
+  @@map("training_applications")
+}
+
+/// contact_leads：联系线索表
+model ContactLead {
+  id         BigInt     @id @default(autoincrement())
+  name       String     @db.VarChar(60) // 姓名
+  contactWay String     @map("contact_way") @db.VarChar(120) // 手机/微信
+  company    String?    @db.VarChar(120) // 公司
+  email      String?    @db.VarChar(120) // 邮箱
+  scene      String?    @db.VarChar(40) // 应用场景
+  dataTypes  Json       @default("[]") @map("data_types") // 数据类型多选
+  stage      String?    @db.VarChar(40) // 项目阶段
+  budget     String?    @db.VarChar(40) // 预算范围
+  message    String     @default("") @db.Text // 需求描述
+  status     LeadStatus @default(new) // 线索状态
+  createdAt  DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt  DateTime   @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([status, createdAt])
+  @@map("contact_leads")
+}
+
+/// verification_codes：验证码表（无 Redis 时用表，二期迁 Redis）
+model VerificationCode {
+  id        BigInt            @id @default(autoincrement())
+  target    String            @db.VarChar(120) // 手机号/邮箱
+  scene     VerificationScene // 用途
+  codeHash  String            @map("code_hash") @db.VarChar(255) // 验证码哈希
+  expiresAt DateTime          @map("expires_at") @db.Timestamptz(6) // 过期时间
+  used      Boolean           @default(false) // 是否已用
+  createdAt DateTime          @default(now()) @map("created_at") @db.Timestamptz(6) // 60s 限频依据
+
+  @@index([target, scene])
+  @@map("verification_codes")
+}
+
+/// site_configs：全站配置表（Footer 联系方式、备案号等）
+model SiteConfig {
+  key       String   @id @db.VarChar(60) // phone / email / address / icp 等
+  value     String   @db.Text // 配置值
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@map("site_configs")
+}
