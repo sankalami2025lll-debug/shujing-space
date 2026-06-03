@@ -59,6 +59,7 @@ export interface ModelCategoryVm {
 // 详情视图（完整）
 export interface ModelDetailVm {
   id: number;
+  userId: number;
   title: string;
   type: string;
   tags: unknown; // 标签数组（Json）
@@ -114,6 +115,7 @@ export function toModelDetailVm(
 ): ModelDetailVm {
   return {
     id: Number(m.id),
+    userId: Number(m.userId),
     title: m.title,
     type: m.type,
     tags: m.tags,

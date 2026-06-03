@@ -1,0 +1,55 @@
+name: shujing-space-prod
+
+services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    env_file:
+      - .env.prod
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - shujing_internal
+
+  server:
+    build:
+      context: ../server
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env.prod
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["node", "dist/main.js"]
+    expose:
+      - "4000"
+    networks:
+      - shujing_internal
+
+  web:
+    build:
+      context: ../web
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env.prod
+    depends_on:
+      - server
+    command: ["pnpm", "start", "--hostname", "0.0.0.0", "--port", "3000"]
+    expose:
+      - "3000"
+    networks:
+      - shujing_internal
+
+volumes:
+  pg_data:
+
+networks:
+  shujing_internal:
+    driver: bridge

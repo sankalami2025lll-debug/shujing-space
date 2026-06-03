@@ -2,7 +2,7 @@
  * 视图模型 / 映射：后台管理（Admin）接口对外字段
  * 用途：把 Prisma 实体裁剪为后台各管理模块的对外视图，统一 BigInt（id/userId 等）→ number。
  * 约定：
- *  - AdminModelVm：后台模型（全状态可见，含 status / visibility / rejectReason / 发布者）。
+ *  - AdminModelVm：后台模型（全状态可见，含 status / visibility / 软删除字段 / 发布者）。
  *  - AdminUserVm：后台用户（严格脱敏，绝不返回 passwordHash）。
  *  - AdminCategoryVm：后台分类（含 isActive 等后台字段，区别于游客 CategoryVm）。
  *  - AdminLeadVm：后台联系线索（全字段）。
@@ -56,7 +56,10 @@ export interface AdminModelVm {
   favoritesCount: number;
   visibility: ModelVisibility; // 可见性
   status: ModelStatus; // 审核状态：draft / pending / published / rejected
+  deletedAt: Date | null; // 软删除时间
+  deletedBy: number | null; // 执行删除的用户 id
   rejectReason: string | null; // 驳回原因
+  deleteReason: string | null; // 删除原因
   createdAt: Date;
   updatedAt: Date;
 }
@@ -85,7 +88,10 @@ export function toAdminModelVm(m: ModelWithRelations): AdminModelVm {
     favoritesCount: m.favoritesCount,
     visibility: m.visibility,
     status: m.status,
+    deletedAt: m.deletedAt ?? null,
+    deletedBy: m.deletedBy != null ? Number(m.deletedBy) : null,
     rejectReason: m.rejectReason ?? null,
+    deleteReason: m.deleteReason ?? null,
     createdAt: m.createdAt,
     updatedAt: m.updatedAt,
   };

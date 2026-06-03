@@ -10,7 +10,11 @@ import NavBar from "@/components/layout/NavBar";
 export function SiteChrome({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   // hideNav：登录注册页使用独立顶栏，不复用 NavBar（对齐 Vite App.tsx auth 分支）
-  const hideNav = pathname === "/auth" || pathname.startsWith("/auth/");
+  const hideNav =
+    pathname === "/auth" ||
+    pathname.startsWith("/auth/") ||
+    pathname === "/admin" ||
+    pathname.startsWith("/admin/");
 
   return (
     <>

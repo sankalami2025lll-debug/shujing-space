@@ -34,13 +34,15 @@ export function configuration() {
       accessSecret: env.JWT_ACCESS_SECRET,
       accessExpires: env.JWT_ACCESS_EXPIRES,
     },
-    // Cloudflare R2 对象存储配置（上传模块使用；密钥仅来自环境变量，不入库）
+    // S3 兼容对象存储配置（历史命名仍为 r2；可用于 Cloudflare R2 / 阿里云 OSS）
     r2: {
       accountId: env.R2_ACCOUNT_ID,
       accessKeyId: env.R2_ACCESS_KEY_ID,
       secretAccessKey: env.R2_SECRET_ACCESS_KEY,
       bucket: env.R2_BUCKET,
+      region: env.R2_REGION,
       endpoint: env.R2_ENDPOINT,
+      forcePathStyle: String(env.R2_FORCE_PATH_STYLE) === 'true',
       publicBase: env.R2_PUBLIC_BASE,
       presignExpires: Number(env.R2_PRESIGN_EXPIRES),
     },

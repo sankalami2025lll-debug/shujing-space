@@ -39,6 +39,8 @@
   --sidebar-accent-foreground: #ffffff;
   --sidebar-border: rgba(255, 255, 255, 0.1);
   --sidebar-ring: rgba(255, 255, 255, 0.2);
+  --toast-success-accent: #8fd6ff;
+  --toast-error-accent: #f08a96;
 }
 
 .dark {
@@ -76,6 +78,8 @@
   --sidebar-accent-foreground: #ffffff;
   --sidebar-border: rgba(255, 255, 255, 0.1);
   --sidebar-ring: rgba(255, 255, 255, 0.2);
+  --toast-success-accent: #8fd6ff;
+  --toast-error-accent: #f08a96;
 }
 
 @theme inline {
@@ -178,5 +182,81 @@
     font-size: var(--text-base);
     font-weight: var(--font-weight-normal);
     line-height: 1.5;
+  }
+}
+
+@layer components {
+  .toaster {
+    --gray1: rgba(9, 9, 11, 0.9);
+    --gray2: rgba(255, 255, 255, 0.12);
+    --gray12: rgba(255, 255, 255, 0.96);
+    --border-radius: 18px;
+  }
+
+  .toaster [data-sonner-toast] {
+    position: relative;
+    overflow: hidden;
+    gap: 12px;
+    padding: 14px 16px;
+  }
+
+  .toaster [data-sonner-toast]::before {
+    content: "";
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 3px;
+    background: rgba(255, 255, 255, 0.16);
+  }
+
+  .toaster [data-sonner-toast][data-type="success"]::before {
+    background: linear-gradient(180deg, var(--toast-success-accent), rgba(143, 214, 255, 0.28));
+  }
+
+  .toaster [data-sonner-toast][data-type="error"]::before {
+    background: linear-gradient(180deg, var(--toast-error-accent), rgba(240, 138, 150, 0.28));
+  }
+
+  .toaster [data-sonner-toast] [data-icon] {
+    width: 28px;
+    height: 28px;
+    border-radius: 9999px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(255, 255, 255, 0.04);
+    color: rgba(255, 255, 255, 0.85);
+  }
+
+  .toaster [data-sonner-toast][data-type="success"] [data-icon] {
+    color: var(--toast-success-accent);
+    border-color: rgba(143, 214, 255, 0.18);
+    background: rgba(143, 214, 255, 0.08);
+  }
+
+  .toaster [data-sonner-toast][data-type="error"] [data-icon] {
+    color: var(--toast-error-accent);
+    border-color: rgba(240, 138, 150, 0.18);
+    background: rgba(240, 138, 150, 0.08);
+  }
+
+  .toaster [data-sonner-toast] [data-content] {
+    gap: 4px;
+  }
+
+  .toaster [data-sonner-toast] [data-button],
+  .toaster [data-sonner-toast] [data-cancel] {
+    height: 34px;
+    border-radius: 9999px;
+    padding-inline: 14px;
+    font-size: 12px;
+    font-weight: 500;
+    box-shadow: none;
+  }
+
+  .toaster [data-sonner-toast] [data-close-button] {
+    width: 28px;
+    height: 28px;
+    border-radius: 9999px;
+    border-color: rgba(255, 255, 255, 0.1);
+    background: rgba(255, 255, 255, 0.04);
+    color: rgba(255, 255, 255, 0.7);
   }
 }

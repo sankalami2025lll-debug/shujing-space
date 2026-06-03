@@ -42,14 +42,20 @@ const envSchema = z.object({
   JWT_ACCESS_SECRET: z.string().min(1, 'JWT_ACCESS_SECRET 不能为空'),
   // 访问令牌有效期（如 2h / 30m），默认 2h
   JWT_ACCESS_EXPIRES: z.string().default('2h'),
-  // —— Cloudflare R2 对象存储（第 6 步 上传模块）——
+  // —— S3 兼容对象存储（第 6 步 上传模块；历史变量名仍为 R2_*）——
   // 说明：开发环境允许为空（不阻断启动），缺失时由 R2Service 在调用时抛清晰错误；
   //       生产应在部署环境注入真实值。一律不落服务器本地磁盘。
   R2_ACCOUNT_ID: z.string().default(''),
   R2_ACCESS_KEY_ID: z.string().default(''),
   R2_SECRET_ACCESS_KEY: z.string().default(''),
   R2_BUCKET: z.string().default('shujing-dev'),
+  // region 默认 auto（兼容 Cloudflare R2）；阿里云 OSS 等 S3 兼容存储应填真实地域，如 cn-shenzhen。
+  R2_REGION: z.string().default('auto'),
   R2_ENDPOINT: z.string().default(''),
+  // Cloudflare R2 默认 path-style=true；阿里云 OSS 应设为 false（virtual-hosted style）。
+  R2_FORCE_PATH_STYLE: z
+    .enum(['true', 'false'])
+    .default('true'),
   R2_PUBLIC_BASE: z.string().default(''),
   // 预签名 PUT 有效期（秒），默认 600（10 分钟）
   R2_PRESIGN_EXPIRES: z.coerce.number().int().positive().default(600),

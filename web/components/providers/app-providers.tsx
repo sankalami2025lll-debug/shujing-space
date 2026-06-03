@@ -19,7 +19,7 @@ export function AppProviders({ children }: { children: ReactNode }) {
         <SiteConfigProvider>
           {children}
           {/* 全站轻提示出口，与 Vite App.tsx 中 Toaster 配置一致 */}
-          <Toaster richColors position="top-center" />
+          <Toaster closeButton position="top-center" visibleToasts={3} />
         </SiteConfigProvider>
       </AuthProvider>
     </ThemeProvider>

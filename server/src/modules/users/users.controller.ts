@@ -12,7 +12,7 @@
  *  - 个人信息（GET /api/users/me）不在此实现，继续使用 GET /api/auth/me。
  *  - 响应体由全局 TransformInterceptor 统一包成 { code, message, data }。
  */
-import { Controller, Get, Query, UseGuards } from '@nestjs/common';
+import { Controller, Delete, Get, Param, ParseIntPipe, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { PaginationDto } from '../../common/dto/pagination.dto';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
@@ -61,5 +61,15 @@ export class UsersController {
   @ApiOperation({ summary: '个人中心统计（models/published/pending/rejected/favorites/applications）' })
   async stats(@CurrentUser() user: AuthUser) {
     return this.usersService.getStats(user.id);
+  }
+
+  // DELETE /api/users/me/models/:id：删除自己的模型（软删除，幂等）
+  @Delete('me/models/:id')
+  @ApiOperation({ summary: '删除自己的模型（软删除；仅本人可删；重复删除幂等）' })
+  async deleteMyModel(
+    @CurrentUser() user: AuthUser,
+    @Param('id', ParseIntPipe) id: number,
+  ) {
+    return this.usersService.deleteOwnModel(user.id, BigInt(id));
   }
 }

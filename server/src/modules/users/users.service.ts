@@ -4,9 +4,9 @@
  * 红线：
  *  - 所有查询严格按当前 userId 过滤，禁止越权读他人数据。
  *  - BigInt 主键 / 计数统一在 VM 层或本层转 number。
- *  - 本阶段只读：不实现编辑资料 / 删除模型 / 审核 / 训练申请提交。
+ *  - 本阶段支持本人删除自己的模型（软删除）；不做物理删除、不删 OSS/R2 / model_files / likes / favorites。
  */
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { ModelStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { PaginationDto } from '../../common/dto/pagination.dto';
@@ -27,6 +27,13 @@ export interface PaginatedResult<T> {
   total: number;
   page: number;
   pageSize: number;
+}
+
+// 删除模型返回结构
+export interface DeleteModelResult {
+  id: number;
+  deleted: true;
+  deletedAt: Date;
 }
 
 @Injectable()
@@ -116,15 +123,62 @@ export class UsersService {
   async getStats(userId: bigint): Promise<MeStatsVm> {
     const [models, published, pending, rejected, favorites, applications] =
       await this.prisma.$transaction([
-        this.prisma.model.count({ where: { userId } }),
-        this.prisma.model.count({ where: { userId, status: ModelStatus.published } }),
-        this.prisma.model.count({ where: { userId, status: ModelStatus.pending } }),
-        this.prisma.model.count({ where: { userId, status: ModelStatus.rejected } }),
+        this.prisma.model.count({ where: { userId, deletedAt: null } }),
+        this.prisma.model.count({
+          where: { userId, status: ModelStatus.published, deletedAt: null },
+        }),
+        this.prisma.model.count({
+          where: { userId, status: ModelStatus.pending, deletedAt: null },
+        }),
+        this.prisma.model.count({
+          where: { userId, status: ModelStatus.rejected, deletedAt: null },
+        }),
         this.prisma.favorite.count({ where: { userId } }),
         this.prisma.trainingApplication.count({ where: { userId } }),
       ]);
 
     return { models, published, pending, rejected, favorites, applications };
+  }
+
+  /**
+   * 删除自己的模型（DELETE /api/users/me/models/:id）。
+   * - 仅允许删除当前用户自己的模型；不存在/越权统一 404。
+   * - 软删除：只写 deletedAt / deletedBy，不删 model_files / likes / favorites / OSS/R2。
+   * - 幂等：若模型已删除，直接返回既有 deletedAt，不重复覆盖。
+   */
+  async deleteOwnModel(userId: bigint, modelId: bigint): Promise<DeleteModelResult> {
+    const model = await this.prisma.model.findFirst({
+      where: { id: modelId, userId },
+      select: { id: true, deletedAt: true },
+    });
+    if (!model) {
+      throw new NotFoundException('模型不存在');
+    }
+
+    if (model.deletedAt) {
+      return {
+        id: Number(model.id),
+        deleted: true,
+        deletedAt: model.deletedAt,
+      };
+    }
+
+    const deletedAt = new Date();
+    const updated = await this.prisma.model.update({
+      where: { id: modelId },
+      data: {
+        deletedAt,
+        deletedBy: userId,
+        deleteReason: null,
+      },
+      select: { id: true, deletedAt: true },
+    });
+
+    return {
+      id: Number(updated.id),
+      deleted: true,
+      deletedAt: updated.deletedAt as Date,
+    };
   }
 
   // —— 内部工具 ——
@@ -139,7 +193,7 @@ export class UsersService {
     const skip = (page - 1) * pageSize;
 
     // 严格按当前用户过滤；status=all 时不附加状态条件
-    const where: Prisma.ModelWhereInput = { userId };
+    const where: Prisma.ModelWhereInput = { userId, deletedAt: null };
     if (status !== 'all') {
       where.status = status as ModelStatus;
     }

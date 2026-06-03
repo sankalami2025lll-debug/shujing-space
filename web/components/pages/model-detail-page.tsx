@@ -7,7 +7,7 @@
  * 对应文档：页面功能注释文档/06_模型详情_ModelDetail.md
  * 说明：步骤 7C 已接收藏写接口与 TrainingModal。全站 NavBar 由 SiteChrome 挂载。
  */
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, type MouseEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -22,6 +22,8 @@ import {
   Heart,
   User,
   Loader2,
+  Trash2,
+  X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { TrainingModal } from "@/components/models/training-modal";
@@ -33,6 +35,7 @@ import {
   unfavoriteModel,
   recordModelView,
 } from "@/lib/api/models";
+import { deleteMyModel } from "@/lib/api/users";
 import { coverStyleByType, formatViews, formatRelativeTime } from "@/lib/format";
 import { typeTagColor } from "@/lib/community-data";
 import { ApiError } from "@/lib/http";
@@ -54,7 +57,7 @@ interface ModelDetailPageProps {
 
 export default function ModelDetailPage({ modelId }: ModelDetailPageProps) {
   const router = useRouter();
-  const { isAuthed } = useAuth();
+  const { user, isAuthed } = useAuth();
 
   const numericId = Number.parseInt(modelId, 10);
   const idValid = Number.isFinite(numericId) && numericId > 0;
@@ -70,6 +73,8 @@ export default function ModelDetailPage({ modelId }: ModelDetailPageProps) {
   const [saved, setSaved] = useState(false);
   const [favs, setFavs] = useState(0);
   const [savePending, setSavePending] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [deletePending, setDeletePending] = useState(false);
   // showTraining：训练数据服务申请弹窗显隐
   const [showTraining, setShowTraining] = useState(false);
   // viewedRef：记录已打点的模型 id，避免 React 严格模式 / 重渲染导致重复打点（本次会话内最小去重）
@@ -156,12 +161,23 @@ export default function ModelDetailPage({ modelId }: ModelDetailPageProps) {
   }, [idValid, numericId]);
 
   useEffect(() => {
-    if (detail) {
-      window.scrollTo({ top: 0, behavior: "instant" });
-      setSaved(detail.isFavorited ?? false);
-      setFavs(detail.favoritesCount);
-    }
-  }, [detail?.id, detail?.isFavorited, detail?.favoritesCount]);
+    if (!detail) return;
+    window.scrollTo({ top: 0, behavior: "instant" });
+    setSaved(detail.isFavorited ?? false);
+    setFavs(detail.favoritesCount);
+  }, [detail]);
+
+  // 删除确认弹窗：支持 Esc 关闭；删除请求进行中不允许关闭，避免状态混乱。
+  useEffect(() => {
+    if (!confirmOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !deletePending) {
+        setConfirmOpen(false);
+      }
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [confirmOpen, deletePending]);
 
   // handleSave：收藏/取消收藏。未登录引导登录；乐观更新 + 接口校正 + 失败回滚
   const handleSave = useCallback(async () => {
@@ -189,6 +205,34 @@ export default function ModelDetailPage({ modelId }: ModelDetailPageProps) {
       setSavePending(false);
     }
   }, [detail, isAuthed, requireAuth, savePending, saved]);
+
+  const handleDelete = useCallback((event: MouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation();
+    if (!detail || !user || deletePending) return;
+    if (user.id !== detail.userId) return;
+    setConfirmOpen(true);
+  }, [deletePending, detail, user]);
+
+  const closeConfirm = useCallback(() => {
+    if (deletePending) return;
+    setConfirmOpen(false);
+  }, [deletePending]);
+
+  const handleConfirmDelete = useCallback(async () => {
+    if (!detail || !user || deletePending) return;
+    if (user.id !== detail.userId) return;
+    setDeletePending(true);
+    try {
+      await deleteMyModel(detail.id);
+      setConfirmOpen(false);
+      toast.success("模型已删除");
+      router.replace("/models/me");
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : "删除失败，请稍后重试。");
+    } finally {
+      setDeletePending(false);
+    }
+  }, [deletePending, detail, router, user]);
 
   if (detailLoading) {
     return (
@@ -224,6 +268,7 @@ export default function ModelDetailPage({ modelId }: ModelDetailPageProps) {
     detail.description && detail.description.trim()
       ? detail.description
       : `这是一个高质量的${detail.type}模型，适用于${sceneLabels.join("、") || "多种"}等场景。模型数据精度高，可在线流畅浏览。`;
+  const isAuthor = !!user && user.id === detail.userId;
 
   const handleFullscreen = () => {
     const el = document.getElementById("model-viewer-area");
@@ -447,6 +492,26 @@ export default function ModelDetailPage({ modelId }: ModelDetailPageProps) {
                   申请训练数据服务
                 </button>
               )}
+              {isAuthor && (
+                <button
+                  type="button"
+                  onClick={(event) => void handleDelete(event)}
+                  disabled={deletePending}
+                  className="w-full py-2.5 rounded-xl bg-red-500/10 border border-red-500/20 text-red-300 text-[14px] hover:bg-red-500/15 hover:border-red-500/30 transition-all flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
+                >
+                  {deletePending ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      删除中
+                    </>
+                  ) : (
+                    <>
+                      <Trash2 className="w-4 h-4" />
+                      删除模型
+                    </>
+                  )}
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -490,6 +555,56 @@ export default function ModelDetailPage({ modelId }: ModelDetailPageProps) {
                 </Link>
               );
             })}
+          </div>
+        </div>
+      )}
+      {confirmOpen && (
+        <div
+          className="fixed inset-0 z-[70] flex items-center justify-center p-4"
+          onClick={closeConfirm}
+        >
+          <div className="absolute inset-0 bg-black/78 backdrop-blur-sm" />
+          <div
+            className="relative w-full max-w-[440px] overflow-hidden rounded-[24px] border border-white/10 bg-[#101010]/95 shadow-[0_28px_80px_rgba(0,0,0,0.7)]"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/20 to-transparent" />
+            <div className="flex items-start justify-between gap-4 border-b border-white/[0.06] px-6 py-5">
+              <div className="min-w-0">
+                <h3 className="text-[20px] font-semibold leading-tight">确认删除模型？</h3>
+                <p className="mt-2 text-[13px] leading-6 text-gray-400">
+                  删除后该模型将不再展示，相关文件暂不会立即从对象存储删除。此操作当前无法在前台恢复。
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={closeConfirm}
+                disabled={deletePending}
+                aria-label="关闭删除确认弹窗"
+                className="mt-0.5 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full border border-white/10 bg-white/5 text-gray-400 transition-all hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="flex gap-3 px-6 py-5">
+              <button
+                type="button"
+                onClick={closeConfirm}
+                disabled={deletePending}
+                className="flex-1 rounded-full border border-white/14 bg-white/5 px-5 py-3 text-[14px] text-gray-200 transition-all hover:bg-white/8 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleConfirmDelete()}
+                disabled={deletePending}
+                className="flex flex-1 items-center justify-center gap-2 rounded-full border border-red-400/16 bg-red-500/12 px-5 py-3 text-[14px] text-red-200 transition-all hover:bg-red-500/18 hover:border-red-400/24 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {deletePending && <Loader2 className="h-4 w-4 animate-spin" />}
+                {deletePending ? "删除中…" : "确认删除"}
+              </button>
+            </div>
           </div>
         </div>
       )}

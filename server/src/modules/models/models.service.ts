@@ -2,8 +2,8 @@
  * 服务：ModelsService
  * 用途：模型列表与详情的只读查询（本阶段不实现新增/编辑/删除/审核/上传）。
  * 安全口径：
- *  - 列表（findList）仅 status=published 且 visibility=public。
- *  - 详情（findOne）：游客与非作者同上；作者可查看本人任意状态/可见性模型（2F）。
+ *  - 列表（findList）仅 status=published 且 visibility=public 且 deletedAt=null。
+ *  - 详情（findOne）：游客与非作者同上；作者可查看本人未删除模型的任意状态/可见性模型。
  *  - 不存在或无权限统一 404，避免泄露非公开模型是否存在。
  * 红线：BigInt 主键统一在 VM 层转 number；本层只出业务真值。
  */
@@ -44,10 +44,11 @@ export class ModelsService {
     private readonly config: ConfigService,
   ) {}
 
-  // 游客可见性的统一过滤条件：已发布 + 公开
+  // 游客可见性的统一过滤条件：已发布 + 公开 + 未软删除
   private readonly publicWhere: Prisma.ModelWhereInput = {
     status: ModelStatus.published,
     visibility: ModelVisibility.public,
+    deletedAt: null,
   };
 
   /**
@@ -149,15 +150,16 @@ export class ModelsService {
 
   /**
    * 模型详情（GET /api/models/:id，2F 作者可见性）。
-   * - 游客 / 非作者：仅 status=published 且 visibility=public。
-   * - 作者本人：可查看自己的 draft / pending / rejected / private / published 等全状态模型。
+   * - 游客 / 非作者：仅 status=published 且 visibility=public 且 deletedAt=null。
+   * - 作者本人：可查看自己未删除的 draft / pending / rejected / private / published 等全状态模型。
+   * - 已删除模型统一 404；本阶段不做回收站。
    * - 未找到或无权限：404「模型不存在或暂未公开」（不区分原因，避免泄露）。
    * userId 可选：登录态时附带 isLiked / isFavorited；作者本人额外附带 status / visibility / rejectReason。
    */
   async findOne(id: bigint, userId?: bigint): Promise<ModelDetailVm> {
-    // 登录态：公开模型 OR 本人模型；游客：仅公开模型
+    // 登录态：公开模型 OR 本人未删除模型；游客：仅公开且未删除模型
     const where: Prisma.ModelWhereInput = userId
-      ? { id, OR: [this.publicWhere, { userId }] }
+      ? { id, OR: [this.publicWhere, { userId, deletedAt: null }] }
       : { id, ...this.publicWhere };
 
     const model = await this.prisma.model.findFirst({

@@ -11,6 +11,7 @@
  */
 import { http } from "../http";
 import type {
+  DeleteModelResult,
   MeStats,
   MyApplication,
   MyFavorite,
@@ -70,4 +71,9 @@ export function getMyApplications(
 // getMyStats：个人中心统计角标（各 Tab 数量）。
 export function getMyStats(): Promise<MeStats> {
   return http.get<MeStats>(`/users/me/stats`);
+}
+
+// deleteMyModel：删除自己的模型（软删除；仅本人可删；重复删除幂等）。
+export function deleteMyModel(id: number): Promise<DeleteModelResult> {
+  return http.delete<DeleteModelResult>(`/users/me/models/${id}`);
 }

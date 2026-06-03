@@ -3,7 +3,7 @@
  * 用途：把 Prisma 实体裁剪为个人中心各 Tab 的对外视图，并统一 BigInt（id 等）转 number。
  * 约定：
  *  - MyModelVm（我的模型/我的发布）：本人视角，附带 status / visibility / rejectReason 等审核字段（公开列表 VM 不含）。
- *  - MyFavoriteVm（我的收藏）：公开风格 + isFavorited（恒 true）+ isAvailable（是否仍 published+public）+ favoritedAt。
+ *  - MyFavoriteVm（我的收藏）：公开风格 + isFavorited（恒 true）+ isAvailable（是否仍 published+public+未删除）+ favoritedAt。
  *  - MyApplicationVm（我的申请）：训练数据服务申请，含状态流转。
  *  - MeStatsVm（统计角标）：各 Tab 数量。
  */
@@ -53,7 +53,7 @@ export interface MyFavoriteVm {
   favoritesCount: number;
   createdAt: Date; // 模型创建时间
   isFavorited: boolean; // 恒 true（本就是收藏列表）
-  isAvailable: boolean; // 是否仍 published + public（他人下架/转私有则 false）
+  isAvailable: boolean; // 是否仍 published + public + 未删除（软删除/下架/转私有则 false）
   favoritedAt: Date; // 收藏发生时间（favorites.createdAt）
 }
 
@@ -117,9 +117,11 @@ export function toMyFavoriteVm(f: FavoriteWithModel): MyFavoriteVm {
     favoritesCount: m.favoritesCount,
     createdAt: m.createdAt,
     isFavorited: true,
-    // 是否仍对外可见：已发布 + 公开
+    // 是否仍对外可见：已发布 + 公开 + 未删除
     isAvailable:
-      m.status === ModelStatus.published && m.visibility === ModelVisibility.public,
+      m.status === ModelStatus.published &&
+      m.visibility === ModelVisibility.public &&
+      m.deletedAt == null,
     favoritedAt: f.createdAt,
   };
 }

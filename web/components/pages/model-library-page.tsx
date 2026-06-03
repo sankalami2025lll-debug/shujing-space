@@ -120,7 +120,17 @@ export default function ModelLibraryPage() {
 
   const handleSearchClick = () => {
     searchInputRef.current?.blur();
+    setPage(1);
     setKeyword(searchInput.trim());
+  };
+
+  const handleCategoryClick = (type: string) => {
+    setPage(1);
+    setActiveType(type);
+    if (type === "全部模型") {
+      setSearchInput("");
+      setKeyword("");
+    }
   };
 
   const canLoadMore = list.length < total;
@@ -205,7 +215,7 @@ export default function ModelLibraryPage() {
                 <button
                   key={t}
                   type="button"
-                  onClick={() => setActiveType(t)}
+                  onClick={() => handleCategoryClick(t)}
                   className={`px-3 py-1.5 rounded-full text-[13px] whitespace-nowrap flex-shrink-0 transition-all border ${
                     activeType === t
                       ? "bg-white text-black border-white"

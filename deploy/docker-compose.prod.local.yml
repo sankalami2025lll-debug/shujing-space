@@ -1,0 +1,11 @@
+# 仅供本地 Docker 生产模拟冒烟使用。
+# 服务器正式部署请只使用 docker-compose.prod.yml，
+# 并通过 1Panel / OpenResty 反向代理对外提供访问，不要直接暴露容器端口。
+services:
+  server:
+    ports:
+      - "4000:4000"
+
+  web:
+    ports:
+      - "3000:3000"

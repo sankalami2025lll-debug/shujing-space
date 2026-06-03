@@ -1,6 +1,6 @@
 # 数境空间官网 阶段开发检查点
 
-> 更新日期：2026-06-02（上线前安全与一致性修复 2A–2F 收口 + lint 可执行）
+> 更新日期：2026-06-03（部署前准备阶段 3 小收口已完成：根目录 `.gitignore` 已忽略 `deploy/.env.prod` 与 `deploy/.env.*.local`，新增 `deploy/docker-compose.prod.local.yml` 供本地冒烟端口映射；部署前准备阶段 1 已落地：新增 `web/Dockerfile`、`deploy/docker-compose.prod.yml`、`deploy/.env.prod.example`；模型库“全部模型”搜索状态同步 bug 已修复；Admin 前端阶段 5 总体验收与文档收口完成；Admin 前端第一版完成；Admin 前端阶段 4 用户 / 分类 / 站点配置已接入；Admin 前端阶段 3 联系线索与训练申请已接入；Admin 前端阶段 2 模型管理页已接入；Admin 前端阶段 1 后台壳子 + 管理员守卫已落地；上线前安全与一致性修复 2A–2G 收口 + OSS 最小兼容配置已落地 + 个人中心封面显示收口）
 > 范围：仅记录已实际落地的改动与事实，供后续 Agent 续接。
 
 ## 🚩 最终检查点（重开新对话前，先读本节）
@@ -23,6 +23,121 @@
 - ✅ **全局样式问题已解决**：自 Vite `src/styles/` 迁移 `web/styles/{fonts,tailwind,theme}.css`，`globals.css` 链式引入；Tailwind 扫描 `app/` / `components/` / `lib/`；shadcn CSS 变量与 `@layer base` 已生效（详见「第 11 步·全局样式修复」「〇之启·十六·全局样式」）。
 - ⚠️ **样式修复后须清缓存重启才生效**：结束占用 **3000** 的旧 `next dev` 进程 → 删除 `web/.next` → `cd web && pnpm dev` → 硬刷新浏览器。
 
+#### Admin 前端阶段 1（后台壳子 + 管理员守卫，2026-06-03）
+
+- ✅ **`/admin` 后台入口已落地**：新增 `web/app/admin` 路由组，默认页为后台概览占位。
+- ✅ **后台统一壳子已完成**：新增 `web/components/admin/admin-shell.tsx`，包含后台品牌区、黑白灰侧边导航、顶部管理员信息栏与主内容区域。
+- ✅ **管理员体验守卫已完成**：新增 `web/components/admin/admin-guard.tsx`，复用现有 `AuthProvider` 与 `User.role`：
+  - 未登录访问 `/admin` → toast「请先登录管理员账号」+ `router.replace('/auth')`
+  - 已登录但非 admin → 展示 403 无权限页
+  - admin → 正常进入后台
+- ✅ **后台模块导航已建好**：概览、模型管理、用户管理、分类管理、联系线索、训练申请、站点配置均有可点击路由占位页，点击不报错。
+- ✅ **官网入口已补充**：`NavBar` 对 `role=admin` 用户显示「管理后台」入口；`SiteChrome` 在 `/admin*` 下隐藏用户侧 NavBar，避免双导航叠层。
+- ⚠️ **当前仍仅为壳子阶段**：尚未对接 `/api/admin/models`、`/api/admin/users` 等真实列表/表格与写操作。
+
+#### Admin 前端阶段 2（模型管理页 /admin/models，2026-06-03）
+
+- ✅ **`/admin/models` 已接入真实接口**：新增 `web/lib/api/admin-models.ts`，对接：
+  - `GET /api/admin/models`
+  - `GET /api/admin/models/:id`
+  - `PATCH /api/admin/models/:id/status`
+  - `DELETE /api/admin/models/:id`
+- ✅ **模型列表表格已落地**：展示 `id / 标题 / 类型 / 作者 / 分类 / status / visibility / 浏览量 / 点赞数 / 收藏数 / 创建时间 / 操作`。
+- ✅ **筛选与分页可用**：已支持状态筛选（all / pending / published / rejected / draft）、关键词搜索、上一页 / 下一页切换。
+- ✅ **审核流已可用**：
+  - 审核通过：确认后调用 `action=approve`
+  - 驳回：弹层填写 `rejectReason` 后调用 `action=reject`
+  - 错误时统一 `toast.error(后端 message)`，成功后 `toast.success` 并刷新列表
+- ✅ **后台删除入口已接入**：调用 `DELETE /api/admin/models/:id`，删除成功后刷新列表；当前仍为**软删除**，OSS / R2 文件**不会立即删除**。
+- ✅ **详情弹层已接入**：支持查看单个模型的后台详情字段（含审核状态、可见性、驳回原因、删除原因等）。
+- ⚠️ **当前范围说明**：模型管理页已完成，但其它后台页面（用户 / 分类 / 线索 / 训练申请 / 站点配置）仍是占位壳子。
+
+#### Admin 前端阶段 3（联系线索 / 训练申请，2026-06-03）
+
+- ✅ **`/admin/leads` 已接入真实接口**：新增 `web/lib/api/admin-leads.ts`，对接：
+  - `GET /api/admin/leads`
+  - `PATCH /api/admin/leads/:id/status`
+- ✅ **`/admin/training` 已接入真实接口**：新增 `web/lib/api/admin-training.ts`，对接：
+  - `GET /api/admin/training-applications`
+  - `PATCH /api/admin/training-applications/:id/status`
+- ✅ **联系线索后台页已完成**：支持列表、状态筛选、详情弹层、loading / error / empty 三态、行内状态更新与成功/失败 toast。
+- ✅ **训练申请后台页已完成**：支持列表、状态筛选、详情弹层、loading / error / empty 三态、行内状态更新与成功/失败 toast。
+- ✅ **后台导航已收口到 `/admin/training`**：同时兼容旧的 `/admin/training-applications` 路由，避免阶段 1 遗留链接失效。
+- ⚠️ **浏览器手工联调项延期**：`/admin/models`、`/admin/leads`、`/admin/training` 的 admin / 非 admin 访问、真实列表加载、状态流转与 toast 展示，统一放到 **Admin 总体验收阶段**。
+- ⚠️ **二期明确不做**：批量操作、导出 Excel、复杂权限系统。
+
+#### Admin 前端阶段 4（用户 / 分类 / 站点配置，2026-06-03）
+
+- ✅ **`/admin/users` 已接入真实接口**：新增 `web/lib/api/admin-users.ts`，对接：
+  - `GET /api/admin/users`
+  - `PATCH /api/admin/users/:id/status`
+- ✅ **用户管理后台页已完成**：支持搜索、角色/状态筛选、分页、行内角色调整、启用/禁用与 loading / error / empty 三态；列表严格脱敏，不显示 `passwordHash`。
+- ✅ **`/admin/categories` 已接入真实接口**：新增 `web/lib/api/admin-categories.ts`，对接：
+  - `GET /api/admin/categories`
+  - `POST /api/admin/categories`
+  - `PUT /api/admin/categories/:id`
+  - `DELETE /api/admin/categories/:id`
+- ✅ **分类管理后台页已完成**：支持分类列表、新增分类、编辑分类、启用/停用、删除未引用分类；若分类被模型引用，直接透传后端错误 message 提示。
+- ✅ **`/admin/site-config` 已接入真实接口**：新增 `web/lib/api/admin-site-config.ts`，对接：
+  - `GET /api/admin/site-config`
+  - `PUT /api/admin/site-config`
+- ✅ **站点配置后台页已完成**：支持读取并保存 `phone / email / address / icp / companyName / footerText` 六个白名单字段；保存成功后前台 Footer 后续刷新即可反映最新配置。
+- ⚠️ **浏览器手工联调项延期**：`/admin/users`、`/admin/categories`、`/admin/site-config` 的 admin 真实登录加载、增改停用、保存结果、错误 toast 展示，统一放到 **Admin 总体验收阶段**。
+- ⚠️ **二期明确不做**：批量操作、审计日志、导出 Excel、复杂权限系统。
+
+#### Admin 前端阶段 5（总体验收与文档收口，2026-06-03）
+
+- ✅ **Admin 前端第一版完成**：已完成页面：
+  - `/admin`
+  - `/admin/models`
+  - `/admin/leads`
+  - `/admin/training`
+  - `/admin/users`
+  - `/admin/categories`
+  - `/admin/site-config`
+- ✅ **本轮 CLI 质量门禁通过**：
+  - `cd web && pnpm lint`
+  - `cd web && pnpm build`
+  - `cd server && pnpm lint`
+  - `cd server && pnpm build`
+  - `cd server && pnpm test`
+- ✅ **后端自动化测试结果**：当前 `server` 共 5 组测试、19 条用例，全部通过：
+  - `admin-models.service.spec.ts`
+  - `users.service.spec.ts`
+  - `interactions.service.spec.ts`
+  - `uploads.service.spec.ts`
+  - `models.service.spec.ts`
+- ✅ **管理员初始化机制已按文档实测**：使用 `pnpm admin:init` + `ADMIN_*` 环境变量创建本地验收管理员；弱密码关键词（如 `admin`）会被脚本拒绝，符合预期。
+- ✅ **Admin 主链路已做真实 API 验收**：
+  - 普通用户访问 `/api/admin/*` 返回 `403`
+  - `/api/admin/models`：列表 / 详情 / approve / reject / soft delete 跑通；删除后公开详情 `404`
+  - `/api/admin/leads`：列表 / 状态筛选 / 状态更新跑通
+  - `/api/admin/training-applications`：列表 / 状态筛选 / 状态更新跑通
+  - `/api/admin/users`：列表 / 搜索 / 分页 / 启用禁用 / 角色调整跑通
+  - `/api/admin/categories`：新增 / 编辑 / 启停 / 删除未引用分类跑通；删除被引用分类会返回后端错误 message
+  - `/api/admin/site-config`：读取 / 保存 / 公共 `/api/site-config` 读取新值 / 恢复原值 跑通
+- ✅ **前台站点配置联动已验证**：Admin 保存 `site-config` 后，公共 `/api/site-config` 可立即读取到新配置；随后已恢复为原值。
+- ✅ **用户侧关键路由未被 Admin 改动破坏**：生产预览下 `/models`、`/models/me`、`/contact`、`/auth` 均返回 `200` 页面壳。
+- ✅ **阶段 5 收口修复**：
+  - 修复 `/admin` 的 hydration mismatch：`web/components/admin/admin-guard.tsx` 先统一渲染“正在校验管理员身份”，避免 SSR/CSR 首屏文案不一致。
+  - 修复本地验收环境问题：`next dev` 并发会破坏 `web/.next`，总体验收最终以 `pnpm build` + `pnpm start -- --port 3001` 的稳定预览为准。
+  - 修复模型库搜索状态同步 bug：`web/components/pages/model-library-page.tsx` 中点击“全部模型”会同步清空 `searchInput` 与实际请求 `keyword`，回到第 1 页并重新请求全部模型；空搜索点击“搜索”也会按空 keyword 恢复全量列表。
+  - 补充 `/admin/users` 角色变更提示：`web/components/admin/admin-users-page.tsx` 在修改用户 `role` 成功后提示“角色已更新，对方需退出并重新登录后生效”；仅改 `status` 时仍提示“用户状态已更新”。
+- ℹ️ **当前权限生效机制说明**：
+  - JWT access token 内包含 `role`，后端后台接口守卫当前按 token 中的 `role` 判定 admin 权限。
+  - 管理员在 `/admin/users` 中变更其他账号角色后，数据库 `role` 会更新，但对方手中的旧 token 不会自动刷新。
+  - 被变更账号需退出并重新登录，拿到新的 access token 后，新的角色权限才会生效。
+  - 后续如需“角色变更即时生效”，可考虑让后端按 `token.sub` 每次查询数据库最新 `role`，或引入 `tokenVersion` / 强制下线机制。
+- ⚠️ **当前仍未实现（二期 / backlog）**：
+  - 审计日志
+  - 批量操作
+  - Excel 导出
+  - 回收站恢复
+  - OSS / R2 文件清理
+  - 更细粒度权限
+  - 分类迁移
+  - Admin 操作日志
+
 #### 质量门禁快照（CLI，2026-06-02 第一阶段后）
 
 | 命令 | 状态 | 说明 |
@@ -31,7 +146,7 @@
 | `cd web && pnpm lint` | ✅ 可执行 / 0 error / 13 warning | 已补 eslint + eslint-config-next + `.eslintrc.json`；告警均非阻断，未改业务代码（详见「〇之启·十七」） |
 | `cd server && pnpm build` | ✅ 通过 | nest build，仅编译，不含 lint/test |
 | `cd web && pnpm build` | ✅ 通过 | next build，仅编译，不含 test |
-| `cd server && pnpm test` | ❌ 无用例 | `No tests found`，**自动化测试缺失**，待后续补关键路径测试 |
+| `cd server && pnpm test` | ✅ 通过 | 当前有 1 组 `uploads.service.spec.ts` 单测（3/3 通过）；**整体覆盖仍不足**，待继续补关键路径测试 |
 | `web` 自动化测试 | ❌ 未配置 | 无测试脚本/框架 |
 
 #### 验证口径说明（重要，避免误读历史记录）
@@ -55,53 +170,127 @@
 | **2D** | `viewerUrl` 域名白名单 | 外链发布入库前 https + host 白名单（`VIEWER_URL_ALLOWED_HOSTS`）；R2 文件发布路径不校验 | 〇之启·二十一 |
 | **2E** | 模型浏览量打点 | `POST /api/models/:id/view` 仅 published+public +1；Next 详情页打开打点一次；GET 详情保持只读 | 〇之启·二十二 |
 | **2F** | 作者查看自己的非公开模型详情 | `GET /api/models/:id`：作者可看本人全状态模型；游客/非作者仍仅 published+public；无权限统一 **404**；作者响应含 `status/visibility/rejectReason`；**列表口径不变** | 〇之启·二十三 |
-| **2G** | R2 上传安全增强 | `callback` 必须 **HeadObject 成功** 才写 `model_files`；size/mime 以 R2 为准；超上限/非法 Content-Type 拒绝；**无本地兜底**；presign 仍校验扩展名/大小 | 〇之启·二十四 |
+| **2G** | R2 上传安全增强 | `callback` 必须 **HeadObject 成功** 才写 `model_files`；size/mime 以对象存储 HeadObject 为准；超上限/非法 Content-Type 拒绝；**无本地兜底**；presign 仍校验扩展名/大小 | 〇之启·二十四 |
 
 - **2A–2D、2G**：仅 `server/` 配置与校验（+ 文档），无前端 UI 变更。
 - **2E**：`server/` + `web/` 打点封装与详情 `useEffect`（**无新增 UI**）。
 - **2F**：`server/` 详情可见性 + `web/lib/types.ts` 类型兼容（**未改详情页 UI**）。
+- **补记（2026-06-02）**：上传模块配置层已支持 **阿里云 OSS 等 S3 兼容对象存储**；`R2_*` 变量名仅为历史保留，当前实际可用于 S3 兼容对象存储。**阿里云 OSS 真实上传验收已通过**；后续若切回 Cloudflare R2，仍需单独复验真实凭证与桶 CORS。
 
 ##### 仍未处理（上线前 backlog）
 
 | 项 | 状态 | 说明 |
 |----|------|------|
-| **真实 R2 凭证与桶 CORS 端到端验收** | ❌ 未验 | presign 200 → 浏览器 PUT → callback → 带 `modelFileId` 发布；**无凭证时 presign/callback 仍 503**，无法完整验收浏览器直传 |
+| **真实对象存储凭证与桶 CORS 端到端验收** | ⚠️ 部分完成 | **阿里云 OSS 已完成验收**：presign → 浏览器 PUT → callback → `POST /api/models` 跑通；**Cloudflare R2 尚未复验** |
 | **孤儿 model_files / 上传会话表** | ❌ 二期待办 | 2G 未做 presign→callback 绑定表与定时清理 |
 | **大文件多段上传** | ❌ 二期待办 | 仍为单次预签名 PUT |
-| **Admin 后台前端** | ❌ 未做 | `/api/admin/*` 仅有接口 + `admin:init`，无管理 UI |
-| **关键路径自动化测试** | ❌ 未配 | `pnpm test` 无用例；历史「冒烟」均为人工/临时脚本 HTTP 联调 |
+| **Admin 后台前端** | ✅ 第一版完成 | `/admin`、`/admin/models`、`/admin/leads`、`/admin/training`、`/admin/users`、`/admin/categories`、`/admin/site-config` 已接入并完成阶段 5 总体验收 |
+| **关键路径自动化测试** | ⚠️ 覆盖不足 | `server` 当前仅 1 组 uploads 单测；历史「冒烟」多为人工/临时脚本 HTTP 联调；`web` 仍未配置测试 |
 
 ##### 本阶段下一步建议（主线）
 
-1. **配置真实 Cloudflare R2 + 桶 CORS**，完成浏览器直传端到端验收（presign → PUT → callback → `POST /api/models`）。
-2. **Admin 后台前端**（对接已有 `/api/admin/*`）。
-3. **补齐关键路径自动化测试**（在 2G 已增 `uploads.service.spec.ts` 基础上扩展 auth/models 等）。
-4. **二期**：孤儿文件清理、多段上传、生产 `trust proxy`（配合 2B IP 限流）等。
+1. **如需双存储兼容，补做 Cloudflare R2 真实凭证与桶 CORS 复验**（阿里 OSS 已通过）。
+2. **部署前准备**：补全生产域名、Cloudflare、1Panel、Docker/Compose 编排与 HTTPS 策略。
+3. **生产环境变量检查**：数据库、JWT、短信、对象存储、管理员初始化、`VIEWER_URL_ALLOWED_HOSTS`、CORS 白名单逐项核对。
+4. **数据库备份策略**：确定 PostgreSQL 自动备份、恢复演练与 1Panel 备份保留周期。
+5. **OSS / R2 生产收口**：确认生产域名、桶 CORS、回源策略、文件访问域名与回调链路。
+6. **二期**：孤儿文件清理、多段上传、生产 `trust proxy`（配合 2B IP 限流）、后台批量操作 / 审计日志 / Excel 导出等。
 
 > 其它上线项（生产部署、真实短信、生产 `trust proxy` 配合 2B IP 限流等）仍见「一·续」与 `backend-architecture-plan.md`，不在 2A–2G 表内展开。
 
 #### 当前已完成
 
-- ✅ **上线前安全与一致性修复 2A–2G 已完成**（含 R2 callback 必须 HeadObject 确认；总表见上节）。
+- ✅ **上线前安全与一致性修复 2A–2G 已完成**（含上传 callback 必须 HeadObject 确认；总表见上节）。
 - ✅ **Next.js 用户侧页面迁移完成**（`web/` 步骤 0–8C + 全局样式）。
+- ✅ **Admin 前端阶段 1 已完成**：`/admin` 后台入口、AdminShell、AdminGuard、模块导航占位页与管理员可见的官网入口均已落地；当前只完成后台壳子，业务表格未接。
+- ✅ **Admin 前端阶段 2 已完成**：`/admin/models` 已接入真实接口，支持模型列表、状态筛选、详情查看、审核通过、填写驳回原因、软删除与成功/失败 toast。
+- ✅ **Admin 前端阶段 3 已完成**：`/admin/leads` 与 `/admin/training` 已接入真实接口，支持列表、状态筛选、详情查看、状态更新与成功/失败 toast；浏览器手工联调统一延后到 Admin 总体验收阶段。
+- ✅ **Admin 前端阶段 4 已完成**：`/admin/users`、`/admin/categories`、`/admin/site-config` 已接入真实接口，支持用户启停与角色调整、分类增改启停删除、站点配置读取与保存；浏览器手工联调统一延后到 Admin 总体验收阶段。
+- ✅ **Admin 前端阶段 5 已完成**：Admin 前端第一版已完成总体验收与文档收口；主链路已做真实 API 验收，`web/server` lint/build/test 均通过，部署前阻断项已清零。
+- ✅ **部署前准备阶段 1 已完成（生产 Docker 产物与 Compose 规划落地）**：
+  - 已新增 `web/Dockerfile`：采用 Next.js 生产构建流程，镜像内执行 `pnpm build`，运行期使用 `pnpm start --hostname 0.0.0.0 --port 3000`。
+  - 已新增 `deploy/docker-compose.prod.yml`：当前推荐生产编排为 `postgres` + `server` + `web` 三服务；`postgres` 使用 `postgres:16` + volume 持久化；`server/web` 仅 `expose` 内网端口，不直接暴露公网。
+  - 已新增 `deploy/.env.prod.example`：收口 PostgreSQL、NestJS、Next.js、OSS/R2、Admin 初始化所需生产变量占位，**未写入任何真实密钥**。
+  - 生产访问模式已固定为：`https://你的正式域名/` → `web:3000`，`https://你的正式域名/api/*` → `server:4000/api/*`，由 **1Panel / OpenResty** 配置域名、HTTPS 与反向代理；`NEXT_PUBLIC_API_BASE_URL=/api`。
+  - 上线流程建议已固定：先启动 `postgres`，再执行 `server` 容器内 `pnpm prisma:deploy`，随后执行 `pnpm admin:init`，最后启动 `server` 与 `web`，完成反代与 SSL 配置。
+  - 生产环境明确不建议执行 `seed`；管理员请统一使用 `admin:init` 创建；OSS/R2 桶 CORS 需加入正式站点域名；`JWT_ACCESS_SECRET` 必须使用强随机值。
+- ✅ **部署前准备阶段 3 已完成（部署产物小收口）**：
+  - 根目录 `.gitignore` 已新增忽略：`deploy/.env.prod`、`deploy/.env.*.local`，避免生产 / 本地部署环境变量误提交。
+  - 已新增 `deploy/docker-compose.prod.local.yml`：仅供**本地 Docker 生产模拟冒烟**使用，为 `server` 映射 `4000:4000`、为 `web` 映射 `3000:3000`。
+  - 本地测试推荐命令已固定为：`docker compose -f docker-compose.prod.yml -f docker-compose.prod.local.yml --env-file .env.prod up -d`。
+  - 生产策略保持不变：正式服务器仍只使用 `deploy/docker-compose.prod.yml`，容器端口不直接暴露公网，继续由 **1Panel / OpenResty** 做 `/` → `web:3000`、`/api` → `server:4000/api` 反向代理。
 - ✅ **已迁移页面/模块**：Home（`/`）、About（`/about`）、Contact（`/contact`）、Auth（`/auth`）、Community（`/community`）、Models 列表（`/models`）、ModelDetail（`/models/[id]`）、PersonalCenter（`/models/me`）、UploadModal、TrainingModal、NavBar + AppProviders。
 - ✅ **API 接入已完成**（Next `web/lib/api/*` 与 Vite 对齐）：auth、models/categories、点赞/收藏、users/me、contact、training-applications、site-config、uploads 发布链路（viewerUrl 已验；R2 直传代码路径保留）。
+- ✅ **上传模块配置层已兼容阿里云 OSS**：`server/src/modules/uploads/r2.service.ts` 现支持 `R2_REGION` / `R2_FORCE_PATH_STYLE`，`R2_ENDPOINT` 仍优先显式填写，`R2_ACCOUNT_ID` 仅作为 Cloudflare R2 fallback；**不改前端、不改上传业务流程**。
+- ✅ **个人中心封面显示已收口（运行态确认）**：
+  - 静态代码排查：后端 VM 已映射 `coverUrl`（`model.vm.ts` / `users.vm.ts`），前端 `personal-center-page.tsx` 的 `CoverPreview` 已读取并渲染 `coverUrl`，有值时显示图片、为空或加载失败回退渐变/图标占位。
+  - 运行态数据库只读查询：`models` 表最新 20 条中除接口测试模型（id=12）外，`cover_url` 均为空串；`model_files (kind='cover')` 有 4 条封面记录，其中 3 条为 uid=22 用户的 OSS 真实 URL，1 条为 uid=12 的测试占位 URL。
+  - OSS 封面 URL 验证：`https://shujingspace.oss-cn-shenzhen.aliyuncs.com/cover/22/...` 返回 HTTP 200，可正常访问。
+  - 用户重新发布带封面的模型后，`/models/me` 个人中心卡片可正常显示封面。
+  - **根因**：旧模型 `models.cover_url` 为空（发布时未关联 `coverFileId` 或发布时间早于封面链路完成），非当前代码 bug。
+  - **后续处理**：新发布模型选择封面即可正常显示；旧数据如需显示封面，可在确认封面 `model_files.url` 与模型对应关系后，手动 `UPDATE models SET cover_url = '<OSS URL>' WHERE id = <目标模型ID>`。
+- ✅ **小问题阶段 1（全站 toast 样式 + 删除确认流程）已完成**：
+  - `web/components/providers/app-providers.tsx` 已将全站 `Toaster` 收口为统一配置：顶部居中、最多 3 条、支持关闭按钮。
+  - `web/components/ui/sonner.tsx` + `web/styles/theme.css` 已统一 toast 视觉风格：深色半透明背景、细白灰边框、圆角、轻阴影/模糊，成功仅用轻微冰蓝点缀，错误仅用低饱和红点缀；各页面原有 `toast.success / toast.error` 调用保持不变。
+  - 联系表单提交成功已补充统一 success toast，登录成功 / 模型发布成功 / 删除成功会复用同一套全站样式。
+  - `web/components/pages/model-detail-page.tsx` 的删除流程已校正：继续沿用 `window.confirm`，但仅在用户确认后才调用 `DELETE /api/users/me/models/:id`；取消时不发请求、不弹成功、不跳转；成功只在接口成功后 toast；失败仅显示错误。
+  - 删除按钮已补 `stopPropagation()` 与 `deletePending` 禁用态，避免重复点击；**本阶段未替换为站内确认弹窗**，后续可升级为统一风格 `AlertDialog`。
+- ✅ **小问题阶段 2（删除确认升级为站内轻量弹窗）已完成**：
+  - `web/components/pages/model-detail-page.tsx` 已移除 `window.confirm`，改为页内轻量删除确认弹窗：深色半透明遮罩、黑灰面板、细白灰边框、圆角、低饱和红色危险按钮，视觉与官网黑白灰科技风保持一致。
+  - 点击「删除模型」按钮时仅打开确认弹窗；点击「取消」只关闭弹窗，不调用 `DELETE /api/users/me/models/:id`、不 toast 成功、不跳转。
+  - 点击「确认删除」后才调用删除接口；接口成功后才 toast「模型已删除」并跳转 `/models/me`；接口失败仅显示错误 toast。
+  - 删除请求进行中，确认按钮会进入 loading，取消按钮、遮罩关闭、右上角关闭和 `Esc` 关闭全部禁用，避免状态混乱。
+  - 当前删除仍为**软删除**；前台不可恢复；相关 OSS / R2 文件**不会立即删除**。
+- ✅ **模型删除管理阶段 1（后端软删除基础能力）已完成**：
+  - `models` 表已新增软删除字段：`deleted_at`、`deleted_by`、`delete_reason`；迁移：`20260602135405_add_model_soft_delete`。
+  - 已新增 `DELETE /api/users/me/models/:id`：仅登录用户可删除自己的模型；只做软删除；重复删除幂等。
+  - 已新增 `DELETE /api/admin/models/:id`：仅 admin 可删除任意模型；支持可选 `deleteReason`；只做软删除；重复删除幂等。
+  - 本阶段**明确不做**：删除 `model_files`、删除 `likes/favorites`、删除真实 OSS/R2 文件、前端删除按钮。
+- ✅ **模型删除管理阶段 2（`deletedAt` 查询过滤与接口口径收口）已完成**：
+  - 公开模型列表 `/api/models` 已统一过滤 `deletedAt = null`。
+  - 公开模型详情 `/api/models/:id` 已统一口径：游客、非作者、作者本人都不能查看已软删除模型；已删除统一 `404`，**本阶段不做回收站**。
+  - 浏览量 `/api/models/:id/view` 已统一过滤 `deletedAt = null`，已删除模型不能继续累加浏览量。
+  - 点赞 / 收藏已统一口径：已删除模型不能新增点赞/收藏；取消点赞 / 取消收藏保留幂等处理。
+  - 个人中心 `/api/users/me/models`、`/api/users/me/published`、`/api/users/me/stats` 默认不包含 `deletedAt != null` 的模型。
+  - 我的收藏 `/api/users/me/favorites` 保留收藏记录；若模型已软删除，则返回 `isAvailable = false`，前端应视为失效收藏，不再进入公开详情。
+  - 后台 `/api/admin/models` 默认仅展示未删除模型；`/api/admin/models/:id` 仍允许查看已删除模型，并返回 `deletedAt / deletedBy / deleteReason` 便于审计。
+  - 本阶段继续**明确不做**：回收站、物理硬删除、删除真实 OSS/R2 文件、删除 `model_files`、删除 `likes/favorites`。
+- ✅ **模型删除管理阶段 3（Next 删除入口迁移到作者详情页）已完成**：
+  - `web /models/me` 的「我的模型」卡片已移除删除入口，保留卡片点击进入详情页的路径，不影响「我的收藏 / 我的发布 / 我的申请」。
+  - `web /models/[id]` 已新增作者专属删除入口；仅当前登录用户满足 `auth.user.id === detail.userId` 时显示，游客与非作者不显示。
+  - 删除前会弹确认文案：删除后模型将不再展示，相关文件暂不会立即从对象存储删除。
+  - 确认后调用 `DELETE /api/users/me/models/:id`；删除成功后 toast 提示“模型已删除”，并跳转 `/models/me`。
+  - 当前前端接入仍为**软删除**；真实 OSS/R2 文件不会立即删除。
+  - Admin 前端删除按钮仍**未做**；admin 回收站 / restore 仍属二期待办。
+- ✅ **模型删除管理阶段 4（总体验收与文档收口）已完成**：
+  - 已完成第一版删除管理验收：`server pnpm lint/build/test`、`web pnpm lint/build` 全部通过。
+  - HTTP 冒烟已验证：用户删除自己的模型成功；用户删除他人模型失败；admin 删除任意模型成功；普通用户访问 admin 删除接口返回 `403`；未登录删除接口返回 `401`；删除后 `/api/models`、`/api/models/:id`、`/api/users/me/models`、`/api/users/me/stats` 口径符合预期；`/api/health` 返回 `db: up`。
+  - 当前删除管理第一版结论：**仅软删除模型记录**，不做 restore / 回收站，不做物理硬删除，不删除 `model_files`，也**不会立即删除 OSS/R2 文件**。
+  - 当前仍未实现：**Admin 后台前端删除按钮**、站内统一确认弹窗、删除审计日志、恢复模型、硬删除、对象存储文件清理。
 
 #### 当前未完成
 
 | 项 | 状态 |
 |----|------|
-| 真实 R2 文件直传端到端 | ❌ 待 Cloudflare R2 凭证 + 桶 CORS（2G 已加固 callback，无凭证仍 503） |
-| 后台 Admin 前端 | ❌ `/api/admin/*` 无 UI |
+| 真实对象存储文件直传端到端 | ⚠️ 阿里 OSS 已通过；Cloudflare R2 尚未复验 |
+| 后台 Admin 前端 | ✅ Admin 第一版完成：`/admin`、`/admin/models`、`/admin/leads`、`/admin/training`、`/admin/users`、`/admin/categories`、`/admin/site-config` 已完成验收收口 |
 | 线上生产部署 | ❌ Docker/Cloudflare/域名/生产短信 |
-| 关键路径自动化测试 | ❌ server/web 均无用例（见「质量门禁快照」） |
+| Admin 回收站 / restore | ❌ 二期待办 |
+| 关键路径自动化测试 | ⚠️ `server` 已有 `users/models/admin/uploads/interactions` 单测；`web` 仍无自动化用例 |
+| `/models/me` hydration mismatch | ⚠️ 待单独定位并修复 |
+| BIM/IFC 原生 Viewer | ❌ 尚未接入 |
 
 #### 建议下一步（当前主线）
 
-1. **配置真实 Cloudflare R2 凭证与桶 CORS**（服务器环境变量 + R2 控制台）。
-2. **验证真实文件上传**（presign 200 → 浏览器 PUT → callback → 带 `modelFileId`/`coverFileId` 发布；清单 L21）。
-3. **Admin 后台前端**（对接已有 `/api/admin/*`）。
-4. **补齐关键路径自动化测试**（2G 已增 uploads 单测；扩展 auth/models 等）。
+1. **如需双存储兼容，补做 Cloudflare R2 真实凭证与桶 CORS 复验**（阿里 OSS 已通过）。
+2. **部署前准备**：1Panel + Docker 部署脚本、生产环境变量、域名 / HTTPS / Cloudflare 策略。
+3. **数据安全**：数据库备份与恢复演练、对象存储生产域名与 CORS 收口。
+4. **后台二期规划**：批量操作、审计日志、Excel 导出、回收站 / restore。
+3. **模型删除管理二期**：设计恢复模型 / 回收站、物理硬删除、OSS/R2 文件清理、删除审计日志。
+4. **交互收口**：将当前原生 `confirm` 升级为站内统一确认弹窗。
+5. **专项问题拆单**：单独修复 `/models/me` hydration mismatch。
+6. **模型展示能力**：推进 BIM/IFC 原生 Viewer 接入。
+7. **补齐关键路径自动化测试**：继续扩展 `web` 与更高层集成验收。
 
 > 可选：按 `docs/frontend-acceptance-checklist.md` 在 **`:3000`** 做浏览器全量勾选；UI 差异可对照 **`:5173`**。2A–2F 已落地项见上表，无需重复开发。
 

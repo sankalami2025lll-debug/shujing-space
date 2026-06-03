@@ -30,7 +30,9 @@ interface R2Config {
   accessKeyId: string;
   secretAccessKey: string;
   bucket: string;
+  region: string;
   endpoint: string;
+  forcePathStyle: boolean;
   publicBase: string;
   presignExpires: number;
 }
@@ -47,7 +49,7 @@ export class R2Service {
     return this.config.get<R2Config>('r2') as R2Config;
   }
 
-  // 解析 S3 端点：优先用显式 endpoint，否则由 accountId 推导 R2 端点
+  // 解析 S3 端点：优先用显式 endpoint；仅在 Cloudflare R2 下由 accountId 推导默认端点
   private resolveEndpoint(r2: R2Config): string {
     if (r2.endpoint) return r2.endpoint;
     if (r2.accountId) return `https://${r2.accountId}.r2.cloudflarestorage.com`;
@@ -80,9 +82,13 @@ export class R2Service {
     if (this.client) return this.client;
     const { endpoint, r2 } = this.ensureConfigured();
     this.client = new S3Client({
-      region: 'auto', // R2 固定 region=auto
+      // region/forcePathStyle 走环境变量，兼容 Cloudflare R2 与阿里云 OSS 等 S3 兼容对象存储
+      region: r2.region || 'auto',
       endpoint,
-      forcePathStyle: true, // R2 使用 path-style 访问
+      forcePathStyle: r2.forcePathStyle,
+      // 对非 AWS 的 S3 兼容对象存储，仅在请求明确要求时才计算 checksum，
+      // 避免预签名 PUT URL 自动附带 CRC32 参数导致阿里 OSS 等服务拒绝请求。
+      requestChecksumCalculation: 'WHEN_REQUIRED',
       credentials: {
         accessKeyId: r2.accessKeyId,
         secretAccessKey: r2.secretAccessKey,

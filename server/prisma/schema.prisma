@@ -154,6 +154,9 @@ model Model {
   visibility     ModelVisibility @default(public) // 可见性
   status         ModelStatus     @default(draft) // 审核状态
   rejectReason   String?         @map("reject_reason") @db.Text // 驳回原因（后台审核）
+  deletedAt      DateTime?       @map("deleted_at") @db.Timestamptz(6) // 软删除时间
+  deletedBy      BigInt?         @map("deleted_by") // 执行删除的用户 id（普通用户或管理员）
+  deleteReason   String?         @map("delete_reason") @db.Text // 删除原因（管理员可填）
   createdAt      DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt      DateTime        @updatedAt @map("updated_at") @db.Timestamptz(6)
 

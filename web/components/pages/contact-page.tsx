@@ -210,6 +210,7 @@ export default function ContactPage() {
         budget: selectedBudget || undefined,
         message: message.trim() || undefined,
       });
+      toast.success("需求已提交，我们将尽快与你联系");
       setSubmitted(true);
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : "提交失败，请稍后重试。");

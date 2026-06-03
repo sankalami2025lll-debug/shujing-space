@@ -122,6 +122,14 @@ export default function NavBar() {
         <div className="hidden md:flex items-center gap-4">
           {isAuthed ? (
             <>
+              {user?.role === "admin" && (
+                <Link
+                  href="/admin"
+                  className="px-4 py-2.5 rounded-full border border-white/15 text-white text-[14px] hover:bg-white/5 transition-all"
+                >
+                  管理后台
+                </Link>
+              )}
               <span className="flex items-center gap-2 text-[15px] text-gray-300 max-w-[160px] truncate">
                 <UserRound className="w-4 h-4 text-cyan-400/80 flex-shrink-0" />
                 <span className="truncate">{user?.nickname}</span>
@@ -184,6 +192,15 @@ export default function NavBar() {
             <div className="mt-3 pt-4 border-t border-white/10 flex flex-col gap-3">
               {isAuthed ? (
                 <>
+                  {user?.role === "admin" && (
+                    <Link
+                      href="/admin"
+                      onClick={close}
+                      className="w-full py-3 rounded-full border border-white/15 text-white text-[15px] hover:bg-white/5 transition-all text-center"
+                    >
+                      管理后台
+                    </Link>
+                  )}
                   <div className="flex items-center gap-2 px-4 py-2 text-[15px] text-gray-300">
                     <UserRound className="w-4 h-4 text-cyan-400/80 flex-shrink-0" />
                     <span className="truncate">{user?.nickname}</span>

@@ -7,7 +7,9 @@
  *  - 必须用事务保证「明细表」与「计数字段」一致；
  *  - 重复点赞/收藏要幂等（已存在则不重复加、不报错）；
  *  - 取消点赞/收藏不能让计数变成负数（仅当存在明细才减，并做 >=0 兜底）。
- * 可见性：仅允许对「已发布 + 公开」的模型操作（与读接口口径一致），否则 404。
+ * 可见性：
+ *  - 点赞 / 收藏：仅允许对「已发布 + 公开 + 未删除」模型操作，否则 404。
+ *  - 取消点赞 / 取消收藏：已删除模型按幂等逻辑允许取消，不额外泄露管理字段。
  */
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { ModelStatus, ModelVisibility, Prisma } from '@prisma/client';
@@ -29,10 +31,11 @@ export interface FavoriteResult {
 export class InteractionsService {
   constructor(private readonly prisma: PrismaService) {}
 
-  // 与模型读接口一致的可见性口径：已发布 + 公开
+  // 与模型读接口一致的可见性口径：已发布 + 公开 + 未删除
   private readonly visibleWhere = {
     status: ModelStatus.published,
     visibility: ModelVisibility.public,
+    deletedAt: null,
   };
 
   /**
@@ -68,7 +71,7 @@ export class InteractionsService {
    * 幂等：未点赞则保持原状；仅当存在明细才「删明细 + 计数 -1」，并兜底不为负。
    */
   async unlike(userId: bigint, modelId: bigint): Promise<LikeResult> {
-    await this.ensureVisibleModel(modelId);
+    await this.ensureExistingModel(modelId);
 
     const likesCount = await this.prisma.$transaction(async (tx) => {
       const existing = await tx.like.findUnique({
@@ -130,7 +133,7 @@ export class InteractionsService {
    * 取消收藏（DELETE /api/models/:id/favorite）。逻辑与取消点赞对称。
    */
   async unfavorite(userId: bigint, modelId: bigint): Promise<FavoriteResult> {
-    await this.ensureVisibleModel(modelId);
+    await this.ensureExistingModel(modelId);
 
     const favoritesCount = await this.prisma.$transaction(async (tx) => {
       const existing = await tx.favorite.findUnique({
@@ -170,6 +173,17 @@ export class InteractionsService {
     });
     if (!model) {
       throw new NotFoundException('模型不存在或暂未公开');
+    }
+  }
+
+  // 校验目标模型主记录存在；用于已删除模型的取消点赞/取消收藏幂等收口
+  private async ensureExistingModel(modelId: bigint): Promise<void> {
+    const model = await this.prisma.model.findUnique({
+      where: { id: modelId },
+      select: { id: true },
+    });
+    if (!model) {
+      throw new NotFoundException('模型不存在');
     }
   }
 

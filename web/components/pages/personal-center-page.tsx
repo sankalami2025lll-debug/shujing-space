@@ -70,6 +70,48 @@ interface Async<T> {
 
 const ASYNC_IDLE = { loading: false, error: null, data: null } as const;
 
+// CoverPreview：个人中心模型封面预览；有 coverUrl 时优先显示图片，失败或为空则回退渐变占位。
+function CoverPreview({
+  coverUrl,
+  type,
+  id,
+  className,
+  iconClassName,
+}: {
+  coverUrl: string;
+  type: string;
+  id: number;
+  className: string;
+  iconClassName: string;
+}) {
+  const [imgFailed, setImgFailed] = useState(false);
+  const cover = coverStyleByType(type, id);
+  const showImage = Boolean(coverUrl) && !imgFailed;
+
+  return (
+    <div className={`relative overflow-hidden bg-gradient-to-br ${cover.color} ${className}`}>
+      {showImage ? (
+        <>
+          <img
+            src={coverUrl}
+            alt=""
+            className="absolute inset-0 w-full h-full object-cover"
+            onError={() => setImgFailed(true)}
+          />
+          <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-black/25 to-transparent" />
+        </>
+      ) : (
+        <>
+          <div className="absolute inset-0 flex items-center justify-center">
+            <Grid3X3 className={`${iconClassName} text-white/20`} />
+          </div>
+          <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent" />
+        </>
+      )}
+    </div>
+  );
+}
+
 // TabState：个人中心单个 Tab 的三态渲染外壳（loading 骨架 / error+重试 / empty 空态 / 正常内容）。
 function TabState<T>({
   state,
@@ -328,32 +370,37 @@ export default function PersonalCenterPage() {
               {(list) => (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                   {list.map((m) => {
-                    const cover = coverStyleByType(m.type, m.id);
                     const meta = modelStatusMeta(m.status);
                     return (
-                      <button
+                      <div
                         key={m.id}
-                        type="button"
-                        onClick={() => onView(m.id)}
-                        className="text-left w-full bg-white/[0.03] border border-white/10 rounded-xl overflow-hidden hover:border-white/20 transition-all"
+                        className="relative w-full bg-white/[0.03] border border-white/10 rounded-xl overflow-hidden hover:border-white/20 transition-all"
                       >
-                        <div
-                          className={`h-28 bg-gradient-to-br ${cover.color} flex items-center justify-center`}
+                        <button
+                          type="button"
+                          onClick={() => onView(m.id)}
+                          className="text-left w-full"
                         >
-                          <Grid3X3 className="w-6 h-6 text-white/20" />
-                        </div>
-                        <div className="p-3">
-                          <p className="text-[13px] font-medium line-clamp-1">{m.title}</p>
-                          <div className="flex items-center justify-between mt-1.5">
-                            <span className="text-[11px] text-gray-500">{m.type}</span>
-                            <span
-                              className={`px-2 py-0.5 rounded-full text-[10px] border ${meta.color}`}
-                            >
-                              {meta.label}
-                            </span>
+                          <CoverPreview
+                            coverUrl={m.coverUrl}
+                            type={m.type}
+                            id={m.id}
+                            className="h-28"
+                            iconClassName="w-6 h-6"
+                          />
+                          <div className="p-3">
+                            <p className="text-[13px] font-medium line-clamp-1">{m.title}</p>
+                            <div className="flex items-center justify-between mt-1.5">
+                              <span className="text-[11px] text-gray-500">{m.type}</span>
+                              <span
+                                className={`px-2 py-0.5 rounded-full text-[10px] border ${meta.color}`}
+                              >
+                                {meta.label}
+                              </span>
+                            </div>
                           </div>
-                        </div>
-                      </button>
+                        </button>
+                      </div>
                     );
                   })}
                   {/* 发布新模型：点击打开 UploadModal（8C） */}
@@ -377,18 +424,19 @@ export default function PersonalCenterPage() {
               {(list) => (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                   {list.map((m) => {
-                    const cover = coverStyleByType(m.type, m.id);
                     if (!m.isAvailable) {
                       return (
                         <div
                           key={m.id}
                           className="w-full bg-white/[0.03] border border-white/10 rounded-xl overflow-hidden opacity-50 cursor-not-allowed"
                         >
-                          <div
-                            className={`h-28 bg-gradient-to-br ${cover.color} flex items-center justify-center`}
-                          >
-                            <Grid3X3 className="w-6 h-6 text-white/20" />
-                          </div>
+                          <CoverPreview
+                            coverUrl={m.coverUrl}
+                            type={m.type}
+                            id={m.id}
+                            className="h-28"
+                            iconClassName="w-6 h-6"
+                          />
                           <div className="p-3">
                             <p className="text-[13px] font-medium line-clamp-1">{m.title}</p>
                             <span className="mt-1 inline-block px-2 py-0.5 rounded-full text-[10px] border text-gray-400 bg-white/5 border-white/10">
@@ -405,11 +453,13 @@ export default function PersonalCenterPage() {
                         onClick={() => onView(m.id)}
                         className="text-left w-full bg-white/[0.03] border border-white/10 rounded-xl overflow-hidden hover:border-white/20 transition-all"
                       >
-                        <div
-                          className={`h-28 bg-gradient-to-br ${cover.color} flex items-center justify-center`}
-                        >
-                          <Grid3X3 className="w-6 h-6 text-white/20" />
-                        </div>
+                        <CoverPreview
+                          coverUrl={m.coverUrl}
+                          type={m.type}
+                          id={m.id}
+                          className="h-28"
+                          iconClassName="w-6 h-6"
+                        />
                         <div className="p-3">
                           <p className="text-[13px] font-medium line-clamp-1">{m.title}</p>
                           <span
@@ -437,9 +487,18 @@ export default function PersonalCenterPage() {
                         key={m.id}
                         type="button"
                         onClick={() => onView(m.id)}
-                        className="w-full text-left flex items-center justify-between bg-white/[0.03] border border-white/10 rounded-xl px-4 py-3 hover:border-white/20 transition-all"
+                        className="w-full text-left flex items-center justify-between gap-3 bg-white/[0.03] border border-white/10 rounded-xl px-4 py-3 hover:border-white/20 transition-all"
                       >
-                        <p className="text-[14px] line-clamp-1">{m.title}</p>
+                        <div className="flex items-center gap-3 min-w-0 flex-1">
+                          <CoverPreview
+                            coverUrl={m.coverUrl}
+                            type={m.type}
+                            id={m.id}
+                            className="w-20 h-14 rounded-lg flex-shrink-0"
+                            iconClassName="w-5 h-5"
+                          />
+                          <p className="text-[14px] line-clamp-1 min-w-0">{m.title}</p>
+                        </div>
                         <span
                           className={`px-3 py-1 rounded-full text-[12px] border flex-shrink-0 ml-3 ${meta.color}`}
                         >

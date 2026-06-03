@@ -1,8 +1,8 @@
 /**
  * 服务：AdminModelsService
  * 用途：后台模型审核（开发顺序第 9 步）：
- *  - findList：全状态模型列表（不受 published + public 限制，区别于游客 ModelsService）。
- *  - findOne：后台模型详情（按 id 直查，无可见性过滤）。
+ *  - findList：全状态且未软删除模型列表（不受 published + public 限制，区别于游客 ModelsService）。
+ *  - findOne：后台模型详情（按 id 直查；允许查看已删除模型，便于审计/后续恢复）。
  *  - updateStatus：审核通过 / 驳回（状态机：approve 仅 pending→published；reject 仅 pending→rejected 且需 rejectReason）。
  * 红线：
  *  - 仅 admin 可调用（由 Controller 的 JwtAuthGuard + RolesGuard + @Roles('admin') 保证）。
@@ -15,8 +15,9 @@ import {
 } from '@nestjs/common';
 import { ModelStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
-import { PaginatedResult } from '../users/users.service';
+import { DeleteModelResult, PaginatedResult } from '../users/users.service';
 import { AdminModelVm, toAdminModelVm } from './admin.vm';
+import { DeleteModelDto } from './dto/delete-model.dto';
 import { QueryAdminModelsDto } from './dto/query-admin-models.dto';
 import { UpdateModelStatusDto } from './dto/update-model-status.dto';
 
@@ -33,10 +34,11 @@ export class AdminModelsService {
   /**
    * 后台模型列表（GET /api/admin/models）。
    * 支持 status（all 不过滤）、type、keyword（标题 + 作者昵称）过滤，按创建时间倒序分页。
+   * 默认只展示未删除模型；本阶段不做 includeDeleted 参数。
    */
   async findList(query: QueryAdminModelsDto): Promise<PaginatedResult<AdminModelVm>> {
     const { status, type, keyword, page, pageSize } = query;
-    const where: Prisma.ModelWhereInput = {};
+    const where: Prisma.ModelWhereInput = { deletedAt: null };
 
     // 状态过滤：all 不过滤，其余精确匹配 ModelStatus
     if (status && status !== 'all') {
@@ -115,5 +117,51 @@ export class AdminModelsService {
       include: this.include,
     });
     return toAdminModelVm(updated);
+  }
+
+  /**
+   * 后台删除模型（DELETE /api/admin/models/:id）。
+   * - 仅 admin 可调用（由 Controller 权限守卫保证）。
+   * - 软删除：只写 deletedAt / deletedBy / deleteReason，不删 model_files / likes / favorites / OSS/R2。
+   * - 幂等：若模型已删除，直接返回既有 deletedAt，不重复覆盖。
+   */
+  async softDelete(
+    id: bigint,
+    deletedBy: bigint,
+    dto: DeleteModelDto,
+  ): Promise<DeleteModelResult> {
+    const model = await this.prisma.model.findUnique({
+      where: { id },
+      select: { id: true, deletedAt: true },
+    });
+    if (!model) {
+      throw new NotFoundException('模型不存在');
+    }
+
+    if (model.deletedAt) {
+      return {
+        id: Number(model.id),
+        deleted: true,
+        deletedAt: model.deletedAt,
+      };
+    }
+
+    const deleteReason = dto.deleteReason?.trim() || null;
+    const deletedAt = new Date();
+    const updated = await this.prisma.model.update({
+      where: { id },
+      data: {
+        deletedAt,
+        deletedBy,
+        deleteReason,
+      },
+      select: { id: true, deletedAt: true },
+    });
+
+    return {
+      id: Number(updated.id),
+      deleted: true,
+      deletedAt: updated.deletedAt as Date,
+    };
   }
 }

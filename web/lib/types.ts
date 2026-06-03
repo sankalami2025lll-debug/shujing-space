@@ -76,6 +76,7 @@ export interface ModelListItem {
 }
 
 export interface ModelDetail extends ModelListItem {
+  userId: number;
   description: string;
   scenes: string[];
   viewerUrl: string | null;
@@ -136,6 +137,12 @@ export interface LikeResult {
 export interface FavoriteResult {
   favorited: boolean;
   favoritesCount: number;
+}
+
+export interface DeleteModelResult {
+  id: number;
+  deleted: true;
+  deletedAt: string;
 }
 
 export interface MyModel {
@@ -232,4 +239,210 @@ export interface ApplicationReceipt {
   id: number;
   status: string;
   createdAt: string;
+}
+
+// ============================== Admin / Models ==============================
+
+export type AdminModelStatusFilter = "all" | "draft" | "pending" | "published" | "rejected";
+export type ModelReviewAction = "approve" | "reject";
+
+export interface AdminModelCategory {
+  id: number;
+  name: string;
+  slug: string;
+}
+
+export interface AdminModel {
+  id: number;
+  title: string;
+  type: string;
+  tags: string[];
+  scenes: string[];
+  description: string;
+  userId: number;
+  author: string;
+  category: AdminModelCategory | null;
+  coverUrl: string;
+  viewerUrl: string | null;
+  viewerType: ViewerType;
+  allowIframe: boolean;
+  fileFormat: string | null;
+  viewsCount: number;
+  likesCount: number;
+  favoritesCount: number;
+  visibility: ModelVisibility;
+  status: ModelStatus;
+  deletedAt: string | null;
+  deletedBy: number | null;
+  rejectReason: string | null;
+  deleteReason: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface GetAdminModelsParams {
+  status?: AdminModelStatusFilter;
+  type?: string;
+  keyword?: string;
+  page?: number;
+  pageSize?: number;
+}
+
+export interface UpdateAdminModelStatusPayload {
+  action: ModelReviewAction;
+  rejectReason?: string;
+}
+
+export interface DeleteAdminModelPayload {
+  deleteReason?: string;
+}
+
+// ============================== Admin / Leads ===============================
+
+export type LeadStatus =
+  | "new"
+  | "contacted"
+  | "qualified"
+  | "quoted"
+  | "won"
+  | "lost";
+
+export interface AdminLead {
+  id: number;
+  name: string;
+  contactWay: string;
+  company: string | null;
+  email: string | null;
+  scene: string | null;
+  dataTypes: unknown;
+  stage: string | null;
+  budget: string | null;
+  message: string;
+  status: LeadStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface GetAdminLeadsParams {
+  status?: LeadStatus | "all";
+  keyword?: string;
+  page?: number;
+  pageSize?: number;
+}
+
+export interface UpdateAdminLeadStatusPayload {
+  status: LeadStatus;
+}
+
+// ============================ Admin / Training ==============================
+
+export type TrainingStatus =
+  | "submitted"
+  | "contacted"
+  | "evaluating"
+  | "quoted"
+  | "closed";
+
+export interface AdminTrainingApplication {
+  id: number;
+  userId: number | null;
+  applicant: string | null;
+  contactName: string;
+  contactWay: string;
+  company: string;
+  robotType: string;
+  trainTasks: unknown;
+  sceneDesc: string;
+  status: TrainingStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface GetAdminTrainingParams {
+  status?: TrainingStatus | "all";
+  keyword?: string;
+  page?: number;
+  pageSize?: number;
+}
+
+export interface UpdateAdminTrainingStatusPayload {
+  status: TrainingStatus;
+}
+
+// ============================== Admin / Users ===============================
+
+export interface AdminUser {
+  id: number;
+  nickname: string;
+  phone: string | null;
+  email: string | null;
+  company: string | null;
+  roleType: string | null;
+  role: UserRole;
+  status: UserStatus;
+  avatarUrl: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface GetAdminUsersParams {
+  keyword?: string;
+  role?: UserRole | "all";
+  status?: UserStatus | "all";
+  page?: number;
+  pageSize?: number;
+}
+
+export interface UpdateAdminUserPayload {
+  status?: UserStatus;
+  role?: UserRole;
+}
+
+// ============================ Admin / Categories ============================
+
+export interface AdminCategory {
+  id: number;
+  name: string;
+  slug: string;
+  sort: number;
+  isActive: boolean;
+  modelCount?: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateAdminCategoryPayload {
+  name: string;
+  slug: string;
+  sort?: number;
+  isActive?: boolean;
+}
+
+export interface UpdateAdminCategoryPayload {
+  name?: string;
+  slug?: string;
+  sort?: number;
+  isActive?: boolean;
+}
+
+export interface DeleteAdminCategoryResult {
+  id: number;
+  deleted: true;
+}
+
+// =========================== Admin / Site Config ============================
+
+export type SiteConfigFieldKey =
+  | "phone"
+  | "email"
+  | "address"
+  | "icp"
+  | "companyName"
+  | "footerText";
+
+export interface UpdateAdminSiteConfigPayload {
+  items: Array<{
+    key: SiteConfigFieldKey;
+    value: string;
+  }>;
 }

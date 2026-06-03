@@ -11,6 +11,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   ParseIntPipe,
@@ -23,7 +24,10 @@ import { UserRole } from '@prisma/client';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { AuthUser } from '../auth/jwt-payload.interface';
 import { AdminModelsService } from './admin-models.service';
+import { DeleteModelDto } from './dto/delete-model.dto';
 import { QueryAdminModelsDto } from './dto/query-admin-models.dto';
 import { UpdateModelStatusDto } from './dto/update-model-status.dto';
 
@@ -57,5 +61,16 @@ export class AdminModelsController {
     @Body() dto: UpdateModelStatusDto,
   ) {
     return this.adminModelsService.updateStatus(BigInt(id), dto);
+  }
+
+  // DELETE /api/admin/models/:id：后台删除任意模型（软删除，幂等）
+  @Delete(':id')
+  @ApiOperation({ summary: '后台删除模型（软删除；仅 admin；重复删除幂等）' })
+  async deleteModel(
+    @CurrentUser() user: AuthUser,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: DeleteModelDto,
+  ) {
+    return this.adminModelsService.softDelete(BigInt(id), user.id, dto);
   }
 }
