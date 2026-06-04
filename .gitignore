@@ -10,6 +10,8 @@ deploy/.env.*.local
 
 # Vite 原型构建产物
 dist/
+.next/
+shujing-space-deploy-source.zip
 
 # 测试覆盖率
 coverage/

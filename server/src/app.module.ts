@@ -37,7 +37,7 @@ import { SiteConfigModule } from './modules/site-config/site-config.module';
     CategoriesModule,
     // 第 5 步：模型读接口 /api/models、/api/models/:id；第 6 步新增发布接口 POST /api/models
     ModelsModule,
-    // 第 6 步：R2 上传 /api/uploads/presign、/api/uploads/callback
+    // 第 6 步：对象存储上传 /api/uploads/presign、/api/uploads/callback
     UploadsModule,
     // 第 7 步·第二阶段：个人中心 /api/users/me/*
     UsersModule,

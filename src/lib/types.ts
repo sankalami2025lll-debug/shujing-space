@@ -100,8 +100,11 @@ export type FileKind = "model" | "cover" | "video";
 // PresignResult：POST /api/uploads/presign 返回，供浏览器直传 R2（PUT uploadUrl）。
 export interface PresignResult {
   uploadUrl: string;
+  objectKey: string;
   r2Key: string;
   publicUrl: string;
+  method: "PUT";
+  headers: Record<string, string>;
   expiresIn: number;
   requiredHeaders: Record<string, string>;
 }

@@ -23,6 +23,7 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { randomUUID } from 'node:crypto';
 import { FileKind } from '@prisma/client';
 import { extractExtension } from './upload.constants';
+import { ObjectStorageService } from './object-storage.interface';
 
 // 结构化的 R2 配置（来自 configuration() 的 r2 段）
 interface R2Config {
@@ -38,7 +39,7 @@ interface R2Config {
 }
 
 @Injectable()
-export class R2Service {
+export class R2Service implements ObjectStorageService {
   private readonly logger = new Logger(R2Service.name);
   private client?: S3Client; // 懒加载，未配置时不创建
 
@@ -97,11 +98,15 @@ export class R2Service {
     return this.client;
   }
 
-  // 生成安全的对象 key：{kind}/{userId}/{uuid}.{ext}，避免使用前端原始文件名（防穿越/碰撞）
+  // 生成安全的对象 key：uploads/{userId}/{yyyy}/{MM}/{uuid}.{ext}，避免使用前端原始文件名。
   buildKey(kind: FileKind, userId: bigint, originalName: string): string {
+    void kind;
     const ext = extractExtension(originalName);
     const suffix = ext ? `.${ext}` : '';
-    return `${kind}/${userId.toString()}/${randomUUID()}${suffix}`;
+    const now = new Date();
+    const yyyy = String(now.getUTCFullYear());
+    const mm = String(now.getUTCMonth() + 1).padStart(2, '0');
+    return `uploads/${userId.toString()}/${yyyy}/${mm}/${randomUUID()}${suffix}`;
   }
 
   // 拼接可访问 URL（R2 公共域 / 绑定的 Cloudflare 自定义域）

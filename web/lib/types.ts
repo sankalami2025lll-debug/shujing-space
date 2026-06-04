@@ -93,8 +93,11 @@ export type FileKind = "model" | "cover" | "video";
 
 export interface PresignResult {
   uploadUrl: string;
+  objectKey: string;
   r2Key: string;
   publicUrl: string;
+  method: "PUT";
+  headers: Record<string, string>;
   expiresIn: number;
   requiredHeaders: Record<string, string>;
 }

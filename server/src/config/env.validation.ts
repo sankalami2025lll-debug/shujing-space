@@ -42,8 +42,10 @@ const envSchema = z.object({
   JWT_ACCESS_SECRET: z.string().min(1, 'JWT_ACCESS_SECRET 不能为空'),
   // 访问令牌有效期（如 2h / 30m），默认 2h
   JWT_ACCESS_EXPIRES: z.string().default('2h'),
-  // —— S3 兼容对象存储（第 6 步 上传模块；历史变量名仍为 R2_*）——
-  // 说明：开发环境允许为空（不阻断启动），缺失时由 R2Service 在调用时抛清晰错误；
+  // —— 对象存储驱动（第 6 步 上传模块）——
+  STORAGE_DRIVER: z.enum(['r2', 'oss']).default('r2'),
+  // —— S3 兼容对象存储（历史 R2 配置，保持兼容）——
+  // 说明：开发环境允许为空（不阻断启动），缺失时由具体存储服务在调用时抛清晰错误；
   //       生产应在部署环境注入真实值。一律不落服务器本地磁盘。
   R2_ACCOUNT_ID: z.string().default(''),
   R2_ACCESS_KEY_ID: z.string().default(''),
@@ -59,6 +61,16 @@ const envSchema = z.object({
   R2_PUBLIC_BASE: z.string().default(''),
   // 预签名 PUT 有效期（秒），默认 600（10 分钟）
   R2_PRESIGN_EXPIRES: z.coerce.number().int().positive().default(600),
+  // —— 阿里云 OSS（生产主用）——
+  OSS_ACCESS_KEY_ID: z.string().default(''),
+  OSS_ACCESS_KEY_SECRET: z.string().default(''),
+  OSS_BUCKET: z.string().default(''),
+  // OSS region 形如 oss-cn-shenzhen
+  OSS_REGION: z.string().default(''),
+  // 完整 endpoint，例如 https://oss-cn-shenzhen.aliyuncs.com
+  OSS_ENDPOINT: z.string().default(''),
+  OSS_PUBLIC_BASE: z.string().default(''),
+  OSS_PRESIGN_EXPIRES: z.coerce.number().int().positive().default(900),
   // —— 上传大小上限（MB）——
   MAX_MODEL_SIZE_MB: z.coerce.number().int().positive().default(500),
   MAX_COVER_SIZE_MB: z.coerce.number().int().positive().default(5),

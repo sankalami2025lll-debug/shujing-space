@@ -34,4 +34,7 @@ docker compose -f deploy/docker-compose.dev.yml down -v
 - `db`/`cache` 不暴露宿主机公网端口，仅 Compose 内网供 `api` 访问。
 - `.env` 经 `env_file` 注入，不入库；密钥仅服务器/容器内。
 - 外层由 1Panel 反代 + Cloudflare（DNS/CDN/SSL/WAF）。
-- 模型文件/图片/视频存 Cloudflare R2，不落服务器本地。
+- 生产环境对象存储统一使用阿里云 OSS（`STORAGE_DRIVER=oss` + `OSS_*`），模型文件/图片/视频不落服务器本地。
+- 历史 `R2_*` 变量仅保留兼容旧驱动，不再作为生产主配置。
+- 当前生产桶口径为 **阿里云 OSS Bucket 公有读**；文件上传仍走 **后端申请预签名 URL + 浏览器/前端直传 OSS PUT**。
+- `callback` 阶段仍以对象存储 Head/Meta 结果校验 `size/mime`，服务端不接收文件实体、不落本地磁盘。

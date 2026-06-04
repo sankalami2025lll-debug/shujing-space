@@ -170,18 +170,18 @@
 | **2D** | `viewerUrl` 域名白名单 | 外链发布入库前 https + host 白名单（`VIEWER_URL_ALLOWED_HOSTS`）；R2 文件发布路径不校验 | 〇之启·二十一 |
 | **2E** | 模型浏览量打点 | `POST /api/models/:id/view` 仅 published+public +1；Next 详情页打开打点一次；GET 详情保持只读 | 〇之启·二十二 |
 | **2F** | 作者查看自己的非公开模型详情 | `GET /api/models/:id`：作者可看本人全状态模型；游客/非作者仍仅 published+public；无权限统一 **404**；作者响应含 `status/visibility/rejectReason`；**列表口径不变** | 〇之启·二十三 |
-| **2G** | R2 上传安全增强 | `callback` 必须 **HeadObject 成功** 才写 `model_files`；size/mime 以对象存储 HeadObject 为准；超上限/非法 Content-Type 拒绝；**无本地兜底**；presign 仍校验扩展名/大小 | 〇之启·二十四 |
+| **2G** | 对象存储直传安全增强 | `callback` 必须 **HeadObject 成功** 才写 `model_files`；size/mime 以对象存储 HeadObject 为准；超上限/非法 Content-Type 拒绝；**无本地兜底**；presign 仍校验扩展名/大小 | 〇之启·二十四 |
 
 - **2A–2D、2G**：仅 `server/` 配置与校验（+ 文档），无前端 UI 变更。
 - **2E**：`server/` + `web/` 打点封装与详情 `useEffect`（**无新增 UI**）。
 - **2F**：`server/` 详情可见性 + `web/lib/types.ts` 类型兼容（**未改详情页 UI**）。
-- **补记（2026-06-02）**：上传模块配置层已支持 **阿里云 OSS 等 S3 兼容对象存储**；`R2_*` 变量名仅为历史保留，当前实际可用于 S3 兼容对象存储。**阿里云 OSS 真实上传验收已通过**；后续若切回 Cloudflare R2，仍需单独复验真实凭证与桶 CORS。
+- **补记（2026-06-04）**：OSS 原生上传链路已完成真实验收：`STORAGE_DRIVER=oss` 下 **presign → OSS PUT → callback → POST /api/models → publicUrl 访问 → /models、/models/me 数据命中** 全链路通过。生产环境对象存储最终口径收口为 **阿里云 OSS + `OSS_*` 环境变量**；历史 `R2_*` 仅保留旧驱动兼容，不再作为生产主配置。当前生产桶口径为 **阿里云 OSS Bucket 公有读**，上传仍走**后端预签名 PUT**，文件**不落服务器本地**。
 
 ##### 仍未处理（上线前 backlog）
 
 | 项 | 状态 | 说明 |
 |----|------|------|
-| **真实对象存储凭证与桶 CORS 端到端验收** | ⚠️ 部分完成 | **阿里云 OSS 已完成验收**：presign → 浏览器 PUT → callback → `POST /api/models` 跑通；**Cloudflare R2 尚未复验** |
+| **真实对象存储凭证与桶 CORS 端到端验收** | ⚠️ 基本完成 | **阿里云 OSS 已完成验收**：presign → 浏览器 PUT → callback → `POST /api/models` → `publicUrl` → `/models` / `/models/me` 跑通；**浏览器侧 CORS 响应头仍建议上线前再做一次 DevTools 复核** |
 | **孤儿 model_files / 上传会话表** | ❌ 二期待办 | 2G 未做 presign→callback 绑定表与定时清理 |
 | **大文件多段上传** | ❌ 二期待办 | 仍为单次预签名 PUT |
 | **Admin 后台前端** | ✅ 第一版完成 | `/admin`、`/admin/models`、`/admin/leads`、`/admin/training`、`/admin/users`、`/admin/categories`、`/admin/site-config` 已接入并完成阶段 5 总体验收 |
@@ -299,7 +299,7 @@
 - **前端静态阶段**：首页 Home、NavBar、ModelCommunity、ModelLibrary、AboutUs、AuthPage、ContactPage 已完成主要页面交互修复 + 全量中文注释（详见第二节）。
 - **iframe Viewer 技术验证已完成**：`ModelDetailPage` 支持 `viewerUrl` 时 iframe 内嵌外部三维 Viewer、无链接回退占位 UI（当前 Sketchfab 链接仅技术验证，详见第二节第 11 项）。
 - **前端验收清单**：`docs/frontend-acceptance-checklist.md` 已创建（全站手动验收清单）。
-- **最终技术栈已确定**：Ubuntu 22.04 + 1Panel + Docker/Compose + Next.js（**生产目标前端**）+ NestJS（后端）+ PostgreSQL + Cloudflare R2 + Cloudflare CDN/DNS/SSL/WAF；前后端分离。**`src/` Vite 原型保留为 UI 对照基准**；**`web/` Next.js 用户侧页面已迁完（步骤 0–8C）**（详见「一·续三」、`AGENTS.md`）。
+- **最终技术栈已确定**：Ubuntu 22.04 + 1Panel + Docker/Compose + Next.js（**生产目标前端**）+ NestJS（后端）+ PostgreSQL + 阿里云 OSS + Cloudflare CDN/DNS/SSL/WAF；前后端分离。**`src/` Vite 原型保留为 UI 对照基准**；**`web/` Next.js 用户侧页面已迁完（步骤 0–8C）**（详见「一·续三」、`AGENTS.md`）。
 - **后端架构方案**：`docs/backend-architecture-plan.md` 已创建（架构/部署/建表/接口/环境变量的第一依据）。
 - **NestJS 后端骨架已完成**：`server/`（NestJS 10 + Prisma 6 + zod）骨架落地，含统一响应/异常/校验、Swagger、健康检查、Dockerfile（详见「〇之中」节）。
 - **本地编排**：`deploy/docker-compose.dev.yml` 已创建。

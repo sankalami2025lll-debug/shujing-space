@@ -4,7 +4,7 @@
  * 对应后端：UploadsModule
  *   - POST /api/uploads/presign   申请预签名地址（需登录）
  *   - POST /api/uploads/callback  上传完成登记 model_files（需登录）
- * 红线：文件只存 Cloudflare R2，不经服务器本地；R2 未配置时 presign 返回 503，前端展示固定提示，不做本地兜底。
+ * 红线：文件只存对象存储，不经服务器本地；对象存储未配置时 presign 返回 503，前端展示固定提示，不做本地兜底。
  */
 import { http, ApiError } from "../http";
 import type {
@@ -13,9 +13,9 @@ import type {
   UploadCallbackResult,
 } from "../types";
 
-// R2_NOT_CONFIGURED_MESSAGE：R2 环境未配置时展示给用户的固定文案（产品要求，与后端 503 长文案区分）。
+// R2_NOT_CONFIGURED_MESSAGE：对象存储环境未配置时展示给用户的固定文案（保留常量名，避免改调用处）。
 export const R2_NOT_CONFIGURED_MESSAGE =
-  "R2 对象存储未配置，请先配置对象存储";
+  "对象存储未配置，请先配置对象存储";
 
 // PresignParams：申请预签名入参，对齐后端 PresignDto。
 export interface PresignParams {

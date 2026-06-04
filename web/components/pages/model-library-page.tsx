@@ -157,6 +157,9 @@ export default function ModelLibraryPage() {
     setShowUpload(true);
   };
 
+  const hasActiveFilters =
+    activeType !== "全部模型" || keyword.length > 0 || activeSort !== "最新发布";
+
   return (
     <div className="min-h-screen bg-[#0a0a0a] text-white overflow-x-hidden">
       <div className="pt-16">
@@ -294,8 +297,14 @@ export default function ModelLibraryPage() {
           ) : list.length === 0 ? (
             <div className="text-center py-20 text-gray-500">
               <Search className="w-10 h-10 mx-auto mb-4 opacity-30" />
-              <p className="text-[15px]">未找到相关模型</p>
-              <p className="text-[13px] mt-1">请尝试其他关键词或分类</p>
+              <p className="text-[15px]">
+                {hasActiveFilters ? "未找到相关模型" : "暂无模型，欢迎上传发布第一个模型"}
+              </p>
+              <p className="text-[13px] mt-1">
+                {hasActiveFilters
+                  ? "请尝试其他关键词、分类或排序条件"
+                  : "当前列表仅展示 /api/models 返回的真实模型数据。"}
+              </p>
             </div>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">

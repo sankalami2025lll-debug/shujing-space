@@ -3,7 +3,7 @@
 /**
  * 页面名称：模型社区入口页 ModelCommunity
  * 页面用途：模型社区宣传入口（非完整模型库），展示数据类型、精选模型与服务能力，引导进入模型库与联系数据服务
- * 主要功能：Hero、数据类型、精选模型（GET /api/models 推荐 6 条 + 本地回退）、服务能力、CTA、Footer
+ * 主要功能：Hero、数据类型、精选模型（GET /api/models 推荐 6 条）、服务能力、CTA、Footer
  * 对应文档：页面功能注释文档/04_模型社区入口页_ModelCommunity.md、页面功能注释文档/13_模型数据结构_communityData.md
  * 说明：全站 NavBar 由 layout SiteChrome 挂载；精选模型点击跳转 /models/[id]。
  */
@@ -21,14 +21,15 @@ import {
   Heart,
   User,
   Cpu,
+  Search,
 } from "lucide-react";
 import { useSiteConfig } from "@/components/providers/site-config-provider";
 import { getModels } from "@/lib/api/models";
 import { coverStyleByType, formatViews } from "@/lib/format";
-import { communityModels, typeTagColor } from "@/lib/community-data";
+import { typeTagColor } from "@/lib/community-data";
 import type { ModelListItem } from "@/lib/types";
 
-// FeaturedCard：精选模型卡片展示结构（兼容后端列表项与本地兜底）
+// FeaturedCard：精选模型卡片展示结构（由后端列表项映射而来）
 interface FeaturedCard {
   id: number;
   title: string;
@@ -40,19 +41,6 @@ interface FeaturedCard {
   views: string;
   likes: number;
 }
-
-// FALLBACK_FEATURED：接口异常 / 无数据时回退本地静态前 6 条（与 Vite 一致）
-const FALLBACK_FEATURED: FeaturedCard[] = communityModels.slice(0, 6).map((m) => ({
-  id: m.id,
-  title: m.title,
-  type: m.type,
-  tags: m.tags,
-  author: m.author,
-  color: m.color,
-  pattern: m.pattern,
-  views: m.views,
-  likes: m.likes,
-}));
 
 // mapModelToFeatured：后端 ModelListItem → 精选卡片（补封面视觉与浏览量格式）
 function mapModelToFeatured(m: ModelListItem): FeaturedCard {
@@ -234,8 +222,9 @@ function ServiceCard({ svc }: { svc: (typeof services)[0] }) {
 
 export default function ModelCommunityPage() {
   const { config } = useSiteConfig();
-  // featured：精选模型，初始本地兜底，挂载后尝试 GET /api/models 替换
-  const [featured, setFeatured] = useState<FeaturedCard[]>(FALLBACK_FEATURED);
+  // featured：精选模型，仅来自 GET /api/models
+  const [featured, setFeatured] = useState<FeaturedCard[]>([]);
+  const [featuredLoading, setFeaturedLoading] = useState(true);
 
   useEffect(() => {
     let active = true;
@@ -246,11 +235,17 @@ export default function ModelCommunityPage() {
           pageSize: 6,
           sort: "recommended",
         });
-        if (active && res?.list?.length) {
-          setFeatured(res.list.map(mapModelToFeatured));
+        if (active) {
+          setFeatured((res?.list ?? []).map(mapModelToFeatured));
         }
       } catch {
-        // 接口异常时保留 FALLBACK_FEATURED，保证页面不空白
+        if (active) {
+          setFeatured([]);
+        }
+      } finally {
+        if (active) {
+          setFeaturedLoading(false);
+        }
       }
     })();
     return () => {
@@ -376,100 +371,126 @@ export default function ModelCommunityPage() {
             </Link>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            {featured.map((model) => (
-              <Link
-                key={model.id}
-                href={`/models/${model.id}`}
-                className="group relative bg-white/[0.03] rounded-[16px] border border-white/10 overflow-hidden hover:border-white/20 hover:shadow-[0_0_0_1px_rgba(96,165,250,0.10)] transition-all duration-300 text-left block"
-              >
+          {featuredLoading ? (
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              {Array.from({ length: 3 }).map((_, index) => (
                 <div
-                  className={`relative h-[140px] md:aspect-[16/7] md:h-auto bg-gradient-to-br ${model.color} overflow-hidden`}
+                  key={index}
+                  className="bg-white/[0.03] rounded-[16px] border border-white/10 overflow-hidden animate-pulse"
                 >
-                  {model.pattern === "grid" && (
-                    <div
-                      className="absolute inset-0 opacity-20"
-                      style={{
-                        backgroundImage:
-                          "linear-gradient(rgba(255,255,255,0.3) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.3) 1px, transparent 1px)",
-                        backgroundSize: "28px 28px",
-                      }}
-                    />
-                  )}
-                  {model.pattern === "lines" && (
-                    <div
-                      className="absolute inset-0 opacity-15"
-                      style={{
-                        backgroundImage:
-                          "repeating-linear-gradient(45deg, rgba(255,255,255,0.2) 0, rgba(255,255,255,0.2) 1px, transparent 0, transparent 50%)",
-                        backgroundSize: "18px 18px",
-                      }}
-                    />
-                  )}
-                  {model.pattern === "dots" && (
-                    <div
-                      className="absolute inset-0 opacity-20"
-                      style={{
-                        backgroundImage:
-                          "radial-gradient(circle, rgba(255,255,255,0.4) 1px, transparent 1px)",
-                        backgroundSize: "16px 16px",
-                      }}
-                    />
-                  )}
-                  <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent" />
-                  <div className="absolute top-2.5 left-2.5">
-                    <span
-                      className={`px-2 py-0.5 rounded-full text-[10px] border ${typeTagColor[model.type] || "bg-white/10 text-white/60 border-white/10"}`}
-                    >
-                      {model.type}
-                    </span>
+                  <div className="h-[140px] md:aspect-[16/7] md:h-auto bg-white/5" />
+                  <div className="p-3 md:p-4 space-y-2">
+                    <div className="h-4 bg-white/5 rounded" />
+                    <div className="h-3 bg-white/5 rounded w-2/3" />
+                    <div className="h-3 bg-white/5 rounded w-1/2" />
                   </div>
-                  <div className="absolute bottom-3 left-3 flex gap-1">
-                    {[...Array(3)].map((_, i) => (
+                </div>
+              ))}
+            </div>
+          ) : featured.length === 0 ? (
+            <div className="rounded-[16px] border border-dashed border-white/10 bg-white/[0.02] px-6 py-14 text-center text-gray-400">
+              <Search className="mx-auto mb-4 h-10 w-10 opacity-30" />
+              <p className="text-[15px] text-gray-300">暂无模型，欢迎上传发布第一个模型</p>
+              <p className="mt-2 text-[13px] text-gray-500">
+                当前精选区仅展示 /api/models 返回的真实模型数据。
+              </p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              {featured.map((model) => (
+                <Link
+                  key={model.id}
+                  href={`/models/${model.id}`}
+                  className="group relative bg-white/[0.03] rounded-[16px] border border-white/10 overflow-hidden hover:border-white/20 hover:shadow-[0_0_0_1px_rgba(96,165,250,0.10)] transition-all duration-300 text-left block"
+                >
+                  <div
+                    className={`relative h-[140px] md:aspect-[16/7] md:h-auto bg-gradient-to-br ${model.color} overflow-hidden`}
+                  >
+                    {model.pattern === "grid" && (
                       <div
-                        key={i}
-                        className="h-0.5 rounded-full bg-cyan-400/30"
-                        style={{ width: `${20 + i * 6}px` }}
+                        className="absolute inset-0 opacity-20"
+                        style={{
+                          backgroundImage:
+                            "linear-gradient(rgba(255,255,255,0.3) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.3) 1px, transparent 1px)",
+                          backgroundSize: "28px 28px",
+                        }}
                       />
-                    ))}
-                  </div>
-                </div>
-                <div className="p-3 md:p-4">
-                  <h3 className="text-[13px] md:text-[15px] font-semibold mb-1.5 line-clamp-1">
-                    {model.title}
-                  </h3>
-                  <div className="flex flex-wrap gap-1 mb-2">
-                    {model.tags.map((tag) => (
+                    )}
+                    {model.pattern === "lines" && (
+                      <div
+                        className="absolute inset-0 opacity-15"
+                        style={{
+                          backgroundImage:
+                            "repeating-linear-gradient(45deg, rgba(255,255,255,0.2) 0, rgba(255,255,255,0.2) 1px, transparent 0, transparent 50%)",
+                          backgroundSize: "18px 18px",
+                        }}
+                      />
+                    )}
+                    {model.pattern === "dots" && (
+                      <div
+                        className="absolute inset-0 opacity-20"
+                        style={{
+                          backgroundImage:
+                            "radial-gradient(circle, rgba(255,255,255,0.4) 1px, transparent 1px)",
+                          backgroundSize: "16px 16px",
+                        }}
+                      />
+                    )}
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent" />
+                    <div className="absolute top-2.5 left-2.5">
                       <span
-                        key={tag}
-                        className="px-2 py-0.5 rounded-full bg-white/5 border border-white/[0.08] text-[11px] text-gray-400"
+                        className={`px-2 py-0.5 rounded-full text-[10px] border ${typeTagColor[model.type] || "bg-white/10 text-white/60 border-white/10"}`}
                       >
-                        {tag}
+                        {model.type}
                       </span>
-                    ))}
+                    </div>
+                    <div className="absolute bottom-3 left-3 flex gap-1">
+                      {[...Array(3)].map((_, i) => (
+                        <div
+                          key={i}
+                          className="h-0.5 rounded-full bg-cyan-400/30"
+                          style={{ width: `${20 + i * 6}px` }}
+                        />
+                      ))}
+                    </div>
                   </div>
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-1.5 text-[12px] text-gray-500">
-                      <div className="w-4 h-4 rounded-full bg-white/10 flex items-center justify-center flex-shrink-0">
-                        <User className="w-2.5 h-2.5" />
+                  <div className="p-3 md:p-4">
+                    <h3 className="text-[13px] md:text-[15px] font-semibold mb-1.5 line-clamp-1">
+                      {model.title}
+                    </h3>
+                    <div className="flex flex-wrap gap-1 mb-2">
+                      {model.tags.map((tag) => (
+                        <span
+                          key={tag}
+                          className="px-2 py-0.5 rounded-full bg-white/5 border border-white/[0.08] text-[11px] text-gray-400"
+                        >
+                          {tag}
+                        </span>
+                      ))}
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5 text-[12px] text-gray-500">
+                        <div className="w-4 h-4 rounded-full bg-white/10 flex items-center justify-center flex-shrink-0">
+                          <User className="w-2.5 h-2.5" />
+                        </div>
+                        <span className="truncate max-w-[90px]">{model.author}</span>
                       </div>
-                      <span className="truncate max-w-[90px]">{model.author}</span>
-                    </div>
-                    <div className="flex items-center gap-2.5 text-[11px] text-gray-500">
-                      <span className="flex items-center gap-0.5">
-                        <Eye className="w-3 h-3" />
-                        {model.views}
-                      </span>
-                      <span className="flex items-center gap-0.5">
-                        <Heart className="w-3 h-3" />
-                        {model.likes}
-                      </span>
+                      <div className="flex items-center gap-2.5 text-[11px] text-gray-500">
+                        <span className="flex items-center gap-0.5">
+                          <Eye className="w-3 h-3" />
+                          {model.views}
+                        </span>
+                        <span className="flex items-center gap-0.5">
+                          <Heart className="w-3 h-3" />
+                          {model.likes}
+                        </span>
+                      </div>
                     </div>
                   </div>
-                </div>
-              </Link>
-            ))}
-          </div>
+                </Link>
+              ))}
+            </div>
+          )}
         </div>
       </section>
 
