@@ -29,6 +29,7 @@ import { AuthUser } from '../auth/jwt-payload.interface';
 import { AdminModelsService } from './admin-models.service';
 import { DeleteModelDto } from './dto/delete-model.dto';
 import { QueryAdminModelsDto } from './dto/query-admin-models.dto';
+import { UpdateModelProcessingDto } from './dto/update-model-processing.dto';
 import { UpdateModelStatusDto } from './dto/update-model-status.dto';
 
 @ApiTags('admin-models')
@@ -61,6 +62,16 @@ export class AdminModelsController {
     @Body() dto: UpdateModelStatusDto,
   ) {
     return this.adminModelsService.updateStatus(BigInt(id), dto);
+  }
+
+  // PATCH /api/admin/models/:id/processing：手动标记解析完成 / 失败
+  @Patch(':id/processing')
+  @ApiOperation({ summary: '手动更新模型处理状态（mark_ready / mark_failed）' })
+  async updateProcessing(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: UpdateModelProcessingDto,
+  ) {
+    return this.adminModelsService.updateProcessingStatus(BigInt(id), dto);
   }
 
   // DELETE /api/admin/models/:id：后台删除任意模型（软删除，幂等）

@@ -328,7 +328,7 @@ export class ModelsService {
       data: {
         processingStatus: ModelProcessingStatus.failed,
         processingError: reason.trim() || '解析失败',
-        processedAt: new Date(),
+        processedAt: null,
       },
     });
   }

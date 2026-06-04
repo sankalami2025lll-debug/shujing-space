@@ -19,5 +19,6 @@ import { ModelsService } from './models.service';
   imports: [AuthModule],
   controllers: [ModelsController, InteractionsController],
   providers: [ModelsService, InteractionsService],
+  exports: [ModelsService],
 })
 export class ModelsModule {}

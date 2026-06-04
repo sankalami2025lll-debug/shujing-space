@@ -23,6 +23,7 @@ import {
   deleteAdminModel,
   getAdminModelDetail,
   getAdminModels,
+  updateAdminModelProcessing,
   updateAdminModelStatus,
 } from "@/lib/api/admin-models";
 import { formatViews } from "@/lib/format";
@@ -32,6 +33,7 @@ import type {
   AdminModelStatusFilter,
   ModelProcessingStatus,
   ModelStatus,
+  UpdateAdminModelProcessingPayload,
 } from "@/lib/types";
 
 const PAGE_SIZE = 10;
@@ -118,16 +120,24 @@ function getProcessingLabel(status: ModelProcessingStatus): string {
 function processingBadgeClass(status: ModelProcessingStatus): string {
   switch (status) {
     case "uploaded":
-      return "border-sky-400/15 bg-sky-300/10 text-sky-200";
+      return "border-white/10 bg-white/[0.03] text-white/60";
     case "processing":
-      return "border-cyan-400/15 bg-cyan-300/10 text-cyan-200";
+      return "border-white/12 bg-white/[0.05] text-white/82";
     case "ready":
-      return "border-emerald-400/15 bg-emerald-300/10 text-emerald-200";
+      return "border-white/14 bg-white/[0.08] text-white";
     case "failed":
-      return "border-rose-400/15 bg-rose-300/10 text-rose-200";
+      return "border-white/10 bg-black/35 text-white/72";
     default:
       return "border-white/10 bg-white/[0.05] text-white/68";
   }
+}
+
+function canMarkReady(status: ModelProcessingStatus): boolean {
+  return status === "processing" || status === "uploaded" || status === "failed";
+}
+
+function canMarkFailed(status: ModelProcessingStatus): boolean {
+  return status === "processing" || status === "uploaded" || status === "ready";
 }
 
 function MetaRow({ label, value }: { label: string; value: React.ReactNode }) {
@@ -156,9 +166,12 @@ export function AdminModelsPage() {
 
   const [approveTarget, setApproveTarget] = useState<AdminModel | null>(null);
   const [rejectTarget, setRejectTarget] = useState<AdminModel | null>(null);
+  const [markReadyTarget, setMarkReadyTarget] = useState<AdminModel | null>(null);
+  const [markFailedTarget, setMarkFailedTarget] = useState<AdminModel | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<AdminModel | null>(null);
 
   const [rejectReason, setRejectReason] = useState("");
+  const [processingFailureReason, setProcessingFailureReason] = useState("");
   const [deleteReason, setDeleteReason] = useState("");
   const [actionPendingId, setActionPendingId] = useState<number | null>(null);
 
@@ -293,6 +306,57 @@ export function AdminModelsPage() {
       setActionPendingId(null);
     }
   }, [actionPendingId, deleteReason, deleteTarget, detail?.id, loadList]);
+
+  const handleUpdateProcessing = useCallback(
+    async (
+      target: AdminModel,
+      payload: UpdateAdminModelProcessingPayload,
+      successMessage: string,
+      onSuccess: () => void,
+    ) => {
+      if (actionPendingId != null) return;
+      setActionPendingId(target.id);
+      try {
+        await updateAdminModelProcessing(target.id, payload);
+        toast.success(successMessage);
+        onSuccess();
+        await refreshAfterAction();
+      } catch (e) {
+        toast.error(e instanceof ApiError ? e.message : "处理状态更新失败，请稍后重试。");
+      } finally {
+        setActionPendingId(null);
+      }
+    },
+    [actionPendingId, refreshAfterAction],
+  );
+
+  const handleMarkReady = useCallback(async () => {
+    if (!markReadyTarget) return;
+    await handleUpdateProcessing(
+      markReadyTarget,
+      { action: "mark_ready" },
+      "已标记为可浏览",
+      () => setMarkReadyTarget(null),
+    );
+  }, [handleUpdateProcessing, markReadyTarget]);
+
+  const handleMarkFailed = useCallback(async () => {
+    if (!markFailedTarget) return;
+    const reason = processingFailureReason.trim();
+    if (!reason) {
+      toast.error("请填写解析失败原因");
+      return;
+    }
+    await handleUpdateProcessing(
+      markFailedTarget,
+      { action: "mark_failed", reason },
+      "已标记为解析失败",
+      () => {
+        setMarkFailedTarget(null);
+        setProcessingFailureReason("");
+      },
+    );
+  }, [handleUpdateProcessing, markFailedTarget, processingFailureReason]);
 
   return (
     <div className="space-y-6">
@@ -450,6 +514,31 @@ export function AdminModelsPage() {
                           <Eye className="h-3.5 w-3.5" />
                           查看详情
                         </button>
+                        {canMarkReady(model.processingStatus) && (
+                          <button
+                            type="button"
+                            disabled={actionPendingId === model.id}
+                            onClick={() => setMarkReadyTarget(model)}
+                            className="inline-flex h-9 items-center gap-1.5 rounded-full border border-white/12 px-3 text-xs text-white transition-colors hover:bg-white/[0.05] disabled:cursor-not-allowed disabled:opacity-40"
+                          >
+                            <Check className="h-3.5 w-3.5" />
+                            标记完成
+                          </button>
+                        )}
+                        {canMarkFailed(model.processingStatus) && (
+                          <button
+                            type="button"
+                            disabled={actionPendingId === model.id}
+                            onClick={() => {
+                              setMarkFailedTarget(model);
+                              setProcessingFailureReason("");
+                            }}
+                            className="inline-flex h-9 items-center gap-1.5 rounded-full border border-white/12 px-3 text-xs text-white/78 transition-colors hover:bg-white/[0.05] disabled:cursor-not-allowed disabled:opacity-40"
+                          >
+                            <AlertTriangle className="h-3.5 w-3.5" />
+                            标记失败
+                          </button>
+                        )}
                         <button
                           type="button"
                           disabled={model.status !== "pending" || actionPendingId === model.id}
@@ -576,6 +665,11 @@ export function AdminModelsPage() {
                     <div className="flex flex-wrap gap-2">
                       <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs ${badgeClass(detail.status)}`}>
                         {getStatusLabel(detail.status)}
+                      </span>
+                      <span
+                        className={`inline-flex rounded-full border px-2.5 py-1 text-xs ${processingBadgeClass(detail.processingStatus)}`}
+                      >
+                        {getProcessingLabel(detail.processingStatus)}
                       </span>
                       <span className="inline-flex rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-xs text-white/65">
                         {getVisibilityLabel(detail.visibility)}
@@ -770,6 +864,109 @@ export function AdminModelsPage() {
                   <Trash2 className="h-4 w-4" />
                 )}
                 确认删除
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {markReadyTarget && (
+        <div
+          className="fixed inset-0 z-[95] flex items-center justify-center bg-black/72 px-4 backdrop-blur-sm"
+          onClick={() => {
+            if (actionPendingId == null) setMarkReadyTarget(null);
+          }}
+        >
+          <div
+            className="w-full max-w-md rounded-[28px] border border-white/10 bg-[#111111] p-6"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <p className="text-[11px] uppercase tracking-[0.22em] text-white/40">标记解析完成</p>
+            <h3 className="mt-3 text-xl font-semibold">确认将“{markReadyTarget.title}”标记为可浏览？</h3>
+            <p className="mt-3 text-sm leading-7 text-white/55">
+              确认后将调用 <code>PATCH /api/admin/models/{markReadyTarget.id}/processing</code>，
+              并把处理状态更新为 <code>ready</code>。
+            </p>
+            <div className="mt-6 flex justify-end gap-3">
+              <button
+                type="button"
+                disabled={actionPendingId != null}
+                onClick={() => setMarkReadyTarget(null)}
+                className="h-11 rounded-full border border-white/12 px-5 text-sm text-white transition-colors hover:bg-white/[0.05] disabled:opacity-40"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                disabled={actionPendingId != null}
+                onClick={handleMarkReady}
+                className="inline-flex h-11 items-center gap-2 rounded-full border border-white/12 bg-white/[0.08] px-5 text-sm text-white transition-colors hover:bg-white/[0.12] disabled:opacity-40"
+              >
+                {actionPendingId === markReadyTarget.id ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Check className="h-4 w-4" />
+                )}
+                确认标记
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {markFailedTarget && (
+        <div
+          className="fixed inset-0 z-[95] flex items-center justify-center bg-black/72 px-4 backdrop-blur-sm"
+          onClick={() => {
+            if (actionPendingId == null) {
+              setMarkFailedTarget(null);
+              setProcessingFailureReason("");
+            }
+          }}
+        >
+          <div
+            className="w-full max-w-lg rounded-[28px] border border-white/10 bg-[#111111] p-6"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <p className="text-[11px] uppercase tracking-[0.22em] text-white/40">标记解析失败</p>
+            <h3 className="mt-3 text-xl font-semibold">填写解析失败原因</h3>
+            <p className="mt-3 text-sm leading-7 text-white/55">
+              后端要求 <code>action=mark_failed</code> 时必须传入 <code>reason</code>。
+            </p>
+            <textarea
+              value={processingFailureReason}
+              onChange={(event) => setProcessingFailureReason(event.target.value)}
+              maxLength={500}
+              placeholder="请输入解析失败原因"
+              className="mt-5 min-h-[140px] w-full rounded-[24px] border border-white/10 bg-black/30 px-4 py-3 text-sm text-white outline-none transition-colors placeholder:text-white/25 focus:border-white/20"
+            />
+            <div className="mt-2 text-right text-xs text-white/35">
+              {processingFailureReason.length}/500
+            </div>
+            <div className="mt-6 flex justify-end gap-3">
+              <button
+                type="button"
+                disabled={actionPendingId != null}
+                onClick={() => {
+                  setMarkFailedTarget(null);
+                  setProcessingFailureReason("");
+                }}
+                className="h-11 rounded-full border border-white/12 px-5 text-sm text-white transition-colors hover:bg-white/[0.05] disabled:opacity-40"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                disabled={actionPendingId != null}
+                onClick={handleMarkFailed}
+                className="inline-flex h-11 items-center gap-2 rounded-full border border-white/12 bg-white/[0.08] px-5 text-sm text-white transition-colors hover:bg-white/[0.12] disabled:opacity-40"
+              >
+                {actionPendingId === markFailedTarget.id ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <AlertTriangle className="h-4 w-4" />
+                )}
+                确认失败
               </button>
             </div>
           </div>

@@ -288,7 +288,7 @@ describe('ModelsService soft-delete visibility', () => {
       data: {
         processingStatus: 'failed',
         processingError: '解析失败',
-        processedAt: expect.any(Date),
+        processedAt: null,
       },
     });
   });

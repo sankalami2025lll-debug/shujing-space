@@ -10,6 +10,7 @@ import type {
   DeleteModelResult,
   GetAdminModelsParams,
   PaginatedResponse,
+  UpdateAdminModelProcessingPayload,
   UpdateAdminModelStatusPayload,
 } from "../types";
 
@@ -38,6 +39,13 @@ export function updateAdminModelStatus(
   payload: UpdateAdminModelStatusPayload,
 ): Promise<AdminModel> {
   return http.patch<AdminModel>(`/admin/models/${id}/status`, payload);
+}
+
+export function updateAdminModelProcessing(
+  id: number,
+  payload: UpdateAdminModelProcessingPayload,
+): Promise<AdminModel> {
+  return http.patch<AdminModel>(`/admin/models/${id}/processing`, payload);
 }
 
 export function deleteAdminModel(

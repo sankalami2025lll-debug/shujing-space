@@ -13,6 +13,7 @@
  */
 import { Module } from '@nestjs/common';
 import { AuthModule } from '../auth/auth.module';
+import { ModelsModule } from '../models/models.module';
 import { AdminCategoriesController } from './admin-categories.controller';
 import { AdminCategoriesService } from './admin-categories.service';
 import { AdminLeadsController } from './admin-leads.controller';
@@ -25,7 +26,7 @@ import { AdminUsersController } from './admin-users.controller';
 import { AdminUsersService } from './admin-users.service';
 
 @Module({
-  imports: [AuthModule],
+  imports: [AuthModule, ModelsModule],
   controllers: [
     AdminModelsController,
     AdminUsersController,

@@ -15,15 +15,20 @@ import {
 } from '@nestjs/common';
 import { ModelStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { ModelsService } from '../models/models.service';
 import { DeleteModelResult, PaginatedResult } from '../users/users.service';
 import { AdminModelVm, toAdminModelVm } from './admin.vm';
 import { DeleteModelDto } from './dto/delete-model.dto';
 import { QueryAdminModelsDto } from './dto/query-admin-models.dto';
+import { UpdateModelProcessingDto } from './dto/update-model-processing.dto';
 import { UpdateModelStatusDto } from './dto/update-model-status.dto';
 
 @Injectable()
 export class AdminModelsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly modelsService: ModelsService,
+  ) {}
 
   // 列表 / 详情查询统一附带的关联（发布者 + 分类）
   private readonly include = {
@@ -116,6 +121,43 @@ export class AdminModelsService {
       data,
       include: this.include,
     });
+    return toAdminModelVm(updated);
+  }
+
+  /**
+   * 手动更新模型处理状态（PATCH /api/admin/models/:id/processing）。
+   * - mark_ready：改为 ready，清空失败原因，写入 processedAt。
+   * - mark_failed：改为 failed，要求填写失败原因，并清空 processedAt。
+   */
+  async updateProcessingStatus(
+    id: bigint,
+    dto: UpdateModelProcessingDto,
+  ): Promise<AdminModelVm> {
+    const model = await this.prisma.model.findUnique({
+      where: { id },
+      select: { id: true },
+    });
+    if (!model) {
+      throw new NotFoundException('模型不存在');
+    }
+
+    if (dto.action === 'mark_ready') {
+      await this.modelsService.markReady(id);
+    } else {
+      const reason = dto.reason?.trim();
+      if (!reason) {
+        throw new BadRequestException('请填写解析失败原因');
+      }
+      await this.modelsService.markFailed(id, reason);
+    }
+
+    const updated = await this.prisma.model.findUnique({
+      where: { id },
+      include: this.include,
+    });
+    if (!updated) {
+      throw new NotFoundException('模型不存在');
+    }
     return toAdminModelVm(updated);
   }
 

@@ -176,7 +176,9 @@
 - **2E**：`server/` + `web/` 打点封装与详情 `useEffect`（**无新增 UI**）。
 - **2F**：`server/` 详情可见性 + `web/lib/types.ts` 类型兼容（**未改详情页 UI**）。
 - **补记（2026-06-04）**：OSS 原生上传链路已完成真实验收：`STORAGE_DRIVER=oss` 下 **presign → OSS PUT → callback → POST /api/models → publicUrl 访问 → /models、/models/me 数据命中** 全链路通过。生产环境对象存储最终口径收口为 **阿里云 OSS + `OSS_*` 环境变量**；历史 `R2_*` 仅保留旧驱动兼容，不再作为生产主配置。当前生产桶口径为 **阿里云 OSS Bucket 公有读**，上传仍走**后端预签名 PUT**，文件**不落服务器本地**。
-- **补记（2026-06-04）**：模型“后台解析状态”第一版已完成。`models` 表已新增 `processingStatus / processingError / processedAt`，当前状态枚举为 `uploaded / processing / ready / failed`；历史模型默认 `ready`，避免旧数据不可浏览。外链 `viewerUrl` 发布默认 `ready`，原生文件上传发布默认 `processing`；公开 `/models` 仅展示 `processingStatus=ready` 的公开模型，个人中心保留作者全部模型并显示处理状态。当前**尚未接入真实解析引擎**，也**未引入 Redis / 队列 / worker**；后续可在不改变 OSS 直传架构、且文件仍**不落服务器本地**的前提下，接入 BIM / IFC / GLB / 3D Viewer 解析服务或后台 worker 回写 `markProcessing / markReady / markFailed`。
+- **补记（2026-06-04）**：模型“后台解析状态”第一版已完成。`models` 表已新增 `processingStatus / processingError / processedAt`，当前状态枚举为 `uploaded / processing / ready / failed`；历史模型默认 `ready`，避免旧数据不可浏览。外链 `viewerUrl` 发布默认 `ready`，原生文件上传发布默认 `processing`；公开 `/models` 仅展示 `processingStatus=ready` 的公开模型，个人中心保留作者全部模型并显示处理状态。
+- **补记（2026-06-04）**：Admin 模型管理页已新增“手动标记解析完成 / 标记解析失败”临时控制能力：后台新增 `PATCH /api/admin/models/:id/processing`，仅 admin 可调用；`mark_ready` 会把模型标记为 `ready` 并写入 `processedAt`，`mark_failed` 要求填写失败原因并写入 `processingError`、清空 `processedAt`。该能力仅用于**真实解析引擎接入前**的人工作业兜底，不改变普通用户接口、不改 OSS 上传链路、也不引入本地文件落盘。
+- 当前**尚未接入真实解析引擎**，也**未引入 Redis / 队列 / worker**；后续可在不改变 OSS 直传架构、且文件仍**不落服务器本地**的前提下，接入 BIM / IFC / GLB / 3D Viewer 解析服务或后台 worker / 队列系统自动回写 `markProcessing / markReady / markFailed`。
 
 ##### 仍未处理（上线前 backlog）
 
@@ -205,6 +207,7 @@
 - ✅ **Next.js 用户侧页面迁移完成**（`web/` 步骤 0–8C + 全局样式）。
 - ✅ **Admin 前端阶段 1 已完成**：`/admin` 后台入口、AdminShell、AdminGuard、模块导航占位页与管理员可见的官网入口均已落地；当前只完成后台壳子，业务表格未接。
 - ✅ **Admin 前端阶段 2 已完成**：`/admin/models` 已接入真实接口，支持模型列表、状态筛选、详情查看、审核通过、填写驳回原因、软删除与成功/失败 toast。
+- ✅ **Admin 模型解析状态人工控制已完成**：`/admin/models` 新增“标记完成 / 标记失败”按钮与对应确认/原因弹层，可人工把 `processing / uploaded / failed` 切到 `ready`，或把 `processing / uploaded / ready` 切到 `failed`；操作成功后自动刷新列表与详情。该能力仅为解析引擎接入前的临时人工控制方案。
 - ✅ **Admin 前端阶段 3 已完成**：`/admin/leads` 与 `/admin/training` 已接入真实接口，支持列表、状态筛选、详情查看、状态更新与成功/失败 toast；浏览器手工联调统一延后到 Admin 总体验收阶段。
 - ✅ **Admin 前端阶段 4 已完成**：`/admin/users`、`/admin/categories`、`/admin/site-config` 已接入真实接口，支持用户启停与角色调整、分类增改启停删除、站点配置读取与保存；浏览器手工联调统一延后到 Admin 总体验收阶段。
 - ✅ **Admin 前端阶段 5 已完成**：Admin 前端第一版已完成总体验收与文档收口；主链路已做真实 API 验收，`web/server` lint/build/test 均通过，部署前阻断项已清零。

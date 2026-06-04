@@ -256,6 +256,7 @@ export interface ApplicationReceipt {
 
 export type AdminModelStatusFilter = "all" | "draft" | "pending" | "published" | "rejected";
 export type ModelReviewAction = "approve" | "reject";
+export type ModelProcessingAction = "mark_ready" | "mark_failed";
 
 export interface AdminModelCategory {
   id: number;
@@ -305,6 +306,11 @@ export interface GetAdminModelsParams {
 export interface UpdateAdminModelStatusPayload {
   action: ModelReviewAction;
   rejectReason?: string;
+}
+
+export interface UpdateAdminModelProcessingPayload {
+  action: ModelProcessingAction;
+  reason?: string;
 }
 
 export interface DeleteAdminModelPayload {
