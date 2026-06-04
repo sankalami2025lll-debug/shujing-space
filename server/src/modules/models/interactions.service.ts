@@ -12,7 +12,12 @@
  *  - 取消点赞 / 取消收藏：已删除模型按幂等逻辑允许取消，不额外泄露管理字段。
  */
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { ModelStatus, ModelVisibility, Prisma } from '@prisma/client';
+import {
+  ModelProcessingStatus,
+  ModelStatus,
+  ModelVisibility,
+  Prisma,
+} from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 
 // 点赞操作返回结构（供前端直接刷新角标）
@@ -31,10 +36,11 @@ export interface FavoriteResult {
 export class InteractionsService {
   constructor(private readonly prisma: PrismaService) {}
 
-  // 与模型读接口一致的可见性口径：已发布 + 公开 + 未删除
+  // 与模型读接口一致的可见性口径：已发布 + 公开 + 解析完成 + 未删除
   private readonly visibleWhere = {
     status: ModelStatus.published,
     visibility: ModelVisibility.public,
+    processingStatus: ModelProcessingStatus.ready,
     deletedAt: null,
   };
 

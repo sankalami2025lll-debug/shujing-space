@@ -11,6 +11,7 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { ConfigService } from '@nestjs/config';
 import {
   FileKind,
+  ModelProcessingStatus,
   ModelStatus,
   ModelVisibility,
   Prisma,
@@ -44,10 +45,11 @@ export class ModelsService {
     private readonly config: ConfigService,
   ) {}
 
-  // 游客可见性的统一过滤条件：已发布 + 公开 + 未软删除
+  // 游客可见性的统一过滤条件：已发布 + 公开 + 解析完成 + 未软删除
   private readonly publicWhere: Prisma.ModelWhereInput = {
     status: ModelStatus.published,
     visibility: ModelVisibility.public,
+    processingStatus: ModelProcessingStatus.ready,
     deletedAt: null,
   };
 
@@ -187,7 +189,7 @@ export class ModelsService {
 
   /**
    * 发布模型（POST /api/models，需登录）。
-   * 关联已上传到 R2 的模型/封面文件（按 fileId 反查 model_files，校验归属），
+   * 关联已上传到对象存储的模型/封面文件（按 fileId 反查 model_files，校验归属），
    * 反查得 modelUrl / coverUrl 落库；status 由 visibility 推导。
    * 第一版无独立审核流：public→published（直接公开）、review→pending（待审核）、private→published（仅本人可见）。
    */
@@ -231,6 +233,12 @@ export class ModelsService {
       dto.visibility === ModelVisibility.review
         ? ModelStatus.pending
         : ModelStatus.published;
+    const processingStatus =
+      dto.modelFileId != null
+        ? ModelProcessingStatus.processing
+        : ModelProcessingStatus.ready;
+    const processedAt =
+      processingStatus === ModelProcessingStatus.ready ? new Date() : null;
 
     // 6. 创建模型记录
     const created = await this.prisma.model.create({
@@ -249,6 +257,9 @@ export class ModelsService {
         fileFormat,
         visibility: dto.visibility,
         status,
+        processingStatus,
+        processingError: null,
+        processedAt,
       },
       include: {
         user: { select: { nickname: true } },
@@ -279,6 +290,47 @@ export class ModelsService {
       select: { viewsCount: true },
     });
     return { viewsCount: updated.viewsCount };
+  }
+
+  // 预留：解析任务开始后把模型标记为 processing。
+  async markProcessing(modelId: bigint): Promise<void> {
+    await this.prisma.model.update({
+      where: { id: modelId },
+      data: {
+        processingStatus: ModelProcessingStatus.processing,
+        processingError: null,
+        processedAt: null,
+      },
+    });
+  }
+
+  // 预留：解析完成后把模型标记为 ready，并允许顺带回写可浏览地址。
+  async markReady(
+    modelId: bigint,
+    payload?: { viewerUrl?: string | null; modelUrl?: string | null },
+  ): Promise<void> {
+    const nextUrl = payload?.viewerUrl ?? payload?.modelUrl;
+    await this.prisma.model.update({
+      where: { id: modelId },
+      data: {
+        processingStatus: ModelProcessingStatus.ready,
+        processingError: null,
+        processedAt: new Date(),
+        ...(nextUrl ? { modelUrl: nextUrl } : {}),
+      },
+    });
+  }
+
+  // 预留：解析失败后记录失败原因，后续可由后台或引擎重试。
+  async markFailed(modelId: bigint, reason: string): Promise<void> {
+    await this.prisma.model.update({
+      where: { id: modelId },
+      data: {
+        processingStatus: ModelProcessingStatus.failed,
+        processingError: reason.trim() || '解析失败',
+        processedAt: new Date(),
+      },
+    });
   }
 
   // 校验外链 viewerUrl：必须 https 且 hostname 命中白名单（上线前安全修复 2D）。

@@ -30,6 +30,16 @@ describe('InteractionsService', () => {
     prisma.model.findFirst.mockResolvedValue(null);
 
     await expect(service.like(userId, modelId)).rejects.toThrow(NotFoundException);
+    expect(prisma.model.findFirst).toHaveBeenCalledWith({
+      where: {
+        id: modelId,
+        status: 'published',
+        visibility: 'public',
+        processingStatus: 'ready',
+        deletedAt: null,
+      },
+      select: { id: true },
+    });
     expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 
@@ -58,6 +68,16 @@ describe('InteractionsService', () => {
     prisma.model.findFirst.mockResolvedValue(null);
 
     await expect(service.favorite(userId, modelId)).rejects.toThrow(NotFoundException);
+    expect(prisma.model.findFirst).toHaveBeenCalledWith({
+      where: {
+        id: modelId,
+        status: 'published',
+        visibility: 'public',
+        processingStatus: 'ready',
+        deletedAt: null,
+      },
+      select: { id: true },
+    });
     expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 });

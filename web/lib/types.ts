@@ -58,6 +58,7 @@ export interface Category {
 export type ViewerType = "iframe" | "sketchfab" | "native" | "none";
 export type ModelVisibility = "public" | "private" | "review";
 export type ModelStatus = "draft" | "pending" | "published" | "rejected";
+export type ModelProcessingStatus = "uploaded" | "processing" | "ready" | "failed";
 
 export interface ModelListItem {
   id: number;
@@ -71,6 +72,7 @@ export interface ModelListItem {
   favoritesCount: number;
   viewerType: ViewerType;
   createdAt: string;
+  processingStatus: ModelProcessingStatus;
   isLiked?: boolean;
   isFavorited?: boolean;
 }
@@ -83,10 +85,13 @@ export interface ModelDetail extends ModelListItem {
   allowIframe: boolean;
   fileFormat: string | null;
   category: Category | null;
+  processingStatus: ModelProcessingStatus;
   /** 仅作者查看自己的非公开模型详情时由后端附带（2F）；公开详情不含 */
   status?: ModelStatus;
   visibility?: ModelVisibility;
   rejectReason?: string | null;
+  processingError?: string | null;
+  processedAt?: string | null;
 }
 
 export type FileKind = "model" | "cover" | "video";
@@ -160,6 +165,9 @@ export interface MyModel {
   favoritesCount: number;
   visibility: ModelVisibility;
   status: ModelStatus;
+  processingStatus: ModelProcessingStatus;
+  processingError: string | null;
+  processedAt: string | null;
   rejectReason: string | null;
   createdAt: string;
   updatedAt: string;
@@ -275,6 +283,9 @@ export interface AdminModel {
   favoritesCount: number;
   visibility: ModelVisibility;
   status: ModelStatus;
+  processingStatus: ModelProcessingStatus;
+  processingError: string | null;
+  processedAt: string | null;
   deletedAt: string | null;
   deletedBy: number | null;
   rejectReason: string | null;

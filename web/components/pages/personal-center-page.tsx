@@ -42,9 +42,49 @@ const MODEL_STATUS_META: Record<string, { label: string; color: string }> = {
   draft: { label: "草稿", color: "text-gray-400 bg-white/5 border-white/10" },
 };
 
+const MODEL_PROCESSING_META: Record<string, { label: string; color: string; action: string }> = {
+  uploaded: {
+    label: "等待解析",
+    color: "text-sky-300 bg-sky-500/10 border-sky-500/20",
+    action: "解析中",
+  },
+  processing: {
+    label: "后台解析中",
+    color: "text-cyan-300 bg-cyan-500/10 border-cyan-500/20",
+    action: "解析中",
+  },
+  ready: {
+    label: "可浏览",
+    color: "text-green-400 bg-green-500/10 border-green-500/20",
+    action: "查看模型",
+  },
+  failed: {
+    label: "解析失败",
+    color: "text-rose-300 bg-rose-500/10 border-rose-500/20",
+    action: "查看状态",
+  },
+};
+
 // modelStatusMeta：取模型状态展示信息，未知状态兜底为原文 + 中性配色。
 function modelStatusMeta(status: string) {
   return MODEL_STATUS_META[status] ?? { label: status, color: "text-gray-400 bg-white/5 border-white/10" };
+}
+
+function modelProcessingMeta(status: string) {
+  return (
+    MODEL_PROCESSING_META[status] ?? {
+      label: status,
+      color: "text-gray-400 bg-white/5 border-white/10",
+      action: "查看状态",
+    }
+  );
+}
+
+function resolveMyModelBadge(model: MyModel) {
+  if (model.status !== "published") {
+    return { ...modelStatusMeta(model.status), action: "查看状态" };
+  }
+  return modelProcessingMeta(model.processingStatus);
 }
 
 // APPLICATION_STATUS_META：训练申请状态（后端英文枚举）→ 中文标签 + 角标配色（用于「我的申请」）。
@@ -280,6 +320,17 @@ export default function PersonalCenterPage() {
     router.push(`/models/${id}`);
   };
 
+  const handleModelView = useCallback(
+    (model: MyModel) => {
+      if (model.processingStatus !== "ready") {
+        toast.info("模型正在后台解析中，完成后即可浏览");
+        return;
+      }
+      router.push(`/models/${model.id}`);
+    },
+    [router],
+  );
+
   // handlePublishNew：点击「发布新模型」虚线卡；已登录打开 UploadModal，未登录 toast + /auth
   const handlePublishNew = () => {
     if (!isAuthed) {
@@ -290,11 +341,12 @@ export default function PersonalCenterPage() {
     setShowUpload(true);
   };
 
-  // refreshAfterPublish：发布成功后刷新「我的模型」列表与 stats 角标
+  // refreshAfterPublish：发布成功后刷新「我的模型 / 我的发布」列表与 stats 角标
   const refreshAfterPublish = useCallback(() => {
     loadModels();
+    loadPublished();
     getMyStats().then(setStats).catch(() => {});
-  }, [loadModels]);
+  }, [loadModels, loadPublished]);
 
   // tabs：四个 Tab 定义，角标数量取自 stats（未加载时不显示）
   const tabs = [
@@ -370,36 +422,37 @@ export default function PersonalCenterPage() {
               {(list) => (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                   {list.map((m) => {
-                    const meta = modelStatusMeta(m.status);
+                    const meta = resolveMyModelBadge(m);
                     return (
                       <div
                         key={m.id}
                         className="relative w-full bg-white/[0.03] border border-white/10 rounded-xl overflow-hidden hover:border-white/20 transition-all"
                       >
-                        <button
-                          type="button"
-                          onClick={() => onView(m.id)}
-                          className="text-left w-full"
-                        >
-                          <CoverPreview
-                            coverUrl={m.coverUrl}
-                            type={m.type}
-                            id={m.id}
-                            className="h-28"
-                            iconClassName="w-6 h-6"
-                          />
-                          <div className="p-3">
-                            <p className="text-[13px] font-medium line-clamp-1">{m.title}</p>
-                            <div className="flex items-center justify-between mt-1.5">
-                              <span className="text-[11px] text-gray-500">{m.type}</span>
-                              <span
-                                className={`px-2 py-0.5 rounded-full text-[10px] border ${meta.color}`}
-                              >
-                                {meta.label}
-                              </span>
-                            </div>
+                        <CoverPreview
+                          coverUrl={m.coverUrl}
+                          type={m.type}
+                          id={m.id}
+                          className="h-28"
+                          iconClassName="w-6 h-6"
+                        />
+                        <div className="p-3">
+                          <p className="text-[13px] font-medium line-clamp-1">{m.title}</p>
+                          <div className="flex items-center justify-between mt-1.5 gap-2">
+                            <span className="text-[11px] text-gray-500">{m.type}</span>
+                            <span
+                              className={`px-2 py-0.5 rounded-full text-[10px] border ${meta.color}`}
+                            >
+                              {meta.label}
+                            </span>
                           </div>
-                        </button>
+                          <button
+                            type="button"
+                            onClick={() => handleModelView(m)}
+                            className="mt-3 w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-[12px] text-gray-200 transition-all hover:bg-white/8 hover:border-white/20"
+                          >
+                            {meta.action}
+                          </button>
+                        </div>
                       </div>
                     );
                   })}
@@ -481,12 +534,10 @@ export default function PersonalCenterPage() {
               {(list) => (
                 <div className="space-y-3">
                   {list.map((m) => {
-                    const meta = modelStatusMeta(m.status);
+                    const meta = resolveMyModelBadge(m);
                     return (
-                      <button
+                      <div
                         key={m.id}
-                        type="button"
-                        onClick={() => onView(m.id)}
                         className="w-full text-left flex items-center justify-between gap-3 bg-white/[0.03] border border-white/10 rounded-xl px-4 py-3 hover:border-white/20 transition-all"
                       >
                         <div className="flex items-center gap-3 min-w-0 flex-1">
@@ -504,7 +555,14 @@ export default function PersonalCenterPage() {
                         >
                           {meta.label}
                         </span>
-                      </button>
+                        <button
+                          type="button"
+                          onClick={() => handleModelView(m)}
+                          className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-[12px] text-gray-200 transition-all hover:bg-white/8 hover:border-white/20"
+                        >
+                          {meta.action}
+                        </button>
+                      </div>
                     );
                   })}
                 </div>

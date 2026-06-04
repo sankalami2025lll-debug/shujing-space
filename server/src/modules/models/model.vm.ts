@@ -14,6 +14,7 @@
 import {
   Category,
   Model,
+  ModelProcessingStatus,
   ModelStatus,
   ModelVisibility,
   User,
@@ -45,6 +46,7 @@ export interface ModelListItemVm {
   likesCount: number;
   favoritesCount: number;
   createdAt: Date;
+  processingStatus: ModelProcessingStatus;
   isLiked?: boolean; // 当前登录用户是否已点赞（游客不返回）
   isFavorited?: boolean; // 当前登录用户是否已收藏（游客不返回）
 }
@@ -76,6 +78,9 @@ export interface ModelDetailVm {
   likesCount: number;
   favoritesCount: number;
   createdAt: Date;
+  processingStatus: ModelProcessingStatus;
+  processingError?: string | null; // 作者查看自己的模型时附带
+  processedAt?: Date | null; // 作者查看自己的模型时附带
   isLiked?: boolean; // 当前登录用户是否已点赞（游客不返回）
   isFavorited?: boolean; // 当前登录用户是否已收藏（游客不返回）
   status?: ModelStatus; // 仅作者查看自己的模型时返回
@@ -100,6 +105,7 @@ export function toModelListItemVm(
     likesCount: m.likesCount,
     favoritesCount: m.favoritesCount,
     createdAt: m.createdAt,
+    processingStatus: m.processingStatus,
     ...(interaction
       ? { isLiked: interaction.isLiked, isFavorited: interaction.isFavorited }
       : {}),
@@ -134,6 +140,7 @@ export function toModelDetailVm(
     likesCount: m.likesCount,
     favoritesCount: m.favoritesCount,
     createdAt: m.createdAt,
+    processingStatus: m.processingStatus,
     ...(interaction
       ? { isLiked: interaction.isLiked, isFavorited: interaction.isFavorited }
       : {}),
@@ -142,6 +149,8 @@ export function toModelDetailVm(
           status: m.status,
           visibility: m.visibility,
           rejectReason: m.rejectReason ?? null,
+          processingError: m.processingError ?? null,
+          processedAt: m.processedAt ?? null,
         }
       : {}),
   };

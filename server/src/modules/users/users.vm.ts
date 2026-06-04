@@ -10,6 +10,7 @@
 import {
   Favorite,
   Model,
+  ModelProcessingStatus,
   ModelStatus,
   ModelVisibility,
   TrainingApplication,
@@ -34,6 +35,9 @@ export interface MyModelVm {
   favoritesCount: number;
   visibility: ModelVisibility; // 可见性：public / private / review
   status: ModelStatus; // 审核状态：draft / pending / published / rejected
+  processingStatus: ModelProcessingStatus; // 后台处理状态：uploaded / processing / ready / failed
+  processingError: string | null; // 处理失败原因
+  processedAt: Date | null; // 处理完成时间
   rejectReason: string | null; // 驳回原因（被拒时展示）
   createdAt: Date;
   updatedAt: Date;
@@ -95,6 +99,9 @@ export function toMyModelVm(m: Model): MyModelVm {
     favoritesCount: m.favoritesCount,
     visibility: m.visibility,
     status: m.status,
+    processingStatus: m.processingStatus,
+    processingError: m.processingError ?? null,
+    processedAt: m.processedAt ?? null,
     rejectReason: m.rejectReason ?? null,
     createdAt: m.createdAt,
     updatedAt: m.updatedAt,
@@ -121,6 +128,7 @@ export function toMyFavoriteVm(f: FavoriteWithModel): MyFavoriteVm {
     isAvailable:
       m.status === ModelStatus.published &&
       m.visibility === ModelVisibility.public &&
+      m.processingStatus === ModelProcessingStatus.ready &&
       m.deletedAt == null,
     favoritedAt: f.createdAt,
   };

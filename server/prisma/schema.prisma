@@ -58,6 +58,14 @@ enum ModelStatus {
   rejected
 }
 
+// 模型后台处理状态：文件已上传 / 解析中 / 可浏览 / 解析失败
+enum ModelProcessingStatus {
+  uploaded
+  processing
+  ready
+  failed
+}
+
 // 上传文件用途：模型文件 / 封面图 / 视频
 enum FileKind {
   model
@@ -153,6 +161,9 @@ model Model {
   favoritesCount Int             @default(0) @map("favorites_count") // 收藏量
   visibility     ModelVisibility @default(public) // 可见性
   status         ModelStatus     @default(draft) // 审核状态
+  processingStatus ModelProcessingStatus @default(ready) @map("processing_status") // 后台处理状态：uploaded/processing/ready/failed
+  processingError  String?             @map("processing_error") @db.Text // 后台处理失败原因
+  processedAt      DateTime?           @map("processed_at") @db.Timestamptz(6) // 处理完成时间（ready/failed）
   rejectReason   String?         @map("reject_reason") @db.Text // 驳回原因（后台审核）
   deletedAt      DateTime?       @map("deleted_at") @db.Timestamptz(6) // 软删除时间
   deletedBy      BigInt?         @map("deleted_by") // 执行删除的用户 id（普通用户或管理员）
@@ -168,6 +179,7 @@ model Model {
 
   @@index([type, status])
   @@index([status, createdAt])
+  @@index([processingStatus, createdAt])
   @@index([userId])
   @@map("models")
 }

@@ -27,7 +27,12 @@ import {
 } from "@/lib/api/admin-models";
 import { formatViews } from "@/lib/format";
 import { ApiError } from "@/lib/http";
-import type { AdminModel, AdminModelStatusFilter, ModelStatus } from "@/lib/types";
+import type {
+  AdminModel,
+  AdminModelStatusFilter,
+  ModelProcessingStatus,
+  ModelStatus,
+} from "@/lib/types";
 
 const PAGE_SIZE = 10;
 
@@ -90,6 +95,36 @@ function badgeClass(status: ModelStatus): string {
       return "border-rose-400/15 bg-rose-300/10 text-rose-200";
     case "draft":
       return "border-white/10 bg-white/[0.05] text-white/68";
+    default:
+      return "border-white/10 bg-white/[0.05] text-white/68";
+  }
+}
+
+function getProcessingLabel(status: ModelProcessingStatus): string {
+  switch (status) {
+    case "uploaded":
+      return "等待解析";
+    case "processing":
+      return "后台解析中";
+    case "ready":
+      return "可浏览";
+    case "failed":
+      return "解析失败";
+    default:
+      return status;
+  }
+}
+
+function processingBadgeClass(status: ModelProcessingStatus): string {
+  switch (status) {
+    case "uploaded":
+      return "border-sky-400/15 bg-sky-300/10 text-sky-200";
+    case "processing":
+      return "border-cyan-400/15 bg-cyan-300/10 text-cyan-200";
+    case "ready":
+      return "border-emerald-400/15 bg-emerald-300/10 text-emerald-200";
+    case "failed":
+      return "border-rose-400/15 bg-rose-300/10 text-rose-200";
     default:
       return "border-white/10 bg-white/[0.05] text-white/68";
   }
@@ -349,10 +384,10 @@ export function AdminModelsPage() {
         </div>
 
         <div className="overflow-x-auto">
-          <table className="min-w-[1240px] w-full">
+          <table className="min-w-[1360px] w-full">
             <thead className="bg-black/20">
               <tr className="text-left text-xs uppercase tracking-[0.16em] text-white/35">
-                {["ID", "标题", "类型", "作者", "分类", "状态", "可见性", "浏览", "点赞", "收藏", "创建时间", "操作"].map((label) => (
+                {["ID", "标题", "类型", "作者", "分类", "审核状态", "处理状态", "可见性", "浏览", "点赞", "收藏", "创建时间", "操作"].map((label) => (
                   <th key={label} className="px-4 py-4 font-medium">
                     {label}
                   </th>
@@ -362,7 +397,7 @@ export function AdminModelsPage() {
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={12} className="px-4 py-16">
+                  <td colSpan={13} className="px-4 py-16">
                     <div className="flex items-center justify-center gap-3 text-sm text-white/50">
                       <Loader2 className="h-5 w-5 animate-spin" />
                       正在加载模型列表...
@@ -371,7 +406,7 @@ export function AdminModelsPage() {
                 </tr>
               ) : emptyMessage ? (
                 <tr>
-                  <td colSpan={12} className="px-4 py-16 text-center text-sm text-white/45">
+                  <td colSpan={13} className="px-4 py-16 text-center text-sm text-white/45">
                     {emptyMessage}
                   </td>
                 </tr>
@@ -393,6 +428,11 @@ export function AdminModelsPage() {
                     <td className="px-4 py-4">
                       <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs ${badgeClass(model.status)}`}>
                         {getStatusLabel(model.status)}
+                      </span>
+                    </td>
+                    <td className="px-4 py-4">
+                      <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs ${processingBadgeClass(model.processingStatus)}`}>
+                        {getProcessingLabel(model.processingStatus)}
                       </span>
                     </td>
                     <td className="px-4 py-4 text-white/62">{getVisibilityLabel(model.visibility)}</td>
@@ -556,6 +596,9 @@ export function AdminModelsPage() {
                       <MetaRow label="更新时间" value={toDateTimeText(detail.updatedAt)} />
                       <MetaRow label="Viewer" value={detail.viewerType} />
                       <MetaRow label="模型地址" value={detail.viewerUrl ?? "-"} />
+                      <MetaRow label="处理状态" value={getProcessingLabel(detail.processingStatus)} />
+                      <MetaRow label="处理完成时间" value={toDateTimeText(detail.processedAt)} />
+                      <MetaRow label="处理失败原因" value={detail.processingError ?? "-"} />
                       <MetaRow label="驳回原因" value={detail.rejectReason ?? "-"} />
                       <MetaRow label="删除原因" value={detail.deleteReason ?? "-"} />
                     </div>

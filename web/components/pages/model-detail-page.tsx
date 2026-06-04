@@ -51,6 +51,20 @@ function mergeSceneLabels(tags: unknown, scenes: unknown): string[] {
   return [...new Set(merged)];
 }
 
+function processingStatusText(status: ModelDetail["processingStatus"]) {
+  switch (status) {
+    case "uploaded":
+      return "模型文件已上传，正在等待进入后台解析。";
+    case "processing":
+      return "模型正在后台解析中，完成后即可在线浏览。";
+    case "failed":
+      return "模型解析失败，请联系管理员或稍后重新发布。";
+    case "ready":
+    default:
+      return "";
+  }
+}
+
 interface ModelDetailPageProps {
   modelId: string;
 }
@@ -127,6 +141,7 @@ export default function ModelDetailPage({ modelId }: ModelDetailPageProps) {
   //   GET /api/models/:id 保持只读语义，浏览量由本打点单独累加。
   useEffect(() => {
     if (!idValid) return;
+    if (detail && detail.processingStatus !== "ready") return;
     if (viewedRef.current === numericId) return; // 同一模型仅打点一次
     viewedRef.current = numericId;
     recordModelView(numericId)
@@ -140,7 +155,7 @@ export default function ModelDetailPage({ modelId }: ModelDetailPageProps) {
       .catch(() => {
         // 打点失败静默：浏览量为辅助统计，不阻断详情浏览
       });
-  }, [idValid, numericId]);
+  }, [detail, idValid, numericId]);
 
   // 相关推荐：后端暂无 /related，从列表接口取若干条并排除当前模型
   useEffect(() => {
@@ -261,9 +276,14 @@ export default function ModelDetailPage({ modelId }: ModelDetailPageProps) {
   const isRobot = detail.type === "具身智能机器人训练场景";
   const cover = coverStyleByType(detail.type, detail.id);
   const sceneLabels = mergeSceneLabels(detail.tags, detail.scenes);
-  // canEmbed：有 viewerUrl 且 allowIframe 且 viewerType 非 none 时 iframe 内嵌
+  const processingBlocked = detail.processingStatus !== "ready";
+  const processingHint = processingStatusText(detail.processingStatus);
+  // canEmbed：可浏览且有 viewerUrl 且 allowIframe 且 viewerType 非 none 时 iframe 内嵌
   const canEmbed =
-    !!detail.viewerUrl && detail.allowIframe && detail.viewerType !== "none";
+    !processingBlocked &&
+    !!detail.viewerUrl &&
+    detail.allowIframe &&
+    detail.viewerType !== "none";
   const description =
     detail.description && detail.description.trim()
       ? detail.description
@@ -379,10 +399,14 @@ export default function ModelDetailPage({ modelId }: ModelDetailPageProps) {
                     <Grid3X3 className="w-10 h-10 text-white/25" />
                   </div>
                   <div className="text-center">
-                    <p className="text-white/40 text-[14px]">三维模型在线浏览器</p>
-                    <p className="text-white/25 text-[12px] mt-1">{detail.title}</p>
+                    <p className="text-white/40 text-[14px]">
+                      {processingBlocked ? "模型后台处理状态" : "三维模型在线浏览器"}
+                    </p>
+                    <p className="text-white/25 text-[12px] mt-1">
+                      {processingBlocked ? processingHint : detail.title}
+                    </p>
                   </div>
-                  {detail.viewerUrl && !canEmbed && (
+                  {detail.viewerUrl && !canEmbed && !processingBlocked && (
                     <a
                       href={detail.viewerUrl}
                       target="_blank"
@@ -443,6 +467,18 @@ export default function ModelDetailPage({ modelId }: ModelDetailPageProps) {
                 {formatRelativeTime(detail.createdAt)}发布
               </div>
             </div>
+
+            {processingBlocked && (
+              <div className="rounded-xl border border-cyan-500/20 bg-cyan-500/8 px-4 py-3 text-[13px] text-cyan-100">
+                <p className="font-medium">
+                  {detail.processingStatus === "failed" ? "解析失败" : "后台解析中"}
+                </p>
+                <p className="mt-1 text-cyan-100/80">{processingHint}</p>
+                {detail.processingError && (
+                  <p className="mt-2 text-rose-200/90">失败原因：{detail.processingError}</p>
+                )}
+              </div>
+            )}
 
             {sceneLabels.length > 0 && (
               <div>

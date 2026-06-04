@@ -12,6 +12,7 @@ import {
   Category,
   ContactLead,
   Model,
+  ModelProcessingStatus,
   ModelStatus,
   ModelVisibility,
   TrainingApplication,
@@ -56,6 +57,9 @@ export interface AdminModelVm {
   favoritesCount: number;
   visibility: ModelVisibility; // 可见性
   status: ModelStatus; // 审核状态：draft / pending / published / rejected
+  processingStatus: ModelProcessingStatus; // 后台处理状态
+  processingError: string | null; // 处理失败原因
+  processedAt: Date | null; // 处理完成时间
   deletedAt: Date | null; // 软删除时间
   deletedBy: number | null; // 执行删除的用户 id
   rejectReason: string | null; // 驳回原因
@@ -88,6 +92,9 @@ export function toAdminModelVm(m: ModelWithRelations): AdminModelVm {
     favoritesCount: m.favoritesCount,
     visibility: m.visibility,
     status: m.status,
+    processingStatus: m.processingStatus,
+    processingError: m.processingError ?? null,
+    processedAt: m.processedAt ?? null,
     deletedAt: m.deletedAt ?? null,
     deletedBy: m.deletedBy != null ? Number(m.deletedBy) : null,
     rejectReason: m.rejectReason ?? null,

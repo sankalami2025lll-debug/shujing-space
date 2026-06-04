@@ -12,10 +12,18 @@ describe('ModelsService soft-delete visibility', () => {
       count: jest.Mock;
       findMany: jest.Mock;
       findFirst: jest.Mock;
+      create: jest.Mock;
+      update: jest.Mock;
+    };
+    category: {
+      findUnique: jest.Mock;
     };
     $transaction: jest.Mock;
     like: { findMany: jest.Mock };
     favorite: { findMany: jest.Mock };
+  };
+  const config = {
+    get: jest.fn().mockReturnValue({ allowedHosts: ['viewer.example.com'] }),
   };
   let service: ModelsService;
 
@@ -25,6 +33,11 @@ describe('ModelsService soft-delete visibility', () => {
         count: jest.fn().mockResolvedValue(0),
         findMany: jest.fn().mockResolvedValue([]),
         findFirst: jest.fn(),
+        create: jest.fn(),
+        update: jest.fn(),
+      },
+      category: {
+        findUnique: jest.fn().mockResolvedValue(null),
       },
       $transaction: jest.fn(),
       like: { findMany: jest.fn().mockResolvedValue([]) },
@@ -35,7 +48,7 @@ describe('ModelsService soft-delete visibility', () => {
     );
     service = new ModelsService(
       prisma as unknown as PrismaService,
-      {} as ConfigService,
+      config as unknown as ConfigService,
     );
   });
 
@@ -46,11 +59,11 @@ describe('ModelsService soft-delete visibility', () => {
     );
 
     expect(prisma.model.count).toHaveBeenCalledWith({
-      where: expect.objectContaining({ deletedAt: null }),
+      where: expect.objectContaining({ deletedAt: null, processingStatus: 'ready' }),
     });
     expect(prisma.model.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: expect.objectContaining({ deletedAt: null }),
+        where: expect.objectContaining({ deletedAt: null, processingStatus: 'ready' }),
       }),
     );
     expect(result.total).toBe(0);
@@ -65,7 +78,12 @@ describe('ModelsService soft-delete visibility', () => {
         where: {
           id: modelId,
           OR: [
-            { status: 'published', visibility: 'public', deletedAt: null },
+            {
+              status: 'published',
+              visibility: 'public',
+              processingStatus: 'ready',
+              deletedAt: null,
+            },
             { userId: authorId, deletedAt: null },
           ],
         },
@@ -78,7 +96,13 @@ describe('ModelsService soft-delete visibility', () => {
 
     await expect(service.recordView(modelId)).rejects.toThrow(NotFoundException);
     expect(prisma.model.findFirst).toHaveBeenCalledWith({
-      where: { id: modelId, status: 'published', visibility: 'public', deletedAt: null },
+      where: {
+        id: modelId,
+        status: 'published',
+        visibility: 'public',
+        processingStatus: 'ready',
+        deletedAt: null,
+      },
       select: { id: true },
     });
   });
@@ -101,6 +125,9 @@ describe('ModelsService soft-delete visibility', () => {
       likesCount: 3,
       favoritesCount: 4,
       createdAt: new Date('2026-06-02T12:00:00.000Z'),
+      processingStatus: 'ready',
+      processingError: null,
+      processedAt: new Date('2026-06-02T12:05:00.000Z'),
       status: 'published',
       visibility: 'public',
       rejectReason: null,
@@ -112,5 +139,157 @@ describe('ModelsService soft-delete visibility', () => {
 
     expect(result.userId).toBe(Number(authorId));
     expect(result.author).toBe('作者A');
+  });
+
+  it('外链发布默认写入 ready，并记录 processedAt', async () => {
+    prisma.model.create.mockResolvedValue({
+      id: modelId,
+      userId: authorId,
+      title: '外链模型',
+      type: 'BIM',
+      tags: [],
+      scenes: [],
+      description: '',
+      coverUrl: '',
+      modelUrl: 'https://viewer.example.com/embed/1',
+      viewerType: 'iframe',
+      allowIframe: true,
+      fileFormat: null,
+      viewsCount: 0,
+      likesCount: 0,
+      favoritesCount: 0,
+      createdAt: new Date('2026-06-02T12:00:00.000Z'),
+      processingStatus: 'ready',
+      processingError: null,
+      processedAt: new Date('2026-06-02T12:01:00.000Z'),
+      status: 'published',
+      visibility: 'public',
+      rejectReason: null,
+      user: { nickname: '作者A' },
+      category: null,
+    });
+
+    const result = await service.create(authorId, {
+      title: '外链模型',
+      type: 'BIM',
+      visibility: 'public',
+      viewerUrl: 'https://viewer.example.com/embed/1',
+      viewerType: 'iframe',
+      allowIframe: true,
+    });
+
+    expect(prisma.model.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          modelUrl: 'https://viewer.example.com/embed/1',
+          processingStatus: 'ready',
+          processingError: null,
+          processedAt: expect.any(Date),
+        }),
+      }),
+    );
+    expect(result.processingStatus).toBe('ready');
+  });
+
+  it('原生文件上传发布默认写入 processing', async () => {
+    prisma.model.create.mockResolvedValue({
+      id: modelId,
+      userId: authorId,
+      title: '上传模型',
+      type: 'BIM',
+      tags: [],
+      scenes: [],
+      description: '',
+      coverUrl: 'https://example.com/cover.png',
+      modelUrl: 'https://example.com/model.glb',
+      viewerType: 'native',
+      allowIframe: true,
+      fileFormat: 'glb',
+      viewsCount: 0,
+      likesCount: 0,
+      favoritesCount: 0,
+      createdAt: new Date('2026-06-02T12:00:00.000Z'),
+      processingStatus: 'processing',
+      processingError: null,
+      processedAt: null,
+      status: 'published',
+      visibility: 'public',
+      rejectReason: null,
+      user: { nickname: '作者A' },
+      category: null,
+    });
+    (service as unknown as {
+      findOwnedFile: (
+        userId: bigint,
+        fileId: number,
+        kind: string,
+      ) => Promise<{ id: bigint; originalName: string; url: string }>;
+    }).findOwnedFile = async (_userId: bigint, fileId: number, kind: string) => {
+        if (kind === 'model') {
+          return {
+            id: BigInt(fileId),
+            originalName: 'building.glb',
+            url: 'https://example.com/model.glb',
+          };
+        }
+        return {
+          id: BigInt(fileId),
+          originalName: 'cover.png',
+          url: 'https://example.com/cover.png',
+        };
+      };
+
+    const result = await service.create(authorId, {
+      title: '上传模型',
+      type: 'BIM',
+      visibility: 'public',
+      modelFileId: 11,
+      coverFileId: 12,
+    });
+
+    expect(prisma.model.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          fileFormat: 'glb',
+          processingStatus: 'processing',
+          processedAt: null,
+        }),
+      }),
+    );
+    expect(result.processingStatus).toBe('processing');
+  });
+
+  it('预留方法可更新解析状态', async () => {
+    prisma.model.update.mockResolvedValue({ id: modelId });
+
+    await service.markProcessing(modelId);
+    await service.markReady(modelId, { viewerUrl: 'https://viewer.example.com/next' });
+    await service.markFailed(modelId, '解析失败');
+
+    expect(prisma.model.update).toHaveBeenNthCalledWith(1, {
+      where: { id: modelId },
+      data: {
+        processingStatus: 'processing',
+        processingError: null,
+        processedAt: null,
+      },
+    });
+    expect(prisma.model.update).toHaveBeenNthCalledWith(2, {
+      where: { id: modelId },
+      data: {
+        processingStatus: 'ready',
+        processingError: null,
+        processedAt: expect.any(Date),
+        modelUrl: 'https://viewer.example.com/next',
+      },
+    });
+    expect(prisma.model.update).toHaveBeenNthCalledWith(3, {
+      where: { id: modelId },
+      data: {
+        processingStatus: 'failed',
+        processingError: '解析失败',
+        processedAt: expect.any(Date),
+      },
+    });
   });
 });

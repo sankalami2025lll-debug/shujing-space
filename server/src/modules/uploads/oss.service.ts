@@ -14,7 +14,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'node:crypto';
-import OSS = require('ali-oss');
+import OSS from 'ali-oss';
 import { FileKind } from '@prisma/client';
 import { extractExtension } from './upload.constants';
 import { ObjectStorageService } from './object-storage.interface';

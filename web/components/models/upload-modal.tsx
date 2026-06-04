@@ -3,11 +3,11 @@
 /**
  * 组件名称：UploadModal
  * 组件用途：模型发布弹窗，供登录用户上传/外链发布三维模型
- * 主要功能：presign → PUT R2 → callback → POST /api/models；或仅 viewerUrl iframe 发布
+ * 主要功能：presign → PUT OSS → callback → POST /api/models；或仅 viewerUrl iframe 发布
  * 对应文档：页面功能注释文档/07_模型发布弹窗_UploadModal.md
  */
 import { useRef, useState } from "react";
-import { X, Check, Upload, ChevronDown, Loader2 } from "lucide-react";
+import { X, Upload, ChevronDown, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { createModel } from "@/lib/api/models";
 import { uploadFileToR2 } from "@/lib/api/uploads";
@@ -44,8 +44,6 @@ export function UploadModal({ onClose, onPublished }: UploadModalProps) {
   // modelFile / coverFile：待上传的模型文件与封面（可选）
   const [modelFile, setModelFile] = useState<File | null>(null);
   const [coverFile, setCoverFile] = useState<File | null>(null);
-  // submitted：是否进入成功态
-  const [submitted, setSubmitted] = useState(false);
   // submitting：提交中（含上传 + 发布）
   const [submitting, setSubmitting] = useState(false);
 
@@ -54,7 +52,7 @@ export function UploadModal({ onClose, onPublished }: UploadModalProps) {
       prev.includes(s) ? prev.filter((x) => x !== s) : [...prev, s],
     );
 
-  // handleSubmit：校验 → 可选 R2 直传 → POST /api/models；三态由 submitting/submitted + toast 承担。
+  // handleSubmit：校验 → 可选对象存储直传 → POST /api/models；成功后关闭弹窗并刷新列表。
   const handleSubmit = async () => {
     if (submitting) return;
     if (!title.trim()) {
@@ -84,7 +82,7 @@ export function UploadModal({ onClose, onPublished }: UploadModalProps) {
       let modelFileId: number | undefined;
       let coverFileId: number | undefined;
 
-      // 模型文件：走 presign → PUT R2 → callback；R2 未配置时 presign 503 并中止，不 create。
+      // 模型文件：走 presign → PUT OSS → callback；对象存储未配置时 presign 503 并中止，不 create。
       if (modelFile) {
         const uploaded = await uploadFileToR2("model", modelFile);
         modelFileId = uploaded.fileId;
@@ -118,44 +116,14 @@ export function UploadModal({ onClose, onPublished }: UploadModalProps) {
       });
 
       onPublished();
-      setSubmitted(true);
-      toast.success("发布成功");
+      toast.success("发布成功，模型正在后台解析中");
+      onClose();
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : "发布失败，请稍后重试。");
     } finally {
       setSubmitting(false);
     }
   };
-
-  if (submitted) {
-    return (
-      <div
-        className="fixed inset-0 z-50 flex items-center justify-center p-4"
-        onClick={onClose}
-      >
-        <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" />
-        <div
-          className="relative bg-[#111] border border-white/10 rounded-2xl p-10 text-center max-w-sm w-full"
-          onClick={(e) => e.stopPropagation()}
-        >
-          <div className="w-14 h-14 rounded-full bg-green-500/10 border border-green-500/20 flex items-center justify-center mx-auto mb-4">
-            <Check className="w-7 h-7 text-green-400" />
-          </div>
-          <h3 className="text-[18px] font-semibold mb-2">发布成功</h3>
-          <p className="text-[14px] text-gray-400">
-            模型已提交，审核通过后将在社区展示。
-          </p>
-          <button
-            type="button"
-            onClick={onClose}
-            className="mt-6 px-6 py-2.5 rounded-full bg-white text-black text-[14px] font-medium hover:bg-gray-100 transition-all"
-          >
-            返回社区
-          </button>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div

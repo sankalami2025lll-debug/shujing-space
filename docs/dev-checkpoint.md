@@ -176,6 +176,7 @@
 - **2E**：`server/` + `web/` 打点封装与详情 `useEffect`（**无新增 UI**）。
 - **2F**：`server/` 详情可见性 + `web/lib/types.ts` 类型兼容（**未改详情页 UI**）。
 - **补记（2026-06-04）**：OSS 原生上传链路已完成真实验收：`STORAGE_DRIVER=oss` 下 **presign → OSS PUT → callback → POST /api/models → publicUrl 访问 → /models、/models/me 数据命中** 全链路通过。生产环境对象存储最终口径收口为 **阿里云 OSS + `OSS_*` 环境变量**；历史 `R2_*` 仅保留旧驱动兼容，不再作为生产主配置。当前生产桶口径为 **阿里云 OSS Bucket 公有读**，上传仍走**后端预签名 PUT**，文件**不落服务器本地**。
+- **补记（2026-06-04）**：模型“后台解析状态”第一版已完成。`models` 表已新增 `processingStatus / processingError / processedAt`，当前状态枚举为 `uploaded / processing / ready / failed`；历史模型默认 `ready`，避免旧数据不可浏览。外链 `viewerUrl` 发布默认 `ready`，原生文件上传发布默认 `processing`；公开 `/models` 仅展示 `processingStatus=ready` 的公开模型，个人中心保留作者全部模型并显示处理状态。当前**尚未接入真实解析引擎**，也**未引入 Redis / 队列 / worker**；后续可在不改变 OSS 直传架构、且文件仍**不落服务器本地**的前提下，接入 BIM / IFC / GLB / 3D Viewer 解析服务或后台 worker 回写 `markProcessing / markReady / markFailed`。
 
 ##### 仍未处理（上线前 backlog）
 
