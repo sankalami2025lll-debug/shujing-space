@@ -1,6 +1,6 @@
 # 数境空间官网 阶段开发检查点
 
-> 更新日期：2026-06-03（部署前准备阶段 3 小收口已完成：根目录 `.gitignore` 已忽略 `deploy/.env.prod` 与 `deploy/.env.*.local`，新增 `deploy/docker-compose.prod.local.yml` 供本地冒烟端口映射；部署前准备阶段 1 已落地：新增 `web/Dockerfile`、`deploy/docker-compose.prod.yml`、`deploy/.env.prod.example`；模型库“全部模型”搜索状态同步 bug 已修复；Admin 前端阶段 5 总体验收与文档收口完成；Admin 前端第一版完成；Admin 前端阶段 4 用户 / 分类 / 站点配置已接入；Admin 前端阶段 3 联系线索与训练申请已接入；Admin 前端阶段 2 模型管理页已接入；Admin 前端阶段 1 后台壳子 + 管理员守卫已落地；上线前安全与一致性修复 2A–2G 收口 + OSS 最小兼容配置已落地 + 个人中心封面显示收口）
+> 更新日期：2026-06-04（模型社区精选模型封面已接入 `coverUrl`，无封面或加载失败时保留默认科技背景；部署前准备阶段 3 小收口已完成：根目录 `.gitignore` 已忽略 `deploy/.env.prod` 与 `deploy/.env.*.local`，新增 `deploy/docker-compose.prod.local.yml` 供本地冒烟端口映射；部署前准备阶段 1 已落地：新增 `web/Dockerfile`、`deploy/docker-compose.prod.yml`、`deploy/.env.prod.example`；模型库“全部模型”搜索状态同步 bug 已修复；Admin 前端阶段 5 总体验收与文档收口完成；Admin 前端第一版完成；Admin 前端阶 段 4 用户 / 分类 / 站点配置已接入；Admin 前端阶段 3 联系线索与训练申请已接入；Admin 前端阶段 2 模型管理页已接入；Admin 前端阶段 1 后台壳子 + 管理员守卫已落地；上线前安全与一致性修复 2A–2G 收口 + OSS 最小兼容配置已落地 + 个人中心封面显示收口）
 > 范围：仅记录已实际落地的改动与事实，供后续 Agent 续接。
 
 ## 🚩 最终检查点（重开新对话前，先读本节）
@@ -226,6 +226,11 @@
 - ✅ **已迁移页面/模块**：Home（`/`）、About（`/about`）、Contact（`/contact`）、Auth（`/auth`）、Community（`/community`）、Models 列表（`/models`）、ModelDetail（`/models/[id]`）、PersonalCenter（`/models/me`）、UploadModal、TrainingModal、NavBar + AppProviders。
 - ✅ **API 接入已完成**（Next `web/lib/api/*` 与 Vite 对齐）：auth、models/categories、点赞/收藏、users/me、contact、training-applications、site-config、uploads 发布链路（viewerUrl 已验；R2 直传代码路径保留）。
 - ✅ **上传模块配置层已兼容阿里云 OSS**：`server/src/modules/uploads/r2.service.ts` 现支持 `R2_REGION` / `R2_FORCE_PATH_STYLE`，`R2_ENDPOINT` 仍优先显式填写，`R2_ACCOUNT_ID` 仅作为 Cloudflare R2 fallback；**不改前端、不改上传业务流程**。
+- ✅ **模型社区精选模型封面已收口**：
+  - `web/components/pages/model-community.tsx` 的精选模型映射已保留 `coverUrl`，不再只保留 `color/pattern/views/likes`。
+  - 精选模型卡片顶部现优先渲染 `model.coverUrl` 原生 `<img>`，样式保持原卡片布局与圆角不变。
+  - 当 `coverUrl` 为空或图片加载失败时，继续显示原有渐变 + 纹理科技背景，不影响分类标签、标题、浏览量、点赞数布局。
+  - 本次仅改 `web/` 与文档，未改 `server/`、OSS 上传链路、数据库 schema，也未影响模型库页 / 个人中心 / Admin 页面。
 - ✅ **个人中心封面显示已收口（运行态确认）**：
   - 静态代码排查：后端 VM 已映射 `coverUrl`（`model.vm.ts` / `users.vm.ts`），前端 `personal-center-page.tsx` 的 `CoverPreview` 已读取并渲染 `coverUrl`，有值时显示图片、为空或加载失败回退渐变/图标占位。
   - 运行态数据库只读查询：`models` 表最新 20 条中除接口测试模型（id=12）外，`cover_url` 均为空串；`model_files (kind='cover')` 有 4 条封面记录，其中 3 条为 uid=22 用户的 OSS 真实 URL，1 条为 uid=12 的测试占位 URL。
@@ -457,6 +462,7 @@
   - 新增 `web/public/community-hero.png`（自 `src/imports/____.png`）；新增 `web/app/models/[id]/page.tsx`（详情路由壳，非 ModelLibrary 正式 UI）。
   - 改 `web/app/community/page.tsx`：挂载正式页。
   - 精选模型：`GET /api/models?page=1&pageSize=6&sort=recommended`；失败回退 `community-data` 前 6 条。
+  - **2026-06-04 补记**：精选模型卡片已补接 `coverUrl`；有封面时显示真实图片，无封面或图片加载失败时继续保留原渐变/纹理科技背景。
   - 跳转：`/models`、`/models/[id]`、`/contact`；服务能力区保留桌面 2+2+1 顺序（「数字孪生平台接入」+ 底部「具身智能空间训练数据处理」）。
   - 验证：`web/` 内 `pnpm build` Exit code 0；`/community` 约 9.08 kB；`/models/[id]` 动态路由 ƒ。
   - **下一步**：~~7B 详情~~ → ~~7C 点赞/收藏 + TrainingModal~~ → UploadModal / PersonalCenter。
