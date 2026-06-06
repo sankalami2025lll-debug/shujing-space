@@ -5,8 +5,8 @@
 import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { FileKind } from '@prisma/client';
 import { UploadsService } from './uploads.service';
+import { OssCompatibleService } from './oss-compatible.service';
 import { OssService } from './oss.service';
-import { R2Service } from './r2.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { ConfigService } from '@nestjs/config';
 
@@ -14,14 +14,14 @@ describe('UploadsService.callback (2G)', () => {
   const userId = BigInt(2);
   const dto = {
     kind: 'model' as FileKind,
-    r2Key: 'uploads/2/2026/06/11111111-1111-1111-1111-111111111111.glb',
+    objectKey: 'uploads/2/2026/06/11111111-1111-1111-1111-111111111111.glb',
     originalName: 'test.glb',
     mime: 'application/octet-stream',
     size: 1024,
   };
 
   let prisma: { modelFile: { create: jest.Mock } };
-  let r2: {
+  let ossCompatible: {
     buildKey: jest.Mock;
     presignPut: jest.Mock;
     headObject: jest.Mock;
@@ -36,13 +36,13 @@ describe('UploadsService.callback (2G)', () => {
     presignExpires: number;
   };
   let config: { get: jest.Mock };
-  let storageDriver: 'r2' | 'oss';
+  let storageDriver: 'oss-compatible' | 'oss';
   let service: UploadsService;
 
   beforeEach(() => {
-    storageDriver = 'r2';
+    storageDriver = 'oss-compatible';
     prisma = { modelFile: { create: jest.fn().mockResolvedValue({ id: BigInt(99) }) } };
-    r2 = {
+    ossCompatible = {
       buildKey: jest.fn((kind: string, uid: bigint, originalName: string) => {
         const ext = originalName.split('.').pop() ?? kind;
         return `uploads/${uid.toString()}/2026/06/test.${ext}`;
@@ -72,14 +72,14 @@ describe('UploadsService.callback (2G)', () => {
     };
     service = new UploadsService(
       prisma as unknown as PrismaService,
-      r2 as unknown as R2Service,
+      ossCompatible as unknown as OssCompatibleService,
       oss as unknown as OssService,
       config as unknown as ConfigService,
     );
   });
 
   it('HeadObject 失败时不写入 model_files', async () => {
-    r2.headObject.mockRejectedValue(
+    ossCompatible.headObject.mockRejectedValue(
       new NotFoundException('对象存储中未找到该文件，请先完成上传'),
     );
     await expect(service.callback(userId, dto)).rejects.toThrow(NotFoundException);
@@ -87,7 +87,7 @@ describe('UploadsService.callback (2G)', () => {
   });
 
   it('HeadObject 成功时写入 model_files（size/mime 以 Head 为准）', async () => {
-    r2.headObject.mockResolvedValue({
+    ossCompatible.headObject.mockResolvedValue({
       size: 2048,
       mime: 'application/octet-stream',
     });
@@ -96,18 +96,18 @@ describe('UploadsService.callback (2G)', () => {
     expect(prisma.modelFile.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         userId,
-        r2Key: dto.r2Key,
+        r2Key: dto.objectKey,
         size: BigInt(2048),
         mime: 'application/octet-stream',
       }),
     });
   });
 
-  it('越权 r2Key 返回 403 且不写库', async () => {
+  it('越权 objectKey 返回 403 且不写库', async () => {
     await expect(
-      service.callback(userId, { ...dto, r2Key: 'model/999/uuid.glb' }),
+      service.callback(userId, { ...dto, objectKey: 'model/999/uuid.glb' }),
     ).rejects.toThrow(ForbiddenException);
-    expect(r2.headObject).not.toHaveBeenCalled();
+    expect(ossCompatible.headObject).not.toHaveBeenCalled();
     expect(prisma.modelFile.create).not.toHaveBeenCalled();
   });
 
@@ -120,7 +120,7 @@ describe('UploadsService.callback (2G)', () => {
 
     const res = await service.callback(userId, {
       kind: 'cover',
-      r2Key: 'uploads/2/2026/06/cover-test.png',
+      objectKey: 'uploads/2/2026/06/cover-test.png',
       originalName: 'cover-test.png',
       mime: 'application/octet-stream',
       size: 1,
@@ -128,7 +128,7 @@ describe('UploadsService.callback (2G)', () => {
 
     expect(res.fileId).toBe(99);
     expect(oss.headObject).toHaveBeenCalledWith('uploads/2/2026/06/cover-test.png');
-    expect(r2.headObject).not.toHaveBeenCalled();
+    expect(ossCompatible.headObject).not.toHaveBeenCalled();
     expect(prisma.modelFile.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         userId,
@@ -157,6 +157,51 @@ describe('UploadsService.callback (2G)', () => {
       headers: { 'Content-Type': 'model/gltf-binary' },
       requiredHeaders: { 'Content-Type': 'model/gltf-binary' },
     });
+  });
+
+  it('model zip presign 允许超过普通模型 500MB 上限的真实成果包', async () => {
+    const res = await service.presign(userId, {
+      kind: 'model',
+      fileName: 'lcc-result.zip',
+      mime: 'application/zip',
+      size: 558509287,
+    });
+
+    expect(res.objectKey).toBe('uploads/2/2026/06/test.zip');
+    expect(ossCompatible.presignPut).toHaveBeenCalledWith(
+      'uploads/2/2026/06/test.zip',
+      'application/zip',
+    );
+  });
+
+  it('model 非 zip 仍受普通模型大小上限限制', async () => {
+    await expect(
+      service.presign(userId, {
+        kind: 'model',
+        fileName: 'too-large.glb',
+        mime: 'model/gltf-binary',
+        size: 558509287,
+      }),
+    ).rejects.toThrow(BadRequestException);
+  });
+
+  it('callback 兼容旧 r2Key 别名', async () => {
+    ossCompatible.headObject.mockResolvedValue({
+      size: 2048,
+      mime: 'application/octet-stream',
+    });
+
+    const res = await service.callback(userId, {
+      kind: 'model',
+      r2Key: 'uploads/2/2026/06/legacy.glb',
+      originalName: 'legacy.glb',
+      mime: 'application/octet-stream',
+      size: 1024,
+    });
+
+    expect(res.objectKey).toBe('uploads/2/2026/06/legacy.glb');
+    expect(res.r2Key).toBe('uploads/2/2026/06/legacy.glb');
+    expect(ossCompatible.headObject).toHaveBeenCalledWith('uploads/2/2026/06/legacy.glb');
   });
 });
 

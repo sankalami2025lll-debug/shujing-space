@@ -1,7 +1,7 @@
 /**
  * 模块：环境变量校验
  * 用途：服务启动时校验关键环境变量是否合法，避免缺失/格式错误导致运行期才暴露问题。
- * 说明：本步脚手架只校验基础字段；后续模块（JWT/R2/短信）字段在对应阶段加入校验。
+ * 说明：本步脚手架只校验基础字段；后续模块（JWT/对象存储/短信）字段在对应阶段加入校验。
  */
 import { z } from 'zod';
 
@@ -43,33 +43,23 @@ const envSchema = z.object({
   // 访问令牌有效期（如 2h / 30m），默认 2h
   JWT_ACCESS_EXPIRES: z.string().default('2h'),
   // —— 对象存储驱动（第 6 步 上传模块）——
-  STORAGE_DRIVER: z.enum(['r2', 'oss']).default('r2'),
-  // —— S3 兼容对象存储（历史 R2 配置，保持兼容）——
+  STORAGE_DRIVER: z.enum(['oss-compatible', 'oss']).default('oss'),
+  // —— 阿里云 OSS / OSS 兼容对象存储（第 6 步 上传模块）——
   // 说明：开发环境允许为空（不阻断启动），缺失时由具体存储服务在调用时抛清晰错误；
   //       生产应在部署环境注入真实值。一律不落服务器本地磁盘。
-  R2_ACCOUNT_ID: z.string().default(''),
-  R2_ACCESS_KEY_ID: z.string().default(''),
-  R2_SECRET_ACCESS_KEY: z.string().default(''),
-  R2_BUCKET: z.string().default('shujing-dev'),
-  // region 默认 auto（兼容 Cloudflare R2）；阿里云 OSS 等 S3 兼容存储应填真实地域，如 cn-shenzhen。
-  R2_REGION: z.string().default('auto'),
-  R2_ENDPOINT: z.string().default(''),
-  // Cloudflare R2 默认 path-style=true；阿里云 OSS 应设为 false（virtual-hosted style）。
-  R2_FORCE_PATH_STYLE: z
-    .enum(['true', 'false'])
-    .default('true'),
-  R2_PUBLIC_BASE: z.string().default(''),
-  // 预签名 PUT 有效期（秒），默认 600（10 分钟）
-  R2_PRESIGN_EXPIRES: z.coerce.number().int().positive().default(600),
-  // —— 阿里云 OSS（生产主用）——
   OSS_ACCESS_KEY_ID: z.string().default(''),
   OSS_ACCESS_KEY_SECRET: z.string().default(''),
-  OSS_BUCKET: z.string().default(''),
-  // OSS region 形如 oss-cn-shenzhen
+  OSS_BUCKET: z.string().default('shujing-dev'),
+  // OSS region 形如 oss-cn-shenzhen；S3 兼容端点可按服务商要求填写真实地域。
   OSS_REGION: z.string().default(''),
-  // 完整 endpoint，例如 https://oss-cn-shenzhen.aliyuncs.com
+  // 完整 endpoint，例如 https://oss-cn-shenzhen.aliyuncs.com 或 S3 兼容 endpoint。
   OSS_ENDPOINT: z.string().default(''),
+  // S3 兼容驱动下，阿里云 OSS 一般为 false（virtual-hosted style）。
+  OSS_FORCE_PATH_STYLE: z
+    .enum(['true', 'false'])
+    .default('false'),
   OSS_PUBLIC_BASE: z.string().default(''),
+  // 预签名 PUT 有效期（秒），默认 600（10 分钟）
   OSS_PRESIGN_EXPIRES: z.coerce.number().int().positive().default(900),
   // —— 上传大小上限（MB）——
   MAX_MODEL_SIZE_MB: z.coerce.number().int().positive().default(500),

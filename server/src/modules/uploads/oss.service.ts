@@ -17,7 +17,7 @@ import { randomUUID } from 'node:crypto';
 import OSS from 'ali-oss';
 import { FileKind } from '@prisma/client';
 import { extractExtension } from './upload.constants';
-import { ObjectStorageService } from './object-storage.interface';
+import { ObjectStorageService, PutObjectResult } from './object-storage.interface';
 
 interface OssConfig {
   accessKeyId: string;
@@ -144,6 +144,47 @@ export class OssService implements ObjectStorageService {
       }
       this.logger.warn(`OSS HeadObject failed for key=${key}`, err);
       throw new BadRequestException('无法确认对象存储中的文件，请稍后重试');
+    }
+  }
+
+  async downloadObject(key: string): Promise<Buffer> {
+    this.ensureConfigured();
+    try {
+      const res = await this.getClient().get(key);
+      const content = res.content;
+      if (!content) {
+        throw new NotFoundException('对象存储中未找到该文件，请先完成上传');
+      }
+      return Buffer.isBuffer(content) ? content : Buffer.from(content);
+    } catch (err: unknown) {
+      if (
+        err instanceof BadRequestException ||
+        err instanceof NotFoundException ||
+        err instanceof ServiceUnavailableException
+      ) {
+        throw err;
+      }
+      const meta = err as { code?: string; status?: number };
+      if (meta.code === 'NoSuchKey' || meta.status === 404) {
+        throw new NotFoundException('对象存储中未找到该文件，请先完成上传');
+      }
+      this.logger.warn(`OSS GetObject failed for key=${key}`, err);
+      throw new BadRequestException('无法下载对象存储中的文件，请稍后重试');
+    }
+  }
+
+  async putObject(key: string, body: Buffer, contentType: string): Promise<PutObjectResult> {
+    this.ensureConfigured();
+    try {
+      await this.getClient().put(key, body, {
+        headers: {
+          'Content-Type': contentType,
+        },
+      });
+      return { key, url: this.publicUrl(key) };
+    } catch (err: unknown) {
+      this.logger.warn(`OSS PutObject failed for key=${key}`, err);
+      throw new BadRequestException('无法上传处理后的文件到对象存储，请稍后重试');
     }
   }
 

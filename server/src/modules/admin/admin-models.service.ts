@@ -164,7 +164,7 @@ export class AdminModelsService {
   /**
    * 后台删除模型（DELETE /api/admin/models/:id）。
    * - 仅 admin 可调用（由 Controller 权限守卫保证）。
-   * - 软删除：只写 deletedAt / deletedBy / deleteReason，不删 model_files / likes / favorites / OSS/R2。
+   * - 软删除：只写 deletedAt / deletedBy / deleteReason，不删 model_files / likes / favorites / 对象存储文件。
    * - 幂等：若模型已删除，直接返回既有 deletedAt，不重复覆盖。
    */
   async softDelete(

@@ -10,15 +10,17 @@
  */
 import { Module } from '@nestjs/common';
 import { AuthModule } from '../auth/auth.module';
+import { UploadsModule } from '../uploads/uploads.module';
 import { InteractionsController } from './interactions.controller';
 import { InteractionsService } from './interactions.service';
+import { LccZipService } from './lcc-zip.service';
 import { ModelsController } from './models.controller';
 import { ModelsService } from './models.service';
 
 @Module({
-  imports: [AuthModule],
+  imports: [AuthModule, UploadsModule],
   controllers: [ModelsController, InteractionsController],
-  providers: [ModelsService, InteractionsService],
+  providers: [ModelsService, InteractionsService, LccZipService],
   exports: [ModelsService],
 })
 export class ModelsModule {}

@@ -1,6 +1,6 @@
 /**
  * 工具：viewerUrl 域名白名单校验（上线前安全修复 2D）
- * 用途：模型「外链发布」（POST /api/models 仅传 viewerUrl，不走 R2 文件）入库前，
+ * 用途：模型「外链发布」（POST /api/models 仅传 viewerUrl，不走对象存储文件）入库前，
  *       校验链接主机名是否在允许列表内，防止任意 https 外链被作为 iframe Viewer 内嵌。
  * 安全说明：
  *  - 仅基于 new URL() 解析出的 hostname 比对（小写、去末尾点），不做字符串 includes，
@@ -10,7 +10,7 @@
  *      1) 精确主机：sketchfab.com（仅该主机命中；x.sketchfab.com 不命中）
  *      2) 通配子域：*.xgrids.cloud（命中裸域 xgrids.cloud 与任意层级子域，如 a.b.xgrids.cloud；
  *         但不命中 evilxgrids.cloud —— 必须等于 base 或以「.base」结尾）
- *  - 仅作用于外链发布分支，不影响 modelFileId / coverFileId 的 R2 发布路径，也不重校验历史数据。
+ *  - 仅作用于外链发布分支，不影响 modelFileId / coverFileId 的对象存储发布路径，也不重校验历史数据。
  */
 
 // 默认兜底白名单（VIEWER_URL_ALLOWED_HOSTS 未配置时使用）：

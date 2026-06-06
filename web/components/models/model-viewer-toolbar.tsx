@@ -1,0 +1,117 @@
+"use client";
+
+import {
+  Camera,
+  ChevronRight,
+  Expand,
+  Info,
+  Layers3,
+  Map,
+  Maximize,
+  Move3D,
+  PenSquare,
+  RefreshCcw,
+  Ruler,
+  ScanSearch,
+  Wrench,
+} from "lucide-react";
+import { useMemo, useState } from "react";
+import type { ModelViewerCapabilities } from "@/components/models/viewers/types";
+
+interface ModelViewerToolbarProps {
+  capabilities: ModelViewerCapabilities;
+  onResetView?: () => void;
+  onToggleFullscreen?: () => void;
+  onTakeScreenshot?: () => void;
+}
+
+const TOOL_ITEMS = [
+  { key: "reset", label: "重置视角", icon: RefreshCcw, enabledBy: "resetView" },
+  { key: "fullscreen", label: "全屏", icon: Expand, enabledBy: "fullscreen" },
+  { key: "screenshot", label: "截图", icon: Camera, enabledBy: "screenshot" },
+  { key: "orbit", label: "旋转 / 环绕", icon: Move3D, enabledBy: "orbit" },
+  { key: "pan", label: "平移", icon: Maximize, enabledBy: "pan" },
+  { key: "zoom", label: "缩放", icon: ScanSearch, enabledBy: "zoom" },
+  { key: "walk", label: "漫游", icon: Map, enabledBy: "walk" },
+  { key: "measure", label: "测量", icon: Ruler, enabledBy: "measure" },
+  { key: "annotation", label: "标注", icon: PenSquare, enabledBy: "annotation" },
+  { key: "layer", label: "图层", icon: Layers3, enabledBy: "layer" },
+  { key: "info", label: "信息", icon: Info, enabledBy: "section" },
+] as const satisfies Array<{
+  key: string;
+  label: string;
+  icon: typeof RefreshCcw;
+  enabledBy: keyof ModelViewerCapabilities;
+}>;
+
+export function ModelViewerToolbar({
+  capabilities,
+  onResetView,
+  onToggleFullscreen,
+  onTakeScreenshot,
+}: ModelViewerToolbarProps) {
+  const [isExpanded, setIsExpanded] = useState(false);
+  const toolActions = useMemo(
+    () => ({
+      reset: onResetView,
+      fullscreen: onToggleFullscreen,
+      screenshot: onTakeScreenshot,
+    }),
+    [onResetView, onTakeScreenshot, onToggleFullscreen],
+  );
+
+  return (
+    <div className="flex items-end gap-2">
+      <button
+        type="button"
+        aria-label={isExpanded ? "收起工具栏" : "展开工具栏"}
+        aria-expanded={isExpanded}
+        title={isExpanded ? "收起工具栏" : "展开工具栏"}
+        onClick={() => setIsExpanded((value) => !value)}
+        className="inline-flex h-11 items-center gap-2 rounded-2xl border border-white/10 bg-[#0b1118]/85 px-4 text-[12px] text-white shadow-[0_12px_40px_rgba(0,0,0,0.35)] backdrop-blur-md transition-all hover:border-cyan-300/30 hover:bg-[#0f1722]/90"
+      >
+        <Wrench className="h-4 w-4 text-cyan-100" />
+        <span>工具</span>
+        <ChevronRight
+          className={`h-4 w-4 text-gray-300 transition-transform duration-200 ${
+            isExpanded ? "rotate-90" : ""
+          }`}
+        />
+      </button>
+
+      <div
+        className={`flex items-center gap-2 overflow-hidden transition-all duration-200 ${
+          isExpanded
+            ? "pointer-events-auto max-w-[720px] translate-x-0 opacity-100"
+            : "pointer-events-none max-w-0 -translate-x-3 opacity-0"
+        }`}
+      >
+        {TOOL_ITEMS.map((tool) => {
+          const enabled = capabilities[tool.enabledBy];
+          const Icon = tool.icon;
+          const onClick = toolActions[tool.key as keyof typeof toolActions];
+          const actionable = enabled && typeof onClick === "function";
+          const title = actionable ? tool.label : `${tool.label}（暂未接入）`;
+
+          return (
+            <button
+              key={tool.key}
+              type="button"
+              aria-label={title}
+              title={title}
+              disabled={!actionable}
+              onClick={onClick}
+              className={`inline-flex h-11 w-11 items-center justify-center rounded-2xl border backdrop-blur-md transition-all ${
+                actionable
+                  ? "border-white/10 bg-[#0b1118]/85 text-gray-100 shadow-[0_10px_30px_rgba(0,0,0,0.28)] hover:border-cyan-300/30 hover:bg-[#0f1722]/90"
+                  : "cursor-not-allowed border-white/[0.08] bg-[#0b1118]/60 text-gray-500 opacity-70"
+              }`}
+            >
+              <Icon className="h-4 w-4" />
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}

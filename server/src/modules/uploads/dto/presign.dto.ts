@@ -1,9 +1,9 @@
 /**
- * DTO：申请 R2 预签名上传地址入参
+ * DTO：申请对象存储预签名上传地址入参
  * 接口：POST /api/uploads/presign
  * 字段：
  *  - kind：文件用途（model 模型 / cover 封面 / video 视频）
- *  - fileName：原始文件名（取扩展名做白名单校验，服务端生成安全 r2Key，不直接用作 key）
+ *  - fileName：原始文件名（取扩展名做白名单校验，服务端生成安全 objectKey，不直接用作 key）
  *  - mime：MIME 类型（写入预签名 Content-Type，前端直传须保持一致）
  *  - size：文件大小（字节），按 kind 校验上限
  */

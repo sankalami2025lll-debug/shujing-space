@@ -3,7 +3,7 @@
  * 用途：暴露模型接口：
  *  - GET  /api/models      模型列表（游客；type/keyword/sort/page/pageSize，返回 list+total）
  *  - GET  /api/models/:id  模型详情（OptionalJwtAuthGuard；公开模型游客可看，作者可看自己的非公开模型）
- *  - POST /api/models      发布模型（需登录；关联已上传 R2 文件）
+ *  - POST /api/models      发布模型（需登录；关联已上传对象存储文件）
  * 说明：响应体由全局 TransformInterceptor 统一包成 { code, message, data }，此处只返回业务数据。
  *       本阶段不实现编辑/删除/审核/点赞/收藏接口。
  */
@@ -64,7 +64,7 @@ export class ModelsController {
   @HttpCode(HttpStatus.OK)
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
-  @ApiOperation({ summary: '发布模型（关联已上传 R2 文件，需登录）' })
+  @ApiOperation({ summary: '发布模型（关联已上传对象存储文件，需登录）' })
   async create(@CurrentUser() user: AuthUser, @Body() dto: CreateModelDto) {
     return this.modelsService.create(user.id, dto);
   }

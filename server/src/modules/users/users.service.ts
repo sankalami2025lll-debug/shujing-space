@@ -4,7 +4,7 @@
  * 红线：
  *  - 所有查询严格按当前 userId 过滤，禁止越权读他人数据。
  *  - BigInt 主键 / 计数统一在 VM 层或本层转 number。
- *  - 本阶段支持本人删除自己的模型（软删除）；不做物理删除、不删 OSS/R2 / model_files / likes / favorites。
+ *  - 本阶段支持本人删除自己的模型（软删除）；不做物理删除、不删对象存储文件 / model_files / likes / favorites。
  */
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { ModelStatus, Prisma } from '@prisma/client';
@@ -143,7 +143,7 @@ export class UsersService {
   /**
    * 删除自己的模型（DELETE /api/users/me/models/:id）。
    * - 仅允许删除当前用户自己的模型；不存在/越权统一 404。
-   * - 软删除：只写 deletedAt / deletedBy，不删 model_files / likes / favorites / OSS/R2。
+   * - 软删除：只写 deletedAt / deletedBy，不删 model_files / likes / favorites / 对象存储文件。
    * - 幂等：若模型已删除，直接返回既有 deletedAt，不重复覆盖。
    */
   async deleteOwnModel(userId: bigint, modelId: bigint): Promise<DeleteModelResult> {

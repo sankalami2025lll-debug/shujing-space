@@ -40,7 +40,7 @@ export interface ModelListItemVm {
   type: string;
   tags: unknown; // 标签数组（Json）
   author: string; // 发布者昵称
-  coverUrl: string; // 封面 URL（当前可能为空串，未接 R2）
+  coverUrl: string; // 封面 URL（当前可能为空串，未接对象存储封面）
   viewerType: ViewerType; // 查看器来源（iframe/sketchfab/native/none）
   viewsCount: number;
   likesCount: number;

@@ -12,12 +12,9 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   Grid3X3,
-  RotateCcw,
-  Maximize2,
   Share2,
   Bookmark,
   ArrowLeft,
-  ExternalLink,
   Eye,
   Heart,
   User,
@@ -26,6 +23,7 @@ import {
   X,
 } from "lucide-react";
 import { toast } from "sonner";
+import { ModelViewerShell } from "@/components/models/model-viewer-shell";
 import { TrainingModal } from "@/components/models/training-modal";
 import { useAuth } from "@/components/providers/auth-provider";
 import {
@@ -81,7 +79,6 @@ export default function ModelDetailPage({ modelId }: ModelDetailPageProps) {
   const [detailLoading, setDetailLoading] = useState(true);
   const [detailError, setDetailError] = useState<string | null>(null);
 
-  const [viewKey, setViewKey] = useState(0);
   const [shareToast, setShareToast] = useState(false);
   // saved / favs：收藏态与计数，用后端 isFavorited / favoritesCount 初始化并同步
   const [saved, setSaved] = useState(false);
@@ -274,32 +271,14 @@ export default function ModelDetailPage({ modelId }: ModelDetailPageProps) {
   }
 
   const isRobot = detail.type === "具身智能机器人训练场景";
-  const cover = coverStyleByType(detail.type, detail.id);
   const sceneLabels = mergeSceneLabels(detail.tags, detail.scenes);
   const processingBlocked = detail.processingStatus !== "ready";
   const processingHint = processingStatusText(detail.processingStatus);
-  // canEmbed：可浏览且有 viewerUrl 且 allowIframe 且 viewerType 非 none 时 iframe 内嵌
-  const canEmbed =
-    !processingBlocked &&
-    !!detail.viewerUrl &&
-    detail.allowIframe &&
-    detail.viewerType !== "none";
   const description =
     detail.description && detail.description.trim()
       ? detail.description
       : `这是一个高质量的${detail.type}模型，适用于${sceneLabels.join("、") || "多种"}等场景。模型数据精度高，可在线流畅浏览。`;
   const isAuthor = !!user && user.id === detail.userId;
-
-  const handleFullscreen = () => {
-    const el = document.getElementById("model-viewer-area");
-    if (!document.fullscreenElement) {
-      el?.requestFullscreen().catch(() => {});
-    } else {
-      document.exitFullscreen().catch(() => {});
-    }
-  };
-
-  const handleReset = () => setViewKey((k) => k + 1);
 
   const handleShare = async () => {
     const url = window.location.href;
@@ -341,22 +320,6 @@ export default function ModelDetailPage({ modelId }: ModelDetailPageProps) {
               )}
               <button
                 type="button"
-                onClick={handleFullscreen}
-                title="全屏"
-                className="w-8 h-8 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center hover:bg-white/10 hover:border-white/20 transition-all"
-              >
-                <Maximize2 className="w-4 h-4 text-gray-400" />
-              </button>
-              <button
-                type="button"
-                onClick={handleReset}
-                title="重置视角"
-                className="w-8 h-8 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center hover:bg-white/10 hover:border-white/20 transition-all"
-              >
-                <RotateCcw className="w-4 h-4 text-gray-400" />
-              </button>
-              <button
-                type="button"
                 onClick={handleShare}
                 title="分享"
                 className="w-8 h-8 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center hover:bg-white/10 hover:border-white/20 transition-all"
@@ -366,72 +329,8 @@ export default function ModelDetailPage({ modelId }: ModelDetailPageProps) {
             </div>
           </div>
 
-          <div
-            key={viewKey}
-            className={`flex-1 relative overflow-hidden bg-gradient-to-br ${cover.color}`}
-          >
-            {canEmbed ? (
-              <iframe
-                title={`${detail.title} 三维在线查看器`}
-                src={detail.viewerUrl as string}
-                loading="lazy"
-                allow="autoplay; fullscreen; xr-spatial-tracking"
-                allowFullScreen
-                sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
-                className="absolute inset-0 w-full h-full border-0 bg-[#0d0d0d]"
-              />
-            ) : (
-              <>
-                <div
-                  className="absolute inset-0 opacity-[0.12]"
-                  style={{
-                    backgroundImage:
-                      "linear-gradient(rgba(255,255,255,0.08) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.08) 1px, transparent 1px)",
-                    backgroundSize: "40px 40px",
-                  }}
-                />
-                <div className="absolute top-4 left-4 w-5 h-5 border-t border-l border-cyan-500/30" />
-                <div className="absolute top-4 right-4 w-5 h-5 border-t border-r border-cyan-500/30" />
-                <div className="absolute bottom-14 left-4 w-5 h-5 border-b border-l border-cyan-500/30" />
-                <div className="absolute bottom-14 right-4 w-5 h-5 border-b border-r border-cyan-500/30" />
-                <div className="absolute inset-0 flex flex-col items-center justify-center gap-4">
-                  <div className="w-24 h-24 rounded-3xl border border-white/10 bg-white/5 backdrop-blur-sm flex items-center justify-center">
-                    <Grid3X3 className="w-10 h-10 text-white/25" />
-                  </div>
-                  <div className="text-center">
-                    <p className="text-white/40 text-[14px]">
-                      {processingBlocked ? "模型后台处理状态" : "三维模型在线浏览器"}
-                    </p>
-                    <p className="text-white/25 text-[12px] mt-1">
-                      {processingBlocked ? processingHint : detail.title}
-                    </p>
-                  </div>
-                  {detail.viewerUrl && !canEmbed && !processingBlocked && (
-                    <a
-                      href={detail.viewerUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="mt-1 inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-white/8 border border-white/10 text-[13px] text-gray-200 hover:bg-white/12 hover:border-white/20 transition-all"
-                    >
-                      <ExternalLink className="w-3.5 h-3.5" />
-                      在新窗口打开
-                    </a>
-                  )}
-                </div>
-              </>
-            )}
-          </div>
-
-          <div className="h-12 flex-shrink-0 flex items-center justify-center gap-2 border-t border-white/[0.06] bg-[#0d0d0d]">
-            {["旋转", "缩放", "漫游", "测量"].map((ctrl) => (
-              <button
-                key={ctrl}
-                type="button"
-                className="px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 text-[12px] text-gray-400 hover:bg-white/10 hover:text-white transition-all"
-              >
-                {ctrl}
-              </button>
-            ))}
+          <div className="flex-1 relative overflow-hidden">
+            <ModelViewerShell model={detail} />
           </div>
         </div>
 

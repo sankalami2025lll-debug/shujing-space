@@ -37,25 +37,14 @@ export function configuration() {
     storage: {
       driver: env.STORAGE_DRIVER,
     },
-    // S3 兼容对象存储配置（历史命名仍为 r2；保持兼容）
-    r2: {
-      accountId: env.R2_ACCOUNT_ID,
-      accessKeyId: env.R2_ACCESS_KEY_ID,
-      secretAccessKey: env.R2_SECRET_ACCESS_KEY,
-      bucket: env.R2_BUCKET,
-      region: env.R2_REGION,
-      endpoint: env.R2_ENDPOINT,
-      forcePathStyle: String(env.R2_FORCE_PATH_STYLE) === 'true',
-      publicBase: env.R2_PUBLIC_BASE,
-      presignExpires: Number(env.R2_PRESIGN_EXPIRES),
-    },
-    // 阿里云 OSS 配置（生产环境默认驱动）
+    // 阿里云 OSS / OSS 兼容对象存储配置
     oss: {
       accessKeyId: env.OSS_ACCESS_KEY_ID,
       accessKeySecret: env.OSS_ACCESS_KEY_SECRET,
       bucket: env.OSS_BUCKET,
       region: env.OSS_REGION,
       endpoint: env.OSS_ENDPOINT,
+      forcePathStyle: String(env.OSS_FORCE_PATH_STYLE) === 'true',
       publicBase: env.OSS_PUBLIC_BASE,
       presignExpires: Number(env.OSS_PRESIGN_EXPIRES),
     },

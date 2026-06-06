@@ -54,8 +54,8 @@ export interface Category {
   sort: number;
 }
 
-// ViewerType：模型在线查看器来源（后端 Prisma enum ViewerType）。
-export type ViewerType = "iframe" | "sketchfab" | "native" | "none";
+// ViewerType：模型在线查看器来源（后端当前为 Prisma enum；前端额外兼容未来可能下发的 lcc）。
+export type ViewerType = "iframe" | "sketchfab" | "native" | "none" | "lcc";
 export type ModelVisibility = "public" | "private" | "review";
 export type ModelStatus = "draft" | "pending" | "published" | "rejected";
 export type ModelProcessingStatus = "uploaded" | "processing" | "ready" | "failed";

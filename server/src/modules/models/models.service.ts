@@ -29,6 +29,7 @@ import {
   toModelDetailVm,
   toModelListItemVm,
 } from './model.vm';
+import { LccZipService } from './lcc-zip.service';
 
 // 列表接口返回结构（分页）
 export interface ModelListResult {
@@ -43,6 +44,7 @@ export class ModelsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
+    private readonly lccZipService: LccZipService,
   ) {}
 
   // 游客可见性的统一过滤条件：已发布 + 公开 + 解析完成 + 未软删除
@@ -202,8 +204,11 @@ export class ModelsService {
     // 2. 模型文件：按 fileId 反查并校验归属与用途
     let modelUrl: string | null = null;
     let fileFormat: string | null = null;
+    let modelFile:
+      | Awaited<ReturnType<ModelsService['findOwnedFile']>>
+      | null = null;
     if (dto.modelFileId != null) {
-      const modelFile = await this.findOwnedFile(userId, dto.modelFileId, FileKind.model);
+      modelFile = await this.findOwnedFile(userId, dto.modelFileId, FileKind.model);
       modelUrl = modelFile.url;
       fileFormat = extractExtension(modelFile.originalName) || null;
     } else if (dto.viewerUrl) {
@@ -267,7 +272,40 @@ export class ModelsService {
       },
     });
 
-    return toModelDetailVm(created);
+    if (modelFile && this.shouldProcessAsLccZip(fileFormat)) {
+      try {
+        const processed = await this.lccZipService.processUploadedZip(
+          created.id,
+          this.getStoredObjectKey(modelFile),
+        );
+        await this.markReady(created.id, {
+          viewerUrl: processed.entryUrl,
+          modelUrl: processed.entryUrl,
+          fileFormat: processed.fileFormat,
+          viewerType: ViewerType.native,
+        });
+      } catch (error) {
+        const reason =
+          error instanceof Error && error.message.trim()
+            ? error.message.trim()
+            : 'LCC/LCC2 ZIP 成果包处理失败';
+        await this.markFailed(created.id, reason);
+      }
+
+      const updated = await this.prisma.model.findUnique({
+        where: { id: created.id },
+        include: {
+          user: { select: { nickname: true } },
+          category: { select: { id: true, name: true, slug: true } },
+        },
+      });
+      if (!updated) {
+        throw new NotFoundException('模型不存在');
+      }
+      return toModelDetailVm(updated, undefined, true);
+    }
+
+    return toModelDetailVm(created, undefined, true);
   }
 
   /**
@@ -307,7 +345,12 @@ export class ModelsService {
   // 预留：解析完成后把模型标记为 ready，并允许顺带回写可浏览地址。
   async markReady(
     modelId: bigint,
-    payload?: { viewerUrl?: string | null; modelUrl?: string | null },
+    payload?: {
+      viewerUrl?: string | null;
+      modelUrl?: string | null;
+      fileFormat?: string | null;
+      viewerType?: ViewerType;
+    },
   ): Promise<void> {
     const nextUrl = payload?.viewerUrl ?? payload?.modelUrl;
     await this.prisma.model.update({
@@ -317,6 +360,8 @@ export class ModelsService {
         processingError: null,
         processedAt: new Date(),
         ...(nextUrl ? { modelUrl: nextUrl } : {}),
+        ...(payload?.fileFormat ? { fileFormat: payload.fileFormat } : {}),
+        ...(payload?.viewerType ? { viewerType: payload.viewerType } : {}),
       },
     });
   }
@@ -335,7 +380,7 @@ export class ModelsService {
 
   // 校验外链 viewerUrl：必须 https 且 hostname 命中白名单（上线前安全修复 2D）。
   // 白名单来自配置 viewer.allowedHosts（env VIEWER_URL_ALLOWED_HOSTS，缺省回退默认安全列表）。
-  // 仅作用于外链发布分支，不影响 modelFileId/coverFileId 的 R2 发布路径与历史数据读取。
+  // 仅作用于外链发布分支，不影响 modelFileId/coverFileId 的对象存储发布路径与历史数据读取。
   private assertViewerUrlAllowed(viewerUrl: string): void {
     const viewer = this.config.get<{ allowedHosts: string[] }>('viewer');
     const allowedHosts = viewer?.allowedHosts ?? [];
@@ -355,6 +400,17 @@ export class ModelsService {
       );
     }
     return file;
+  }
+
+  private shouldProcessAsLccZip(fileFormat: string | null): boolean {
+    // 当前缺少单独的「LCC ZIP」显式字段，第一版先按 .zip 上传统一进入成果包处理流程。
+    // 这能打通主链路，但仍有误处理普通 ZIP 的风险，文档中需明确记录。
+    return fileFormat === 'zip';
+  }
+
+  // 当前数据库字段仍为 r2_key；待未来 schema 迁移后再统一删除该兼容读取。
+  private getStoredObjectKey(file: { objectKey?: string; r2Key?: string }): string {
+    return file.objectKey ?? file.r2Key ?? '';
   }
 
   // sort 参数 → Prisma orderBy 映射

@@ -23,6 +23,17 @@ declare module 'ali-oss' {
     status: number;
   }
 
+  interface OSSGetResult {
+    content: Buffer | string;
+    res: OSSResponse;
+  }
+
+  interface OSSPutResult {
+    name: string;
+    url?: string;
+    res: OSSResponse;
+  }
+
   class OSS {
     constructor(options: OSSOptions);
     signatureUrl(
@@ -32,6 +43,16 @@ declare module 'ali-oss' {
     ): string;
     head(name: string, options?: Record<string, unknown>): Promise<OSSHeadResult>;
     getObjectMeta(name: string, options?: Record<string, unknown>): Promise<OSSMetaResult>;
+    get(
+      name: string,
+      file?: unknown,
+      options?: Record<string, unknown>,
+    ): Promise<OSSGetResult>;
+    put(
+      name: string,
+      file: Buffer | NodeJS.ReadableStream | string,
+      options?: Record<string, unknown>,
+    ): Promise<OSSPutResult>;
   }
 
   export = OSS;

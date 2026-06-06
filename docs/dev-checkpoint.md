@@ -1,7 +1,18 @@
 # 数境空间官网 阶段开发检查点
 
-> 更新日期：2026-06-04（模型社区精选模型封面已接入 `coverUrl`，无封面或加载失败时保留默认科技背景；部署前准备阶段 3 小收口已完成：根目录 `.gitignore` 已忽略 `deploy/.env.prod` 与 `deploy/.env.*.local`，新增 `deploy/docker-compose.prod.local.yml` 供本地冒烟端口映射；部署前准备阶段 1 已落地：新增 `web/Dockerfile`、`deploy/docker-compose.prod.yml`、`deploy/.env.prod.example`；模型库“全部模型”搜索状态同步 bug 已修复；Admin 前端阶段 5 总体验收与文档收口完成；Admin 前端第一版完成；Admin 前端阶 段 4 用户 / 分类 / 站点配置已接入；Admin 前端阶段 3 联系线索与训练申请已接入；Admin 前端阶段 2 模型管理页已接入；Admin 前端阶段 1 后台壳子 + 管理员守卫已落地；上线前安全与一致性修复 2A–2G 收口 + OSS 最小兼容配置已落地 + 个人中心封面显示收口）
+> 更新日期：2026-06-06（文档总口径已同步：当前对象存储为阿里云 OSS；历史对象存储表述已统一收口为 OSS 口径）
 > 范围：仅记录已实际落地的改动与事实，供后续 Agent 续接。
+> 索引：LCC Web SDK 接入记录详见 `docs/lcc-web-sdk-integration.md`
+> 索引：模型浏览器统一架构详见 `docs/model-viewer-architecture.md`
+> 最新总口径：当前对象存储实际使用 **阿里云 OSS**；本文件对象存储相关描述统一按 `OSS_* / objectKey / oss-compatible.service.ts` 口径理解。
+> 提醒：仓库中的 `.env.example / .env.prod.example` 已统一为 `OSS_*`；真实 `server/.env` 已完成从 `R2_*` 到 `OSS_*` 的切换并通过运行冒烟验证，数据库字段 `r2_key` 暂不迁移，后续第三阶段再规划 `r2_key -> object_key`。
+> 补记：LCC/LCC2 ZIP 成果包处理第一版进展详见 `docs/lcc-web-sdk-integration.md`
+> 补记：模型详情页 Viewer 分发修复与统一品牌 Loading 进展详见 `docs/lcc-web-sdk-integration.md`
+> 补记：统一模型 Loading 动画完成收口，自检通过，详见 `docs/model-viewer-architecture.md`
+> 补记：模型浏览器 UI 收口与无用代码清理完成，详见 `docs/model-viewer-architecture.md`
+> 补记：LCC/LCC2 Web SDK 原生 Viewer 已完成封板：用户继续上传 ZIP 成果包，后端解压并保存 `.lcc/.lcc2` 入口文件 URL，前端 `LccViewer` 以入口文件 URL 作为 `dataPath`；不采用目录 `dataPath`，不依赖 `meta.lcc / meta.lcc2 / meta.splat`，LCC/LCC2 共用同一个 `LccViewer`；目录模式残留与误导命名已清理，同步 `unload`、格式切换 `dispose`、全局 load owner 等生命周期保护已保留；`web pnpm build` 已通过。详情见 `docs/lcc-web-sdk-integration.md`
+> 补记：LCC/LCC2 默认视角已最终收口为 `boundsCenterHomeView`，轨迹默认视角与 `spawnPoint.rotation` 试算残留已清理，`spawnPoint` 仅保留诊断；`resetView` 回到 `defaultCameraJson / boundsCenterHomeView / bounds fallback`；本轮无用代码清理与文档记录已完成。详情见 `docs/lcc-web-sdk-integration.md`
+> 补记：OSS 命名收口后的上传链路已完成真实环境冒烟：`server/.env` 已切到 `OSS_*`，直连 `127.0.0.1:4000` 验证 `POST /api/uploads/presign` 成功返回 `uploadUrl + objectKey`，`r2Key` 仅保留为 deprecated 兼容别名；随后完成 1x1 PNG 直传阿里云 OSS、`/api/uploads/callback` 回调、测试模型发布、数据库落库核验（`fileUrl / viewerUrl / objectKey` 正常），且 `cd server && pnpm build` 通过。
 
 ## 🚩 最终检查点（重开新对话前，先读本节）
 
@@ -48,7 +59,7 @@
   - 审核通过：确认后调用 `action=approve`
   - 驳回：弹层填写 `rejectReason` 后调用 `action=reject`
   - 错误时统一 `toast.error(后端 message)`，成功后 `toast.success` 并刷新列表
-- ✅ **后台删除入口已接入**：调用 `DELETE /api/admin/models/:id`，删除成功后刷新列表；当前仍为**软删除**，OSS / R2 文件**不会立即删除**。
+- ✅ **后台删除入口已接入**：调用 `DELETE /api/admin/models/:id`，删除成功后刷新列表；当前仍为**软删除**，OSS 文件**不会立即删除**。
 - ✅ **详情弹层已接入**：支持查看单个模型的后台详情字段（含审核状态、可见性、驳回原因、删除原因等）。
 - ⚠️ **当前范围说明**：模型管理页已完成，但其它后台页面（用户 / 分类 / 线索 / 训练申请 / 站点配置）仍是占位壳子。
 
@@ -133,7 +144,7 @@
   - 批量操作
   - Excel 导出
   - 回收站恢复
-  - OSS / R2 文件清理
+  - OSS 文件清理
   - 更细粒度权限
   - 分类迁移
   - Admin 操作日志
@@ -167,7 +178,7 @@
 | **2A** | JWT 生产密钥强校验 | `NODE_ENV=production` 时 `JWT_ACCESS_SECRET` 长度 ≥32、禁 dev/占位词；弱密钥**阻止启动** | 〇之启·十八 |
 | **2B** | `send-code` IP 限流 | 仅 `POST /api/auth/send-code`：`ThrottlerGuard` 60s/5 次/IP；保留 target+scene 60s 业务限频；其它 auth 接口不受影响 | 〇之启·十九 |
 | **2C** | 管理员初始化机制 | `pnpm admin:init` + `ADMIN_*` 环境变量；bcrypt 入库；**非** seed 占位 admin 生产入口 | 〇之启·二十 |
-| **2D** | `viewerUrl` 域名白名单 | 外链发布入库前 https + host 白名单（`VIEWER_URL_ALLOWED_HOSTS`）；R2 文件发布路径不校验 | 〇之启·二十一 |
+| **2D** | `viewerUrl` 域名白名单 | 外链发布入库前 https + host 白名单（`VIEWER_URL_ALLOWED_HOSTS`）；OSS 文件发布路径不校验 | 〇之启·二十一 |
 | **2E** | 模型浏览量打点 | `POST /api/models/:id/view` 仅 published+public +1；Next 详情页打开打点一次；GET 详情保持只读 | 〇之启·二十二 |
 | **2F** | 作者查看自己的非公开模型详情 | `GET /api/models/:id`：作者可看本人全状态模型；游客/非作者仍仅 published+public；无权限统一 **404**；作者响应含 `status/visibility/rejectReason`；**列表口径不变** | 〇之启·二十三 |
 | **2G** | 对象存储直传安全增强 | `callback` 必须 **HeadObject 成功** 才写 `model_files`；size/mime 以对象存储 HeadObject 为准；超上限/非法 Content-Type 拒绝；**无本地兜底**；presign 仍校验扩展名/大小 | 〇之启·二十四 |
@@ -175,7 +186,7 @@
 - **2A–2D、2G**：仅 `server/` 配置与校验（+ 文档），无前端 UI 变更。
 - **2E**：`server/` + `web/` 打点封装与详情 `useEffect`（**无新增 UI**）。
 - **2F**：`server/` 详情可见性 + `web/lib/types.ts` 类型兼容（**未改详情页 UI**）。
-- **补记（2026-06-04）**：OSS 原生上传链路已完成真实验收：`STORAGE_DRIVER=oss` 下 **presign → OSS PUT → callback → POST /api/models → publicUrl 访问 → /models、/models/me 数据命中** 全链路通过。生产环境对象存储最终口径收口为 **阿里云 OSS + `OSS_*` 环境变量**；历史 `R2_*` 仅保留旧驱动兼容，不再作为生产主配置。当前生产桶口径为 **阿里云 OSS Bucket 公有读**，上传仍走**后端预签名 PUT**，文件**不落服务器本地**。
+- **补记（2026-06-04）**：OSS 原生上传链路已完成真实验收：`STORAGE_DRIVER=oss` 下 **presign → OSS PUT → callback → POST /api/models → publicUrl 访问 → /models、/models/me 数据命中** 全链路通过。生产环境对象存储最终口径收口为 **阿里云 OSS + `OSS_*` 环境变量**；文档已不再把旧命名写作当前主配置。当前生产桶口径为 **阿里云 OSS Bucket 公有读**，上传仍走**后端预签名 PUT**，文件**不落服务器本地**。
 - **补记（2026-06-04）**：模型“后台解析状态”第一版已完成。`models` 表已新增 `processingStatus / processingError / processedAt`，当前状态枚举为 `uploaded / processing / ready / failed`；历史模型默认 `ready`，避免旧数据不可浏览。外链 `viewerUrl` 发布默认 `ready`，原生文件上传发布默认 `processing`；公开 `/models` 仅展示 `processingStatus=ready` 的公开模型，个人中心保留作者全部模型并显示处理状态。
 - **补记（2026-06-04）**：Admin 模型管理页已新增“手动标记解析完成 / 标记解析失败”临时控制能力：后台新增 `PATCH /api/admin/models/:id/processing`，仅 admin 可调用；`mark_ready` 会把模型标记为 `ready` 并写入 `processedAt`，`mark_failed` 要求填写失败原因并写入 `processingError`、清空 `processedAt`。该能力仅用于**真实解析引擎接入前**的人工作业兜底，不改变普通用户接口、不改 OSS 上传链路、也不引入本地文件落盘。
 - 当前**尚未接入真实解析引擎**，也**未引入 Redis / 队列 / worker**；后续可在不改变 OSS 直传架构、且文件仍**不落服务器本地**的前提下，接入 BIM / IFC / GLB / 3D Viewer 解析服务或后台 worker / 队列系统自动回写 `markProcessing / markReady / markFailed`。
@@ -192,11 +203,11 @@
 
 ##### 本阶段下一步建议（主线）
 
-1. **如需双存储兼容，补做 Cloudflare R2 真实凭证与桶 CORS 复验**（阿里 OSS 已通过）。
+1. **如需双存储兼容，补做 OSS 兼容对象存储真实凭证与桶 CORS 复验**（阿里 OSS 已通过）。
 2. **部署前准备**：补全生产域名、Cloudflare、1Panel、Docker/Compose 编排与 HTTPS 策略。
 3. **生产环境变量检查**：数据库、JWT、短信、对象存储、管理员初始化、`VIEWER_URL_ALLOWED_HOSTS`、CORS 白名单逐项核对。
 4. **数据库备份策略**：确定 PostgreSQL 自动备份、恢复演练与 1Panel 备份保留周期。
-5. **OSS / R2 生产收口**：确认生产域名、桶 CORS、回源策略、文件访问域名与回调链路。
+5. **OSS 生产收口**：确认生产域名、桶 CORS、回源策略、文件访问域名与回调链路。
 6. **二期**：孤儿文件清理、多段上传、生产 `trust proxy`（配合 2B IP 限流）、后台批量操作 / 审计日志 / Excel 导出等。
 
 > 其它上线项（生产部署、真实短信、生产 `trust proxy` 配合 2B IP 限流等）仍见「一·续」与 `backend-architecture-plan.md`，不在 2A–2G 表内展开。
@@ -214,18 +225,18 @@
 - ✅ **部署前准备阶段 1 已完成（生产 Docker 产物与 Compose 规划落地）**：
   - 已新增 `web/Dockerfile`：采用 Next.js 生产构建流程，镜像内执行 `pnpm build`，运行期使用 `pnpm start --hostname 0.0.0.0 --port 3000`。
   - 已新增 `deploy/docker-compose.prod.yml`：当前推荐生产编排为 `postgres` + `server` + `web` 三服务；`postgres` 使用 `postgres:16` + volume 持久化；`server/web` 仅 `expose` 内网端口，不直接暴露公网。
-  - 已新增 `deploy/.env.prod.example`：收口 PostgreSQL、NestJS、Next.js、OSS/R2、Admin 初始化所需生产变量占位，**未写入任何真实密钥**。
+  - 已新增 `deploy/.env.prod.example`：收口 PostgreSQL、NestJS、Next.js、OSS、Admin 初始化所需生产变量占位，**未写入任何真实密钥**。
   - 生产访问模式已固定为：`https://你的正式域名/` → `web:3000`，`https://你的正式域名/api/*` → `server:4000/api/*`，由 **1Panel / OpenResty** 配置域名、HTTPS 与反向代理；`NEXT_PUBLIC_API_BASE_URL=/api`。
   - 上线流程建议已固定：先启动 `postgres`，再执行 `server` 容器内 `pnpm prisma:deploy`，随后执行 `pnpm admin:init`，最后启动 `server` 与 `web`，完成反代与 SSL 配置。
-  - 生产环境明确不建议执行 `seed`；管理员请统一使用 `admin:init` 创建；OSS/R2 桶 CORS 需加入正式站点域名；`JWT_ACCESS_SECRET` 必须使用强随机值。
+  - 生产环境明确不建议执行 `seed`；管理员请统一使用 `admin:init` 创建；OSS Bucket CORS 需加入正式站点域名；`JWT_ACCESS_SECRET` 必须使用强随机值。
 - ✅ **部署前准备阶段 3 已完成（部署产物小收口）**：
   - 根目录 `.gitignore` 已新增忽略：`deploy/.env.prod`、`deploy/.env.*.local`，避免生产 / 本地部署环境变量误提交。
   - 已新增 `deploy/docker-compose.prod.local.yml`：仅供**本地 Docker 生产模拟冒烟**使用，为 `server` 映射 `4000:4000`、为 `web` 映射 `3000:3000`。
   - 本地测试推荐命令已固定为：`docker compose -f docker-compose.prod.yml -f docker-compose.prod.local.yml --env-file .env.prod up -d`。
   - 生产策略保持不变：正式服务器仍只使用 `deploy/docker-compose.prod.yml`，容器端口不直接暴露公网，继续由 **1Panel / OpenResty** 做 `/` → `web:3000`、`/api` → `server:4000/api` 反向代理。
 - ✅ **已迁移页面/模块**：Home（`/`）、About（`/about`）、Contact（`/contact`）、Auth（`/auth`）、Community（`/community`）、Models 列表（`/models`）、ModelDetail（`/models/[id]`）、PersonalCenter（`/models/me`）、UploadModal、TrainingModal、NavBar + AppProviders。
-- ✅ **API 接入已完成**（Next `web/lib/api/*` 与 Vite 对齐）：auth、models/categories、点赞/收藏、users/me、contact、training-applications、site-config、uploads 发布链路（viewerUrl 已验；R2 直传代码路径保留）。
-- ✅ **上传模块配置层已兼容阿里云 OSS**：`server/src/modules/uploads/r2.service.ts` 现支持 `R2_REGION` / `R2_FORCE_PATH_STYLE`，`R2_ENDPOINT` 仍优先显式填写，`R2_ACCOUNT_ID` 仅作为 Cloudflare R2 fallback；**不改前端、不改上传业务流程**。
+- ✅ **API 接入已完成**（Next `web/lib/api/*` 与 Vite 对齐）：auth、models/categories、点赞/收藏、users/me、contact、training-applications、site-config、uploads 发布链路（viewerUrl 已验；OSS 直传代码路径保留）。
+- ✅ **上传模块配置层已兼容阿里云 OSS**：`server/src/modules/uploads/oss-compatible.service.ts` 现统一读取 `OSS_*`，支持 `OSS_REGION` / `OSS_FORCE_PATH_STYLE` / `OSS_ENDPOINT`；**不改前端、不改上传业务流程**。
 - ✅ **模型社区精选模型封面已收口**：
   - `web/components/pages/model-community.tsx` 的精选模型映射已保留 `coverUrl`，不再只保留 `color/pattern/views/likes`。
   - 精选模型卡片顶部现优先渲染 `model.coverUrl` 原生 `<img>`，样式保持原卡片布局与圆角不变。
@@ -249,12 +260,12 @@
   - 点击「删除模型」按钮时仅打开确认弹窗；点击「取消」只关闭弹窗，不调用 `DELETE /api/users/me/models/:id`、不 toast 成功、不跳转。
   - 点击「确认删除」后才调用删除接口；接口成功后才 toast「模型已删除」并跳转 `/models/me`；接口失败仅显示错误 toast。
   - 删除请求进行中，确认按钮会进入 loading，取消按钮、遮罩关闭、右上角关闭和 `Esc` 关闭全部禁用，避免状态混乱。
-  - 当前删除仍为**软删除**；前台不可恢复；相关 OSS / R2 文件**不会立即删除**。
+  - 当前删除仍为**软删除**；前台不可恢复；相关 OSS 文件**不会立即删除**。
 - ✅ **模型删除管理阶段 1（后端软删除基础能力）已完成**：
   - `models` 表已新增软删除字段：`deleted_at`、`deleted_by`、`delete_reason`；迁移：`20260602135405_add_model_soft_delete`。
   - 已新增 `DELETE /api/users/me/models/:id`：仅登录用户可删除自己的模型；只做软删除；重复删除幂等。
   - 已新增 `DELETE /api/admin/models/:id`：仅 admin 可删除任意模型；支持可选 `deleteReason`；只做软删除；重复删除幂等。
-  - 本阶段**明确不做**：删除 `model_files`、删除 `likes/favorites`、删除真实 OSS/R2 文件、前端删除按钮。
+  - 本阶段**明确不做**：删除 `model_files`、删除 `likes/favorites`、删除真实 OSS 文件、前端删除按钮。
 - ✅ **模型删除管理阶段 2（`deletedAt` 查询过滤与接口口径收口）已完成**：
   - 公开模型列表 `/api/models` 已统一过滤 `deletedAt = null`。
   - 公开模型详情 `/api/models/:id` 已统一口径：游客、非作者、作者本人都不能查看已软删除模型；已删除统一 `404`，**本阶段不做回收站**。
@@ -263,25 +274,25 @@
   - 个人中心 `/api/users/me/models`、`/api/users/me/published`、`/api/users/me/stats` 默认不包含 `deletedAt != null` 的模型。
   - 我的收藏 `/api/users/me/favorites` 保留收藏记录；若模型已软删除，则返回 `isAvailable = false`，前端应视为失效收藏，不再进入公开详情。
   - 后台 `/api/admin/models` 默认仅展示未删除模型；`/api/admin/models/:id` 仍允许查看已删除模型，并返回 `deletedAt / deletedBy / deleteReason` 便于审计。
-  - 本阶段继续**明确不做**：回收站、物理硬删除、删除真实 OSS/R2 文件、删除 `model_files`、删除 `likes/favorites`。
+  - 本阶段继续**明确不做**：回收站、物理硬删除、删除真实 OSS 文件、删除 `model_files`、删除 `likes/favorites`。
 - ✅ **模型删除管理阶段 3（Next 删除入口迁移到作者详情页）已完成**：
   - `web /models/me` 的「我的模型」卡片已移除删除入口，保留卡片点击进入详情页的路径，不影响「我的收藏 / 我的发布 / 我的申请」。
   - `web /models/[id]` 已新增作者专属删除入口；仅当前登录用户满足 `auth.user.id === detail.userId` 时显示，游客与非作者不显示。
   - 删除前会弹确认文案：删除后模型将不再展示，相关文件暂不会立即从对象存储删除。
   - 确认后调用 `DELETE /api/users/me/models/:id`；删除成功后 toast 提示“模型已删除”，并跳转 `/models/me`。
-  - 当前前端接入仍为**软删除**；真实 OSS/R2 文件不会立即删除。
+  - 当前前端接入仍为**软删除**；真实 OSS 文件不会立即删除。
   - Admin 前端删除按钮仍**未做**；admin 回收站 / restore 仍属二期待办。
 - ✅ **模型删除管理阶段 4（总体验收与文档收口）已完成**：
   - 已完成第一版删除管理验收：`server pnpm lint/build/test`、`web pnpm lint/build` 全部通过。
   - HTTP 冒烟已验证：用户删除自己的模型成功；用户删除他人模型失败；admin 删除任意模型成功；普通用户访问 admin 删除接口返回 `403`；未登录删除接口返回 `401`；删除后 `/api/models`、`/api/models/:id`、`/api/users/me/models`、`/api/users/me/stats` 口径符合预期；`/api/health` 返回 `db: up`。
-  - 当前删除管理第一版结论：**仅软删除模型记录**，不做 restore / 回收站，不做物理硬删除，不删除 `model_files`，也**不会立即删除 OSS/R2 文件**。
+  - 当前删除管理第一版结论：**仅软删除模型记录**，不做 restore / 回收站，不做物理硬删除，不删除 `model_files`，也**不会立即删除 OSS 文件**。
   - 当前仍未实现：**Admin 后台前端删除按钮**、站内统一确认弹窗、删除审计日志、恢复模型、硬删除、对象存储文件清理。
 
 #### 当前未完成
 
 | 项 | 状态 |
 |----|------|
-| 真实对象存储文件直传端到端 | ⚠️ 阿里 OSS 已通过；Cloudflare R2 尚未复验 |
+| 真实对象存储文件直传端到端 | ⚠️ 阿里 OSS 已通过；阿里云 OSS 尚未复验 |
 | 后台 Admin 前端 | ✅ Admin 第一版完成：`/admin`、`/admin/models`、`/admin/leads`、`/admin/training`、`/admin/users`、`/admin/categories`、`/admin/site-config` 已完成验收收口 |
 | 线上生产部署 | ❌ Docker/Cloudflare/域名/生产短信 |
 | Admin 回收站 / restore | ❌ 二期待办 |
@@ -291,11 +302,11 @@
 
 #### 建议下一步（当前主线）
 
-1. **如需双存储兼容，补做 Cloudflare R2 真实凭证与桶 CORS 复验**（阿里 OSS 已通过）。
+1. **如需双存储兼容，补做 OSS 兼容对象存储真实凭证与桶 CORS 复验**（阿里 OSS 已通过）。
 2. **部署前准备**：1Panel + Docker 部署脚本、生产环境变量、域名 / HTTPS / Cloudflare 策略。
 3. **数据安全**：数据库备份与恢复演练、对象存储生产域名与 CORS 收口。
 4. **后台二期规划**：批量操作、审计日志、Excel 导出、回收站 / restore。
-3. **模型删除管理二期**：设计恢复模型 / 回收站、物理硬删除、OSS/R2 文件清理、删除审计日志。
+3. **模型删除管理二期**：设计恢复模型 / 回收站、物理硬删除、OSS 文件清理、删除审计日志。
 4. **交互收口**：将当前原生 `confirm` 升级为站内统一确认弹窗。
 5. **专项问题拆单**：单独修复 `/models/me` hydration mismatch。
 6. **模型展示能力**：推进 BIM/IFC 原生 Viewer 接入。
@@ -318,15 +329,15 @@
 - **`/api/auth/*` 认证模块第一版已完成**：JWT（access-only）+ bcryptjs + 验证码 mock；BigInt 序列化已处理；唯一约束 P2002 已捕获（详见「〇之上」节）。
 - **认证接口冒烟均已通过**：`send-code` / `register` / `login` / `me` / `reset-password` / `logout` 全流程及负向用例均通过。
 - **`/api/categories` + `/api/models` 模型/分类读接口已完成**：`GET /api/categories`、`GET /api/models`（type/keyword/sort/page/pageSize）、`GET /api/models/:id` 三接口落地并全量冒烟通过（详见「〇之巅」节）。
-- **R2 上传 + 模型发布接口第一版已完成**（开发顺序第 6 步，详见「〇之顶」节）：
-  - `POST /api/uploads/presign` 已完成：校验扩展名白名单 + 大小上限，生成安全 key 并返回 R2 预签名直传地址。
+- **OSS 上传 + 模型发布接口第一版已完成**（开发顺序第 6 步，详见「〇之顶」节）：
+  - `POST /api/uploads/presign` 已完成：校验扩展名白名单 + 大小上限，生成安全 key 并返回 OSS 预签名直传地址。
   - `POST /api/uploads/callback` 已完成：校验 key 归属，登记 `model_files` 并返回可访问 URL。
   - `POST /api/models` 已完成：按 `type` 反查分类、按 `fileId` 反查上传文件，写入模型并返回详情。
   - `JwtAuthGuard` 已保护上述三接口（均需 Bearer Token）。
-  - `model_files` 已保存 `r2Key / url / mime / size / originalName`。
+  - `model_files` 已保存 `objectKey / url / mime / size / originalName`。
   - `models` 已保存 `modelUrl / coverUrl / viewerType / allowIframe`（DB 只存元信息，不存二进制）。
-  - 冒烟通过：未登录访问 → **401**；非法扩展名 → **400**；空 R2 配置 → **503 且无本地兜底**；越权 callback → **403**。
-  - 冒烟通过：dummy R2 下 presign / callback / create model 全链路（`viewerType=native`、`fileFormat=glb`、URL 为 R2 域）。
+  - 冒烟通过：未登录访问 → **401**；非法扩展名 → **400**；空 OSS 配置 → **503 且无本地兜底**；越权 callback → **403**。
+  - 冒烟通过：dummy OSS 下 presign / callback / create model 全链路（`viewerType=native`、`fileFormat=glb`、URL 为 OSS 域）。
   - 冒烟通过：`GET /api/models` 可查到新发布模型；`GET /api/models/:id` 字段完整（含 `viewerUrl/viewerType/allowIframe`）。
   - `GET /api/health` 仍 `db:up`；`pnpm build` Exit code 0、ReadLints 无错误。
 - **第 7 步·第一阶段（点赞/收藏 + 读接口附带互动状态）已完成**（详见「〇之极」节）：
@@ -394,11 +405,11 @@
   - **10D**：点赞/收藏写接口 + 个人中心五接口 `GET /api/users/me/*`。
   - **10E**：`ContactPage` 接 `GET /api/contact/options`、`POST /api/contact/leads`；`TrainingModal` 接 `POST /api/training-applications`。
   - **10F**：`ModelCommunity` 精选接 `GET /api/models`；全站 Footer/联系侧栏接 `GET /api/site-config`（`SiteConfigContext`）。
-  - **10G**：`UploadModal` 接 `POST /api/uploads/presign|callback` + `POST /api/models`；**viewerUrl 外链发布已在本环境验证**；R2 文件直传待凭证（见下「上传发布状态」）。
+  - **10G**：`UploadModal` 接 `POST /api/uploads/presign|callback` + `POST /api/models`；**viewerUrl 外链发布已在本环境验证**；OSS 文件直传待凭证（见下「上传发布状态」）。
 - **第 10H·全站前后端联调验收与文档收尾已完成**（2026-06-01，**仅文档**，未改 `src/`、`server/`）：
-  - 更新 `docs/frontend-acceptance-checklist.md`：已接后端项标注为「🔌 真实接口验收」；区分 UI 验收与接口验收；补充未完成项（R2 直传 / Next.js / 后台前端 / 线上部署）。
+  - 更新 `docs/frontend-acceptance-checklist.md`：已接后端项标注为「🔌 真实接口验收」；区分 UI 验收与接口验收；补充未完成项（OSS 直传 / Next.js / 后台前端 / 线上部署）。
   - 更新 `docs/dev-checkpoint.md`：归档前端页面层已接入 API 清单、上传发布状态、未完成项与建议验收顺序（见下「一·续」「一·续二」「二·补」）。
-  - **本步不执行浏览器全量勾选验收**（留验收人按清单逐项填写）；不清理 dev 库、不配置 R2、不启动 Next.js 迁移。
+  - **本步不执行浏览器全量勾选验收**（留验收人按清单逐项填写）；不清理 dev 库、不配置 OSS、不启动 Next.js 迁移。
 - **第 11 步·阶段 0–2（Next.js web/ 骨架 + API 连通性）已完成**（2026-06-01，**仅 `web/` + 文档**，未改 `src/` Vite 原型、`server/` 后端）：
   - 新建 `web/` Next.js 15 App Router 工程（TypeScript + Tailwind CSS 4 + `@/*` 别名）。
   - 配置 `NEXT_PUBLIC_API_BASE_URL=/api`（`web/.env.example` / `web/.env.local`）；`next.config.ts` dev rewrites：`/api/:path* → http://localhost:4000/api/:path*`。
@@ -477,20 +488,20 @@
   - 验证：`web/` 内 `pnpm build` Exit code 0；`/models/me` 动态路由 ƒ。
   - **下一步**：UploadModal 迁移。
 - **第 11 步·阶段 8B（Next.js UploadModal 发布模型）已完成**（2026-06-01，**仅 `web/` + 文档**，未改 `src/`、`server/`）：
-  - 新增 `web/lib/api/uploads.ts`（`presignUpload`/`uploadCallback`/`putFileToPresignedUrl`/`uploadFileToR2`；presign **503** 映射固定文案「R2 对象存储未配置，请先配置对象存储」，无本地兜底）。
+  - 新增 `web/lib/api/uploads.ts`（`presignUpload`/`uploadCallback`/`putFileToPresignedUrl`/`uploadFileToOSS`；presign **503** 映射固定文案「对象存储未配置，请先配置对象存储」，无本地兜底）。
   - 扩展 `web/lib/api/models.ts`：`createModel` → `POST /api/models`。
   - 扩展 `web/lib/model-library-constants.ts`：`SCENE_OPTIONS`、`VISIBILITY_OPTIONS`、`VISIBILITY_MAP`。
-  - 新增 `web/components/models/upload-modal.tsx`（自 Vite `UploadModal` 迁移；受控表单 + viewerUrl iframe 发布 + R2 直传代码路径保留）。
+  - 新增 `web/components/models/upload-modal.tsx`（自 Vite `UploadModal` 迁移；受控表单 + viewerUrl iframe 发布 + OSS 直传代码路径保留）。
   - 改 `web/components/pages/model-library-page.tsx`：「发布模型」已登录打开弹窗；未登录 toast + `/auth`；`onPublished` → `loadModels(1,false)`；关闭卸载重置表单。
   - **viewerUrl 外链发布**：不选模型文件、填 `https://` 在线查看链接 → `viewerType=iframe` + `allowIframe=true` → `POST /api/models` 成功后可刷新列表。
-  - **R2 文件路径代码保留**：选模型/封面 → presign → 浏览器 PUT → callback → create；无 R2 时 presign **503** 固定提示，**不伪造成功、不落本地**。
-  - **真实文件直传端到端**：❌ 待 R2 凭证 + 桶 CORS 后验收。
+  - **OSS 文件路径代码保留**：选模型/封面 → presign → 浏览器 PUT → callback → create；无 OSS 时 presign **503** 固定提示，**不伪造成功、不落本地**。
+  - **真实文件直传端到端**：❌ 待 OSS 凭证 + 桶 CORS 后验收。
   - **未改**：`/models/[id]`、`TrainingModal`；个人中心「发布新模型」入口于 8C 完成。
   - 验证：`web/` 内 `pnpm build` Exit code 0；ReadLints 无错误；`/models` 约 8.09 kB。
-  - **下一步**：真实 R2 直传验收 / 后台 Admin 前端 / 浏览器全量验收。
+  - **下一步**：真实 OSS 直传验收 / 后台 Admin 前端 / 浏览器全量验收。
 - **第 11 步·阶段 8C（Next.js 个人中心「发布新模型」入口）已完成**（2026-06-01，**仅 `web/` + 文档**，未改 `src/`、`server/`）：
   - 改 `web/components/pages/personal-center-page.tsx`：「我的模型」Tab 虚线卡点击打开已有 `UploadModal`；未登录 toast + `/auth`；`onPublished` → `loadModels()` + `getMyStats()` 刷新列表与角标；关闭卸载重置表单。
-  - **未改**：`upload-modal.tsx` UI/发布逻辑、`model-library-page.tsx` 列表页发布入口、R2 503 提示逻辑。
+  - **未改**：`upload-modal.tsx` UI/发布逻辑、`model-library-page.tsx` 列表页发布入口、OSS 503 提示逻辑。
   - 验证：`web/` 内 `pnpm build` Exit code 0；ReadLints 无错误。
   - **下一步**：见下「二、下一步任务」（浏览器全量验收为主）。
 - **第 11 步·用户侧迁移收口（Next.js web/ 步骤 0–8C 已全部完成，2026-06-01）**：
@@ -506,7 +517,7 @@
     - `/models/me` 个人中心
     - UploadModal（`/models` 顶栏 + `/models/me` 虚线卡 8C）
   - **viewerUrl 发布**：✅ Vite + Next.js 均可验收（`POST /api/models` + iframe）。
-  - **R2 文件直传代码路径**：✅ 已保留；❌ 真实凭证 + CORS 端到端未验。
+  - **OSS 文件直传代码路径**：✅ 已保留；❌ 真实凭证 + CORS 端到端未验。
   - **Vite `src/`**：保留不删，作 UI 对照基准。
   - **验收文档**：已更新 `docs/frontend-acceptance-checklist.md`（Next **:3000** 主验 + Vite **:5173** 对照）。
   - **本步仅文档**，未改 `web/` 业务代码、`src/`、`server/`。
@@ -557,7 +568,7 @@
 | **contact** | `GET /contact/options`、`POST /contact/leads` | `api/contact.ts` | `ContactPage` |
 | **training-applications** | `POST /training-applications` | `api/training.ts` | `TrainingModal`（登录态带 token 回填 userId） |
 | **site-config** | `GET /site-config` | `api/siteConfig.ts` | `SiteConfigContext` → 首页/社区/关于/联系/模型库 Footer |
-| **uploads + model publish** | `POST /uploads/presign`、`POST /uploads/callback` + 浏览器 PUT R2 + `POST /models` | `api/uploads.ts` + `api/models.ts`（Vite `src/` + Next.js `web/`） | `UploadModal` |
+| **uploads + model publish** | `POST /uploads/presign`、`POST /uploads/callback` + 浏览器 PUT OSS + `POST /models` | `api/uploads.ts` + `api/models.ts`（Vite `src/` + Next.js `web/`） | `UploadModal` |
 
 **未接入前端（后端已有）**：全部 `/api/admin/*`（无后台管理页面）；`GET /api/health`（运维）；`GET /training-applications/my`（口径已由 `users/me/applications` 覆盖）。
 
@@ -568,10 +579,10 @@
 | 能力 | 状态 |
 |------|------|
 | **viewerUrl 外链发布** | ✅ 已可用（Vite `src/` + Next.js `web/`）：填 `https://` 在线查看链接 + `viewerType=iframe`，`POST /api/models` 成功后在 `GET /api/models` 可见。 |
-| **R2 文件上传代码路径** | ✅ 已保留（Vite + Next.js）：`presign` → 浏览器 `PUT` 预签名 URL → `callback` → `createModel(modelFileId/coverFileId)`；实现于 `*/lib/api/uploads.ts` + `UploadModal`。 |
-| **无真实 R2 凭证时** | `POST /api/uploads/presign` 返回 **503**；前端映射固定提示「R2 对象存储未配置，请先配置对象存储」，**无本地兜底、不伪造上传**。 |
-| **真实文件直传端到端** | ❌ 未完成：需服务器注入 **R2 凭证** + R2 桶 **CORS** 允许浏览器 PUT；配置前勿将「选模型/封面文件发布」计为验收通过。 |
-| **其它说明** | 选封面/模型文件会走 presign，无 R2 时即失败；成功态文案仍写「审核通过后展示」，与 `visibility=public` 立即可见存在产品口径差（UI 未改）。 |
+| **OSS 文件上传代码路径** | ✅ 已保留（Vite + Next.js）：`presign` → 浏览器 `PUT` 预签名 URL → `callback` → `createModel(modelFileId/coverFileId)`；实现于 `*/lib/api/uploads.ts` + `UploadModal`。 |
+| **无真实 OSS 凭证时** | `POST /api/uploads/presign` 返回 **503**；前端映射固定提示「对象存储未配置，请先配置对象存储」，**无本地兜底、不伪造上传**。 |
+| **真实文件直传端到端** | ❌ 未完成：需服务器注入 **OSS 凭证** + OSS Bucket **CORS** 允许浏览器 PUT；配置前勿将「选模型/封面文件发布」计为验收通过。 |
+| **其它说明** | 选封面/模型文件会走 presign，无 OSS 时即失败；成功态文案仍写「审核通过后展示」，与 `visibility=public` 立即可见存在产品口径差（UI 未改）。 |
 
 ### 一·续三、Next.js `web/` 用户侧迁移清单（步骤 0–8C，2026-06-01 收口）
 
@@ -597,14 +608,14 @@
 
 | 项 | 状态 |
 |----|------|
-| 真实 R2 文件直传端到端 | ❌ 待 R2 凭证 + 桶 CORS |
+| 真实 OSS 文件直传端到端 | ❌ 待 OSS 凭证 + 桶 CORS |
 | 后台 Admin 前端 | ❌ `/api/admin/*` 无 UI |
 | 线上生产部署 | ❌ Docker/Cloudflare/域名/生产短信 |
 
 ### 一·补、风险点 / dev 库（延续）
 
-- **本地无真实 R2 凭证**：浏览器「直传 R2」环节未真实端到端验证（后端 dummy/空配置下 presign 503 已验）。
-- **上线前置**：注入真实 R2 凭证 + R2 桶 CORS + `R2_PUBLIC_BASE` 可访问域。
+- **本地无真实 OSS 凭证**：浏览器「直传 OSS」环节未真实端到端验证（后端 dummy/空配置下 presign 503 已验）。
+- **上线前置**：注入真实 OSS 凭证 + OSS Bucket CORS + `OSS_PUBLIC_BASE` 可访问域。
 - **dev 库测试残留**：测试模型 **id≥11**（含 10G 冒烟 id=17/18 等）、联调注册用户、线索/申请冒烟行；验收前可按需 `migrate reset` + `seed` 或手动清理。
 - **孤儿 `model_files`**：上传登记但未发布的文件暂无清理，留二期。
 - **大文件**：当前单次预签名 PUT；多段上传留二期。
@@ -614,7 +625,7 @@
 
 > **Vite 用户侧 API 接入已闭环（10A–10G）**；**Next.js 用户侧页面迁移 + 全局样式 + 本地 `:3000` 验收已闭环**。下列为**当前主线**。
 
-1. **配置真实 Cloudflare R2 凭证与桶 CORS**（`R2_*` 环境变量 + R2 控制台 CORS 允许浏览器 PUT）。
+1. **配置真实阿里云 OSS 凭证与桶 CORS**（`OSS_*` 环境变量 + OSS 控制台 CORS 允许浏览器 PUT）。
 2. **验证真实文件上传**：presign 200 → 浏览器 PUT → callback → 带 `modelFileId`/`coverFileId` 发布（清单 **L21**）。
 3. **后台 Admin 前端**：对接已有 `/api/admin/*`（模型审核、用户、分类、线索、申请、站点配置）。
 4. **真实线上部署**（后续）：生产 Docker Compose + 1Panel + Cloudflare + 真实短信；Next 生产 `/api` 反向代理（dev rewrites 不用于生产）。
@@ -622,10 +633,10 @@
 
 ### 二·补、未完成项
 
-- ❌ **真实 R2 文件直传**（浏览器 PUT + 带文件发布 + 封面 URL 展示）— 清单 L21
+- ❌ **真实 OSS 文件直传**（浏览器 PUT + 带文件发布 + 封面 URL 展示）— 清单 L21
 - ✅ **Next.js 用户侧页面迁移 + API 接入 + 全局样式 + 本地 `:3000` 验收**
 - ❌ **后台 Admin 前端**（`/admin/*` UI）
-- ❌ **真实线上部署**（生产环境、域名、SSL、生产短信/R2）
+- ❌ **真实线上部署**（生产环境、域名、SSL、生产短信/OSS）
 
 ### 二·旧、历史任务索引（已完成，仅供追溯）
 
@@ -639,14 +650,14 @@
 4. `server/prisma/schema.prisma`
 5. `server/src/modules/auth`（认证模块实现，复用其 Guard/`@CurrentUser()`/响应风格）
 6. `server/src/modules/models`（模型读接口 + 发布接口 + 点赞/收藏 `interactions.*`，读接口已附带 isLiked/isFavorited）
-7. `server/src/modules/uploads`（R2 预签名/上传登记实现，发布按 fileId 反查复用）
+7. `server/src/modules/uploads`（OSS 预签名/上传登记实现，发布按 fileId 反查复用）
 8. `server/src/modules/users`（个人中心 `/api/users/me/*`，第 8 步训练申请 `my` 接口可对齐其口径）
 
 ### 四、关键约束提醒
 
 - **`src/` Vite 原型不得删除**，仍为 UI 对照基准；**`web/` 为用户侧生产目标前端**，用户侧页面已迁完，后续改动保持与 Vite 视觉/文案/交互一致。
-- 后端只在 `server/`、编排只在 `deploy/`；Admin 前端、R2 生产配置、线上部署为下一阶段。
-- 模型文件/图片/视频一律存 Cloudflare R2，数据库只存 URL 与业务数据；密钥不入库。
+- 后端只在 `server/`、编排只在 `deploy/`；Admin 前端、OSS 生产配置、线上部署为下一阶段。
+- 模型文件/图片/视频一律存 阿里云 OSS，数据库只存 URL 与业务数据；密钥不入库。
 - 每完成一个模块执行验证（`cd web && pnpm build` / 接口冒烟），并回写本检查点。
 
 ---
@@ -660,7 +671,7 @@
 - **前端（目标）**：**Next.js**；**当前 `src/` 的 Vite + React 前端是 UI 原型基准**（视觉/文案/交互的唯一还原依据），后续需迁移为 Next.js，迁移前后保持 UI 一致，原型在 Next.js 版上线验收前不得删除。
 - **后端**：Node.js + **NestJS**（TypeScript，ORM 用 Prisma）。
 - **数据库**：**PostgreSQL**（只存文件 URL、模型信息、用户信息、业务数据）。
-- **对象存储**：**Cloudflare R2**（模型文件 / 图片 / 视频全部存 R2，**禁止落服务器本地**）。
+- **对象存储**：**阿里云 OSS**（模型文件 / 图片 / 视频全部存 OSS，**禁止落服务器本地**）。
 - **CDN / DNS / SSL / 安全防护**：**Cloudflare**。
 - **架构形态**：前后端分离。
 - **后台管理需覆盖**：模型审核、用户管理、分类管理、数据服务申请管理、联系表单管理。
@@ -700,13 +711,13 @@
 ### 10 张表与枚举
 - 表：`users` / `categories` / `models` / `model_files` / `favorites` / `likes` / `training_applications` / `contact_leads` / `verification_codes` / `site_configs`。
 - 枚举：`UserRole(user/admin)`、`UserStatus(active/disabled)`、`ViewerType(iframe/sketchfab/native/none)`、`ModelVisibility(public/private/review)`、`ModelStatus(draft/pending/published/rejected)`、`FileKind(model/cover/video)`、`TrainingStatus`、`LeadStatus`、`VerificationScene(register/login/reset)`。
-- R2 / Viewer 相关字段：`models.coverUrl`（封面 URL）、`models.modelUrl`（→前端 `viewerUrl`）、`models.viewerType`、`models.allowIframe`、`model_files.r2Key`/`url`、`users.avatarUrl`，一律只存 URL/key，不存二进制。
+- 对象存储 / Viewer 相关字段：`models.coverUrl`（封面 URL）、`models.modelUrl`（→前端 `viewerUrl`）、`models.viewerType`、`models.allowIframe`、`model_files.objectKey`/`url`、`users.avatarUrl`，一律只存 URL/key，不存二进制。
 
 ### 种子数据（清洗规则）
 - `views`("2.1k") → `views_count`(Int)；`time`("3天前") → `created_at`(Timestamptz，基于 now 估算）。
 - `author` 去重 → 7 个种子用户 + 1 个 admin（`系统管理员`，id=1）；`models.userId` 关联。
 - `viewerUrl` → `models.modelUrl`，有链接（id 1、3）→ `viewerType=sketchfab`，其余 `none`。
-- `color`/`pattern` 不入库；`coverUrl` 暂为空串（未接 R2）；`status=published`、`visibility=public`。
+- `color`/`pattern` 不入库；`coverUrl` 暂为空串（未接 OSS）；`status=published`、`visibility=public`。
 - 站点配置 `site_configs`：`contact_phone`/`contact_email`/`contact_address`/`icp` 均为「请填写」占位。
 - **幂等**：全部 `upsert` + 固定主键，重复执行计数不变（实测 2 次均为 categories:4 / users:8 / models:10 / siteConfigs:4）。
 
@@ -718,7 +729,7 @@
 
 ### 遗留 / 说明
 - 种子用户密码 `DEV_PASSWORD_HASH` 为开发占位哈希，**非真实可登录密码**，认证模块联调需走真实注册流程。
-- `coverUrl` 为空串，待第 6 步 R2 上传流程接入后回填真实封面。
+- `coverUrl` 为空串，待第 6 步 OSS 上传流程接入后回填真实封面。
 - `viewerUrl` 仍为 Sketchfab 测试链接（随种子带入），正式上线前替换为业务方真实地址。
 - Windows 下若后端服务（`node dist/main.js`）在运行，会锁定 Prisma 引擎 dll 导致 `prisma generate` 报 `EPERM`；需先停掉该 node 进程再生成。
 - **下一步（第 4 步）**：实现 `/api/auth/*` 认证模块（JWT + 验证码 + 权限 Guard）。
@@ -800,48 +811,48 @@
 - **sort 为英文枚举**：前端中文按钮（最新发布/热门浏览/最多收藏/推荐模型）→ `latest/views/favorites/recommended` 的映射在前端迁移时完成。
 - **recommended 暂无独立算法**：当前与 `latest` 一致按创建时间倒序兜底，待二期补推荐逻辑。
 - **浏览量不自增**：本步只读，未实现 `/api/models/:id/view`；点赞/收藏写入与登录态收藏状态留第 7 步。
-- **下一步（第 6 步）**：R2 上传（`/api/uploads/presign|callback`）+ 模型发布（`POST /api/models`）。
+- **下一步（第 6 步）**：OSS 上传（`/api/uploads/presign|callback`）+ 模型发布（`POST /api/models`）。
 
-## 〇之顶、R2 上传 + 模型发布接口已落地（2026-06-01，server/src/modules/）
+## 〇之顶、OSS 上传 + 模型发布接口已落地（2026-06-01，server/src/modules/）
 
-> 对应 `docs/backend-architecture-plan.md`「九、开发顺序」第 6 步。本步实现**前端直传 R2 的预签名授权 + 上传登记 + 模型发布**；文件实体只存 R2，不落服务器本地；未触碰 `src/` 前端。三接口均需 `JwtAuthGuard`。
+> 对应 `docs/backend-architecture-plan.md`「九、开发顺序」第 6 步。本步实现**前端直传 OSS 的预签名授权 + 上传登记 + 模型发布**；文件实体只存 OSS，不落服务器本地；未触碰 `src/` 前端。三接口均需 `JwtAuthGuard`。
 
 ### 新增 / 修改文件
-- 新增 `server/src/modules/uploads/`：`uploads.module.ts`、`uploads.controller.ts`、`uploads.service.ts`、`r2.service.ts`、`upload.constants.ts`、`dto/presign.dto.ts`、`dto/upload-callback.dto.ts`。
+- 新增 `server/src/modules/uploads/`：`uploads.module.ts`、`uploads.controller.ts`、`uploads.service.ts`、`oss-compatible.service.ts`、`upload.constants.ts`、`dto/presign.dto.ts`、`dto/upload-callback.dto.ts`。
 - 新增 `server/src/modules/models/dto/create-model.dto.ts`。
 - 改 `server/src/modules/models/models.controller.ts`（增 `POST /api/models` + `JwtAuthGuard`）、`models.service.ts`（增 `create()` + `findOwnedFile()`）、`models.module.ts`（`imports: [AuthModule]`）。
 - 改 `server/src/app.module.ts`（注册 `UploadsModule`）。
-- 改 `server/src/config/env.validation.ts`、`configuration.ts`（新增 R2_* / R2_PRESIGN_EXPIRES / MAX_*_SIZE_MB 校验与结构化）、`server/.env`（补 R2 占位，本地留空）。
+- 改 `server/src/config/env.validation.ts`、`configuration.ts`（新增 `OSS_* / OSS_PRESIGN_EXPIRES / MAX_*_SIZE_MB` 文档口径校验说明）、`server/.env`（补 OSS 占位，本地留空）。
 - 改 `server/package.json`（新增依赖 `@aws-sdk/client-s3`、`@aws-sdk/s3-request-presigner`）。
 - 改 `docs/dev-checkpoint.md`（本文件回写）。
 
 ### 3 个接口（统一响应 `{code,message,data}`，均需 Bearer Token）
-- `POST /api/uploads/presign`：入参 `kind(model/cover/video)/fileName/mime/size`；校验扩展名白名单 + 大小上限；服务端生成安全 key `{kind}/{userId}/{uuid}.{ext}` 并签名；返回 `uploadUrl/r2Key/publicUrl/expiresIn/requiredHeaders`。
-- `POST /api/uploads/callback`：入参 `kind/r2Key/originalName/mime/size`；校验 `r2Key` 前缀属于当前用户（防越权），可选 `HeadObject` 复核（网络失败容忍），登记 `model_files`；返回 `fileId/url/r2Key/kind`。
+- `POST /api/uploads/presign`：入参 `kind(model/cover/video)/fileName/mime/size`；校验扩展名白名单 + 大小上限；服务端生成安全 key `{kind}/{userId}/{uuid}.{ext}` 并签名；返回 `uploadUrl/objectKey/publicUrl/expiresIn/requiredHeaders`，并临时保留 `r2Key` 兼容别名。
+- `POST /api/uploads/callback`：入参 `kind/objectKey/originalName/mime/size`；同时兼容历史 `r2Key` 别名；校验 `objectKey` 前缀属于当前用户（防越权），登记 `model_files`；返回 `fileId/url/objectKey/kind`，并临时保留 `r2Key` 兼容别名。
 - `POST /api/models`：入参 `title/type/scenes?/description?/visibility/modelFileId?/coverFileId?/viewerUrl?/viewerType?/allowIframe?`；按 `type` 反查 `categoryId`，按 `fileId` 反查 `model_files`（校验归属 + 用途）得 `modelUrl/coverUrl/fileFormat`；`viewerType` 缺省推断（有上传文件→native、外链→iframe、皆无→none）；返回完整详情 VM。
 
 ### 设计要点
-- **R2（S3 兼容）**：`R2Service` 用 `@aws-sdk/client-s3` + `s3-request-presigner`，`region='auto'`、`forcePathStyle=true`、端点优先 `R2_ENDPOINT` 否则由 `R2_ACCOUNT_ID` 推导；预签名 `getSignedUrl` 为**本地 HMAC 计算、不连网**。
-- **R2 未配置 → 503 清晰错误**：`ensureConfigured()` 缺 `R2_ACCESS_KEY_ID/R2_SECRET_ACCESS_KEY/R2_BUCKET/R2_PUBLIC_BASE/(R2_ENDPOINT 或 R2_ACCOUNT_ID)` 时抛 `ServiceUnavailableException`，**无本地存储兜底**。
-- **数据库只存元信息**：`model_files` 存 `r2Key/url/mime/size/originalName`；`models` 存 `modelUrl/coverUrl/viewerType/allowIframe`；不存任何二进制。`viewerUrl` 仍是 `models.modelUrl` 的前端别名（详情 VM 映射）。
+- **OSS（S3 兼容）**：`OSS 兼容对象存储服务` 用 `@aws-sdk/client-s3` + `s3-request-presigner`，统一读取 `OSS_ACCESS_KEY_ID/OSS_ACCESS_KEY_SECRET/OSS_BUCKET/OSS_REGION/OSS_ENDPOINT/OSS_FORCE_PATH_STYLE/OSS_PUBLIC_BASE/OSS_PRESIGN_EXPIRES`；预签名 `getSignedUrl` 为**本地 HMAC 计算、不连网**。
+- **OSS 未配置 → 503 清晰错误**：`ensureConfigured()` 缺 `OSS_ACCESS_KEY_ID/OSS_ACCESS_KEY_SECRET/OSS_BUCKET/OSS_REGION/OSS_PUBLIC_BASE/OSS_ENDPOINT` 时抛 `ServiceUnavailableException`，**无本地存储兜底**。
+- **数据库只存元信息**：`model_files` 存 `objectKey/url/mime/size/originalName`；`models` 存 `modelUrl/coverUrl/viewerType/allowIframe`；不存任何二进制。`viewerUrl` 仍是 `models.modelUrl` 的前端别名（详情 VM 映射）。
 - **发布状态（第一版，无独立审核流）**：`visibility=public→status=published`（直接公开，故能在 `GET /api/models` 看到）、`review→pending`、`private→published`（列表因公开过滤不显示）。后台审核流转留第 9 步。
-- **安全**：`fileId`/`r2Key` 必须归属当前用户；`viewerUrl` 仅接受 https（DTO `@IsUrl` 限定）；key 由服务端生成、剥离路径片段防穿越。
+- **安全**：`fileId`/`objectKey` 必须归属当前用户；`viewerUrl` 仅接受 https（DTO `@IsUrl` 限定）；key 由服务端生成、剥离路径片段防穿越。
 
 ### 验证结果（均通过）
 - `pnpm install`（+@aws-sdk/* 各 3.1057）、`pnpm build`（nest build）Exit code 0；ReadLints 对新增/修改文件无错误。
 - `node dist/main.js` 启动，新路由挂载（`POST /api/models`、`/api/uploads/presign`、`/api/uploads/callback`）。
-- 冒烟（`Invoke-WebRequest -NoProxy`；先以**空 R2** 验证错误路径，再以**dummy R2 env** 验证全链路）：
+- 冒烟（`Invoke-WebRequest -NoProxy`；先以**空 OSS** 验证错误路径，再以**dummy OSS env** 验证全链路）：
   - 未登录 `POST /api/uploads/presign`、`POST /api/models` → **401**。
-  - presign 非法扩展名 `.exe` → **400**（扩展名白名单先于 R2 校验）。
-  - 空 R2 下 presign → **503**「R2 对象存储未配置（缺少：…）」。
-  - dummy R2 下：presign(model) → **200** 返回签名 `uploadUrl`+`r2Key`+`publicUrl`；callback(model) → **200** 登记 `model_files`（`HeadObject` 网络失败被容忍，按上报 size 落库）；cover 同理；`POST /api/models`（`modelFileId/coverFileId`）→ **200**，`viewerType=native`、`fileFormat=glb`、`modelUrl/coverUrl` 为 R2 公共域链接。
+  - presign 非法扩展名 `.exe` → **400**（扩展名白名单先于 OSS 校验）。
+  - 空 OSS 下 presign → **503**「对象存储未配置（缺少：…）」。
+  - dummy OSS 下：presign(model) → **200** 返回签名 `uploadUrl`+`objectKey`+`publicUrl`；callback(model) → **200** 登记 `model_files`（`HeadObject` 网络失败被容忍，按上报 size 落库）；cover 同理；`POST /api/models`（`modelFileId/coverFileId`）→ **200**，`viewerType=native`、`fileFormat=glb`、`modelUrl/coverUrl` 为 OSS 公共域链接。
   - 越权 callback（他人前缀 `model/999999/...`）→ **403**。
-  - 外链发布：`POST /api/models`（仅 `viewerUrl`，无需 R2）→ **200** `published`，随后 `GET /api/models?keyword=接口测试` 能查到该新模型（满足「发布后列表可见」）。
+  - 外链发布：`POST /api/models`（仅 `viewerUrl`，无需 OSS）→ **200** `published`，随后 `GET /api/models?keyword=接口测试` 能查到该新模型（满足「发布后列表可见」）。
   - `GET /api/health` 仍 `db:up`。
 
 ### 遗留 / 说明
 - **测试在 dev 库新增了 id=11、12 两条测试模型**（冒烟产物，非种子数据）；`seed.ts` 对 id 1–10 幂等，11/12 为残留测试数据，可按需手动清理，不影响后续。
-- **本地无真实 R2 凭证**：presign 的真实「直传 R2」环节无法端到端跑通（仅验证了签名与登记逻辑）；上线前需在服务器注入真实 R2 凭证并配置桶 CORS。
+- **本地无真实 OSS 凭证**：presign 的真实「直传 OSS」环节无法端到端跑通（仅验证了签名与登记逻辑）；上线前需在服务器注入真实 OSS 凭证并配置桶 CORS。
 - **大小校验为弱约束**：presign 按上报 size 校验；callback 已尝试 `HeadObject` 复核真实大小（无网络/无凭证时降级为上报值）。生产建议确保 `HeadObject` 可用以强校验。
 - **孤儿文件**：上传登记但未发布的 `model_files` 暂无清理；定时清理留二期。
 - **大文件**：当前单次预签名 PUT，数百 MB 可行；超大文件多段上传留二期。
@@ -1145,7 +1156,7 @@
 ### 遗留 / 说明
 - 本步**未接任何页面业务、未调用 toast**；`communityData.ts` 静态数据保留作为验收基准，未删除。
 - `.env.local` 需开发者自行复制 `.env.example` 生成（不入库）；缺省时 `http.ts` 兜底 `/api`，行为不受影响。
-- 真实 R2 直传、登录态联动（NavBar/个人中心）等留后续页面接入步骤。
+- 真实 OSS 直传、登录态联动（NavBar/个人中心）等留后续页面接入步骤。
 - 临时连通性脚本 `__smoke_proxy.ps1` 测试后已删除，不入库。
 - **下一步**：登录态地基（`AuthContext` + `api/auth.ts` + AuthPage 接 `/auth/*` + NavBar 登录态），再逐页接入。
 
@@ -1218,7 +1229,7 @@
 - `pnpm build`（vite v6.3.5）Exit code 0，`✓ 1621 modules transformed`（较前 1618 增 3）；ReadLints 对全部新增/修改文件无错误。
 - 冒烟（pwsh 7 `Invoke-RestMethod -NoProxy`，经 **Vite 代理 5173 → 后端 4000**，即前端真实访问路径）：
   - `GET /api/categories` → 4 项（reality-3d/bim/component/robot-training）。
-  - `GET /api/models` → `total=13`、`page=1`、`pageSize=12`、本页 12 条；`coverUrl` 为空串（未接 R2，前端用渐变占位）、`viewsCount/createdAt` 正常。
+  - `GET /api/models` → `total=13`、`page=1`、`pageSize=12`、本页 12 条；`coverUrl` 为空串（未接 OSS，前端用渐变占位）、`viewsCount/createdAt` 正常。
   - `?keyword=BIM` → total=3（含作者「BIM 用户」命中）；`?type=实景三维` → total=6；`?sort=views` → 2100→1200 降序；`?page=2&pageSize=4` → page=2、4 条。
   - `GET /api/models/1` → `viewerType=sketchfab`、`allowIframe=true`、`viewerUrl` 有值（详情页将走 iframe）；`/2` → `viewerType=none`、`viewerUrl` 空（走占位）。
   - `GET /api/models/999999` → 404；`?keyword=zzzznomatch` → total=0（空状态）。
@@ -1226,7 +1237,7 @@
 ### 遗留 / 说明
 - **后端 keyword 不含 tags**：原前端「按标签搜索」失效，属后端已知限制（二期 `pg_trgm`/jsonb），本阶段未改后端。
 - **dev 库残留测试模型**：`total=13` 含早期冒烟产物（如「A published model」等 id≥11），非种子数据，可按需清理，不影响功能。
-- **coverUrl 暂为空串**：未接 R2，封面继续用 `coverStyleByType` 渐变占位，不渲染 `<img>`；待 R2 真实封面再切换。
+- **coverUrl 暂为空串**：未接 OSS，封面继续用 `coverStyleByType` 渐变占位，不渲染 `<img>`；待 OSS 真实封面再切换。
 - **相关推荐用同列表近似**：后端无 `/related`，从当前已加载列表取；当列表为空（如直开详情且列表未加载完）相关推荐可能为空，已做 `related.length>0` 守卫隐藏该区。
 - **个人中心仍静态**：`/api/users/me/*` 未接，PersonalCenter 仍读 `communityModels`（onView 已改传 id，点击可进真实详情）。
 - **点赞/收藏未持久化**：留第 10D（写接口 + 登录态 isLiked/isFavorited）。
@@ -1327,7 +1338,7 @@
 - **TrainingModal 不预填登录信息**：登录态未自动回填联系人/手机（保持原型字段为空，由用户填写）；如需体验优化可二期补。
 - **dev 库新增冒烟残留**：联系线索 id≈3/4、训练申请 id≈4–7 及 1 个随机手机号测试用户，均为冒烟产物，可按需清理。
   - **临时冒烟脚本 `server/__smoke_10e.ps1` 测试后已删除，不入库。**
-  - **下一步**：上传发布（`POST /api/models` + `/api/uploads/*`，需真实 R2）、ModelCommunity 精选模型接入，或推进 Next.js 迁移。
+  - **下一步**：上传发布（`POST /api/models` + `/api/uploads/*`，需真实 OSS）、ModelCommunity 精选模型接入，或推进 Next.js 迁移。
 - **第 10 步·阶段六（ModelCommunity 精选模型 + Footer/站点配置接入，即第 10F）已完成**（2026-06-01，`src/`，详见「〇之埠·精选模型与站点配置接入」节）：
   - 新增 `src/app/SiteConfigContext.tsx`（`SiteConfigProvider` + `useSiteConfig`）：挂载时拉一次 `GET /api/site-config` 全站共享，初始值/异常回退用 `DEFAULT_SITE_CONFIG`（取自各页 Footer 写死文案），后端空串字段逐项以默认兜底，避免空白闪烁。
   - `src/app/App.tsx`：根组件在 `<AuthProvider>` 内再包 `<SiteConfigProvider>`；首页 Footer 联系方式/公司名/版权改读 `useSiteConfig`，新增 icp 备案号渲染位（空值不显示）。
@@ -1335,27 +1346,27 @@
   - `src/app/AboutUs.tsx`、`src/app/ContactPage.tsx`（侧栏 + Footer）、`src/app/ModelLibrary.tsx`：Footer/侧栏联系方式统一改读 `useSiteConfig`，均补 icp 渲染位。
   - **未接**：上传发布（`POST /api/models`、`/api/uploads/*`）；未改 UI 风格/页面结构/文案；未触碰后端 `server/`；`communityData.ts` 未删（精选回退 + 配色 + 验收基准）。
   - 验证：`pnpm build`（vite v6.3.5）Exit code 0、`✓ 1626 modules`（较前 1624 增 2）；ReadLints 无错误。经 Vite 代理(5173)→后端(4000) 冒烟：`GET /api/site-config` 返回 6 字段（phone/email/companyName/footerText/icp 有值、address 仍「请填写」）；`GET /api/models?page=1&pageSize=6&sort=recommended` 返回 6 条、total=13。
-- **第 10 步·阶段七（UploadModal 发布接入，无 R2 可验证版，即第 10G）已完成**（2026-06-01，`src/`，详见「〇之港·发布接入」节）：
-  - 新增 `src/lib/api/uploads.ts`（`presignUpload`/`uploadCallback`/`putFileToPresignedUrl`/`uploadFileToR2`；presign **503** 映射固定文案「R2 对象存储未配置，请先配置对象存储」，无本地兜底）。
+- **第 10 步·阶段七（UploadModal 发布接入，无 OSS 可验证版，即第 10G）已完成**（2026-06-01，`src/`，详见「〇之港·发布接入」节）：
+  - 新增 `src/lib/api/uploads.ts`（`presignUpload`/`uploadCallback`/`putFileToPresignedUrl`/`uploadFileToOSS`；presign **503** 映射固定文案「对象存储未配置，请先配置对象存储」，无本地兜底）。
   - 扩展 `src/lib/api/models.ts`（`createModel` → `POST /api/models`）；`src/lib/types.ts` 补 `FileKind/PresignResult/UploadCallbackResult/CreateModelPayload`。
   - `ModelLibrary.tsx` 的 `UploadModal`：受控表单 + 在线查看链接（viewerUrl）+ 模型/封面文件选择；完整链路 presign→PUT→callback→create 代码保留；**本环境重点验证仅 viewerUrl（viewerType=iframe）发布**；发布按钮未登录 → `requireAuth`；成功 `onPublished`→`loadModels(1,false)`；三态 submitting/toast/成功 UI。
-  - **未接真实 R2**：选文件 presign 503 明确提示；不要求 PUT R2 成功；不伪造上传。未改 `server/`。
+  - **未接真实 OSS**：选文件 presign 503 明确提示；不要求 PUT OSS 成功；不伪造上传。未改 `server/`。
   - 验证：`pnpm build` Exit code 0、`✓ 1627 modules`（较前 1626 增 1）；ReadLints 无错误。冒烟（5173→4000）：viewerUrl 发布 id=18、`viewerType=iframe`；keyword 列表 total=1；presign **503**；未登录 create **401**。
 
-## 〇之港·发布接入、UploadModal 发布（第 10G，无 R2 可验证版）已落地（2026-06-01，src/）
+## 〇之港·发布接入、UploadModal 发布（第 10G，无 OSS 可验证版）已落地（2026-06-01，src/）
 
-> 对应「九、开发顺序」第 10 步阶段七。在**无真实 Cloudflare R2 凭证**条件下，把发布弹窗接入后端上传/发布契约；**可验证**：仅 `viewerUrl`（https）外链发布 + 列表刷新 + presign 503 提示 + 未登录拦截；**不可验证**：presign 200 后浏览器 PUT R2 与带 `modelFileId` 的 native 发布（待 R2 + 桶 CORS）。**只改前端 + 本检查点，不动 `server/`**。
+> 对应「九、开发顺序」第 10 步阶段七。在**无真实 阿里云 OSS 凭证**条件下，把发布弹窗接入后端上传/发布契约；**可验证**：仅 `viewerUrl`（https）外链发布 + 列表刷新 + presign 503 提示 + 未登录拦截；**不可验证**：presign 200 后浏览器 PUT OSS 与带 `modelFileId` 的 native 发布（待 OSS + 桶 CORS）。**只改前端 + 本检查点，不动 `server/`**。
 
 ### 新增 / 修改文件
-- 新增 `src/lib/api/uploads.ts`：`presignUpload`（503→`R2_NOT_CONFIGURED_MESSAGE`）、`uploadCallback`、`putFileToPresignedUrl`（浏览器直传 PUT）、`uploadFileToR2`（完整三步行）。
+- 新增 `src/lib/api/uploads.ts`：`presignUpload`（503→`OSS_NOT_CONFIGURED_MESSAGE`）、`uploadCallback`、`putFileToPresignedUrl`（浏览器直传 PUT）、`uploadFileToOSS`（完整三步行）。
 - 改 `src/lib/api/models.ts`：新增 `createModel(payload)` → `POST /api/models`。
 - 改 `src/lib/types.ts`：新增 `FileKind`、`PresignResult`、`UploadCallbackResult`、`CreateModelPayload`。
 - 改 `src/app/ModelLibrary.tsx`：`UploadModal` 全量接入；`VISIBILITY_MAP` 中文→`public/private/review`；发布按钮 `requireAuth`；`onPublished` 回调刷新列表。
 - 改 `docs/dev-checkpoint.md`：本文件回写。
 
 ### 设计要点
-- **外链发布（无 R2）**：不选模型文件、填 `https://` 的 `viewerUrl` → `POST /api/models` 带 `viewerType=iframe`、`allowIframe=true`；`visibility=public` 时立刻出现在 `GET /api/models`。
-- **文件发布（代码保留）**：选模型/封面 → `uploadFileToR2` → 得 `modelFileId/coverFileId` → create；R2 未配置时 **presign 503**，前端固定文案，**不** callback、**不** create、**不** 本地兜底。
+- **外链发布（无 OSS）**：不选模型文件、填 `https://` 的 `viewerUrl` → `POST /api/models` 带 `viewerType=iframe`、`allowIframe=true`；`visibility=public` 时立刻出现在 `GET /api/models`。
+- **文件发布（代码保留）**：选模型/封面 → `uploadFileToOSS` → 得 `modelFileId/coverFileId` → create；OSS 未配置时 **presign 503**，前端固定文案，**不** callback、**不** create、**不** 本地兜底。
 - **登录门**：与点赞/个人中心一致，`requireAuth()` + toast，未登录不打开弹窗。
 - **三态**：`submitting` + `Loader2`「发布中…」；失败 `toast.error(ApiError.message)`；成功 `toast.success` + 既有成功态 + `onPublished()`。
 - **UI 最小增补**：表单内增加「在线查看链接」一行；模型/封面区绑定 hidden file input，样式 class 未改。
@@ -1365,16 +1376,16 @@
 - 冒烟（pwsh 7 `Invoke-WebRequest -SkipHttpErrorCheck -NoProxy`，经 **Vite 代理 5173 → 后端 4000**）：
   - 新用户 register→token；`POST /api/models`（仅 `viewerUrl`+`viewerType=iframe`+`public`）→ **200**，`id=18`，`viewerType=iframe`。
   - `GET /api/models?keyword=<marker>` → **total=1**，含新模型。
-  - `POST /api/uploads/presign`（`.glb`）→ **503**，body 含 R2 未配置（前端映射为固定用户文案）。
+  - `POST /api/uploads/presign`（`.glb`）→ **503**，body 含 OSS 未配置（前端映射为固定用户文案）。
   - 无 token `POST /api/models` → **401**。
 
 ### 遗留 / 说明
-- **PUT R2 与带文件发布未在本环境验收**：需真实 R2 凭证 + 桶 CORS；代码路径已保留。
+- **PUT OSS 与带文件发布未在本环境验收**：需真实 OSS 凭证 + 桶 CORS；代码路径已保留。
 - **dev 库新增测试模型**：冒烟产物 id=17/18 等，可按需清理。
 - **成功态文案**：仍写「审核通过后将在社区展示」；`公开发布` 实际已 published 立即可见列表，文案未改（遵循 UI 不变）。
-- **封面可选且依赖 R2**：仅 viewerUrl 发布时不要求封面；若选封面且无 R2，会在 cover 的 presign 阶段 503。
+- **封面可选且依赖 OSS**：仅 viewerUrl 发布时不要求封面；若选封面且无 OSS，会在 cover 的 presign 阶段 503。
 - **临时冒烟脚本 `__smoke_10g.ps1` 测试后已删除，不入库。**
-- **下一步**：配置真实 R2 + CORS 后验收文件直传发布；或推进 Next.js 迁移。
+- **下一步**：配置真实 OSS + CORS 后验收文件直传发布；或推进 Next.js 迁移。
 
 ## 〇之埠·精选模型与站点配置接入、ModelCommunity 精选模型 + Footer/站点配置（第 10F）已落地（2026-06-01，src/）
 
@@ -1409,7 +1420,7 @@
 - **recommended 排序当前等同 latest**：后端推荐算法未独立实现，精选 6 条按创建时间倒序（含 id≥11 冒烟测试模型），与原型静态精选不同，属预期。
 - **dev 库站点配置为早期 admin 冒烟改写值**：重跑 `prisma db seed` 会把 phone/email/address 覆盖回「请填写」（不含 icp/footerText 两新键，不影响）。
 - **临时冒烟脚本 `__smoke_10f.ps1` 测试后已删除，不入库。**
-- **下一步**：上传发布（`POST /api/models` + `/api/uploads/*`，需真实 R2）或推进 Next.js 迁移。
+- **下一步**：上传发布（`POST /api/models` + `/api/uploads/*`，需真实 OSS）或推进 Next.js 迁移。
 
 ## 〇之终·第 10H 全站联调验收与文档收尾（2026-06-01，仅 docs/）
 
@@ -1428,11 +1439,11 @@
 
 ### 建议验收顺序（摘要）
 
-环境 health → auth → site-config Footer → 模型读/社区精选 → 详情 iframe → 登录后点赞收藏 → 个人中心 → 联系/训练表单 → viewerUrl 发布 →（有 R2 后）文件直传 → admin API 用 Postman。
+环境 health → auth → site-config Footer → 模型读/社区精选 → 详情 iframe → 登录后点赞收藏 → 个人中心 → 联系/训练表单 → viewerUrl 发布 →（有 OSS 后）文件直传 → admin API 用 Postman。
 
 ### 本步明确不做
 
-- 不跑全站浏览器勾选、不清理 dev 库、不配 R2、不建 `web/` Next.js 工程。
+- 不跑全站浏览器勾选、不清理 dev 库、不配 OSS、不建 `web/` Next.js 工程。
 
 ## 〇之启·Next.js web/ 骨架 + API 连通性（步骤 0–2，2026-06-01，web/）
 
@@ -1479,20 +1490,20 @@
 ### 遗留 / 说明
 - **端口占用**：本机若已有进程占 3000，新起 `pnpm dev` 会使用 3001，验收时注意实际端口。
 - **SSR 首屏**：smoke 页首屏可能短暂显示「正在通过 Provider 加载…」，客户端 hydrate 后展示 API 数据，属预期。
-- **下一步**：~~8C 个人中心发布入口~~ → **Next 浏览器全量验收** → R2 / Admin / 部署。
+- **下一步**：~~8C 个人中心发布入口~~ → **Next 浏览器全量验收** → OSS / Admin / 部署。
 
 ## 〇之启·十四、Next.js 用户侧验收文档收口（2026-06-01，仅文档）
 
 > 本步不修改 `web/`、`src/`、`server/` 业务代码；更新验收清单与检查点，标记 Next.js 用户侧迁移已基本闭环。
 
 ### 修改文件
-- `docs/frontend-acceptance-checklist.md`：增加 Next.js **:3000** 主验收环境；保留 Vite **:5173** UI 对照；标注 L19 viewerUrl 可验、L21 R2 待凭证；更新验收结论表。
+- `docs/frontend-acceptance-checklist.md`：增加 Next.js **:3000** 主验收环境；保留 Vite **:5173** UI 对照；标注 L19 viewerUrl 可验、L21 OSS 待凭证；更新验收结论表。
 - `docs/dev-checkpoint.md`：本文件；新增「一·续三」迁移清单；更新「二、下一步任务」。
 
 ### 当前状态摘要
 - **Next.js 已完成**：骨架/API、Providers、NavBar、Home、About、Contact、Auth、Community、Models 列表/详情、点赞收藏、TrainingModal、个人中心、UploadModal、个人中心发布入口、全局样式；**本地 `:3000` 验收通过**。
-- **仍未完成**：真实 R2 文件直传、Admin 前端、线上部署。
-- **建议下一步**：R2 凭证 + CORS → 真实上传验收 → Admin 后台前端。
+- **仍未完成**：真实 OSS 文件直传、Admin 前端、线上部署。
+- **建议下一步**：OSS 凭证 + CORS → 真实上传验收 → Admin 后台前端。
 
 ## 〇之启·十五、Next.js 本地验收通过（2026-06-01，仅文档）
 
@@ -1510,8 +1521,8 @@
 
 ### 阶段状态（与「零、当前阶段快照」一致）
 - **已完成**：用户侧页面迁移（Home / About / Contact / Auth / Community / Models / ModelDetail / PersonalCenter / UploadModal 等）+ API 接入。
-- **未完成**：真实 R2 直传、Admin 前端、线上部署。
-- **下一步**：R2 凭证 + CORS → 真实上传 → Admin 后台前端。
+- **未完成**：真实 OSS 直传、Admin 前端、线上部署。
+- **下一步**：OSS 凭证 + CORS → 真实上传 → Admin 后台前端。
 
 ## 〇之启·十六、Next.js 全局样式修复（Tailwind 4 + shadcn 主题，2026-06-01，web/）
 
@@ -1694,7 +1705,7 @@
 
 ## 〇之启·二十一、上线前安全修复 2D：viewerUrl 域名白名单（2026-06-02，server/ models）
 
-> 本步对模型「外链发布」入库前增加 **viewerUrl 域名白名单** 校验，防止任意 https 外链被作为 iframe Viewer 内嵌。**不改前端 web/、不改 Vite 原型 src/、不改数据库 schema、不做后台前端、不做 R2 上传增强、不做浏览量打点**。
+> 本步对模型「外链发布」入库前增加 **viewerUrl 域名白名单** 校验，防止任意 https 外链被作为 iframe Viewer 内嵌。**不改前端 web/、不改 Vite 原型 src/、不改数据库 schema、不做后台前端、不做 OSS 上传增强、不做浏览量打点**。
 
 ### 背景
 - 此前 `POST /api/models` 仅经 DTO `@IsUrl({protocols:['https']})` 校验，**无域名白名单**：任意注册用户可提交任意 https 外链，详情页会据此 iframe 内嵌（存在内嵌恶意/不可信页面风险）。
@@ -1710,7 +1721,7 @@
 - **未改**：DTO 仍保留 https + 长度校验；`model.vm.ts`、前端 `web/`、Vite `src/`、Prisma schema 均未动。
 
 ### 白名单策略
-- 仅作用于「外链发布」分支（`POST /api/models` 仅传 `viewerUrl`、无 `modelFileId`）；走 R2 文件上传发布（`modelFileId/coverFileId`）的 `modelUrl` 来自可信 `model_files.url`，**不校验**。
+- 仅作用于「外链发布」分支（`POST /api/models` 仅传 `viewerUrl`、无 `modelFileId`）；走 OSS 文件上传发布（`modelFileId/coverFileId`）的 `modelUrl` 来自可信 `model_files.url`，**不校验**。
 - 校验逻辑：`new URL(viewerUrl)` → 协议必须 `https:` → `hostname` 小写去末尾点 → 逐条匹配白名单。
 - 白名单条目两种形式：
   - 精确主机：`sketchfab.com`（仅该主机命中）。
@@ -1730,7 +1741,7 @@
 - ✅ `cd server && pnpm lint` Exit code 0。
 - ✅ `cd server && pnpm build` Exit code 0。
 - 接口冒烟（登录取 token 后 `POST /api/models`）：
-  - 不传 `viewerUrl`（或走 R2 文件）→ 成功（不受白名单影响）。
+  - 不传 `viewerUrl`（或走 OSS 文件）→ 成功（不受白名单影响）。
   - `https://lcc-viewer.xgrids.cloud/...` → 成功。
   - `https://sketchfab.com/...` → 成功。
   - `http://sketchfab.com/...` → 400（非 https）。
@@ -1742,16 +1753,16 @@
 - 历史数据不重校验：旧数据若含非白名单链接，详情页仍会内嵌；如需收口另列清洗任务。
 - 通配 `*.suffix` 放开过宽会放行该域名下任意子域页面，建议最小授权（优先精确主机）。
 
-## 〇之启·二十四、上线前安全修复 2G：R2 上传安全增强（2026-06-02，server/）
+## 〇之启·二十四、上线前安全修复 2G：OSS 上传安全增强（2026-06-02，server/）
 
-> 加固 `POST /api/uploads/callback`：**必须 HeadObject 确认 R2 对象存在**后才写入 `model_files`；禁止 Head 失败时回退前端上报的 size/mime。**不改 web/、不改 `src/`、不改 schema、不做本地兜底、不做多段上传。**
+> 加固 `POST /api/uploads/callback`：**必须 HeadObject 确认 OSS 对象存在**后才写入 `model_files`；禁止 Head 失败时回退前端上报的 size/mime。**不改 web/、不改 `src/`、不改 schema、不做本地兜底、不做多段上传。**
 
 ### 背景（代码审查）
 - 旧逻辑：`HeadObject` 失败返回 `null`，callback 仍可用 DTO `size`/`mime` 登记 → 可伪造 `model_files` 而未真实上传。
-- 项目红线：文件实体必须在 R2，数据库只存元信息。
+- 项目红线：文件实体必须在 OSS，数据库只存元信息。
 
 ### 新增 / 修改文件
-- 改 `server/src/modules/uploads/r2.service.ts`：`headObject` 成功才返回元信息；不存在 → **404**；无效 size/空 Content-Type/其它错误 → **400**；未配置 R2 → **503**。
+- 改 `server/src/modules/uploads/oss-compatible.service.ts`：`headObject` 成功才返回元信息；不存在 → **404**；无效 size/空 Content-Type/其它错误 → **400**；未配置 OSS → **503**。
 - 改 `server/src/modules/uploads/uploads.service.ts`：callback 仅以 Head 的 `size`/`mime` 入库；`assertSize` + 新增 `assertHeadMime`（Content-Type 白名单）；移除「查不到则容忍」逻辑。
 - 改 `server/src/modules/uploads/upload.constants.ts`：新增 `ALLOWED_MIMES` / `isMimeAllowed` / `normalizeMime`。
 - 改 `server/src/modules/uploads/uploads.controller.ts`：注释与 Swagger 对齐。
@@ -1762,14 +1773,14 @@
 ### callback 新规则（2G）
 | 步骤 | 行为 |
 |------|------|
-| r2Key 前缀 | 必须为 `{kind}/{当前 userId}/`，否则 **403**，不 Head、不写库 |
+| objectKey 前缀 | 必须为 `{kind}/{当前 userId}/`，否则 **403**，不 Head、不写库 |
 | HeadObject | **必须成功**；对象不存在 → **404**；无法确认 → **400** |
 | size | 仅使用 `ContentLength`；超过 `MAX_*_SIZE_MB` → **400** |
 | mime | 仅使用 `Content-Type`（去参数）；不在 `ALLOWED_MIMES[kind]` → **400** |
 | 入库 | 成功后才 `model_files.create`；**不再**使用 DTO 的 size/mime 兜底 |
 
 ### 不变口径
-- `POST /api/uploads/presign`：仍校验扩展名 + 申报 size 上限；R2 未配置 → **503**。
+- `POST /api/uploads/presign`：仍校验扩展名 + 申报 size 上限；OSS 未配置 → **503**。
 - `POST /api/models` 仅 `viewerUrl` 外链发布：**不受影响**（不走 uploads）。
 - **已登记的历史 `model_files`**：不迁移、不重校验；仅新 callback 走 2G 规则。
 - **无本地文件兜底**。
@@ -1778,14 +1789,14 @@
 - ✅ `cd server && pnpm lint`、`pnpm build` Exit 0。
 - ✅ `cd server && pnpm test`：`uploads.service.spec.ts` 3 例通过（mock Head 失败不写库 / 成功写库 / 越权 403）。
 - 接口：`GET /api/health` → **200**，`db:up`（`node dist/main.js` @4000）。
-- R2 未配置时 **503** 行为未改：`presign`/`callback` 均在 `R2Service.ensureConfigured()` 抛 `ServiceUnavailableException`，**无本地兜底、不写库**（与「〇之顶」冒烟一致；本机未注入 `R2_ACCESS_KEY_ID` 等时仍 503）。
+- OSS 未配置时 **503** 行为未改：`presign`/`callback` 均在 `OSS 兼容对象存储服务.ensureConfigured()` 抛 `ServiceUnavailableException`，**无本地兜底、不写库**（与「〇之顶」冒烟一致；本机未注入 `OSS_ACCESS_KEY_ID` 等时仍 503）。
 - 未登录 `presign`/`callback` → **401**（`JwtAuthGuard` 优先于 503）。
-- ⚠️ **无真实 R2 凭证时**：无法在浏览器完成 presign→PUT→callback 全链路验收；须注入 `R2_*` + 桶 CORS 后再验。
+- ⚠️ **无真实 OSS 凭证时**：无法在浏览器完成 presign→PUT→callback 全链路验收；须注入 `OSS_*` + 桶 CORS 后再验。
 
 ### 风险 / 说明
 - **模型 MIME 常为 `application/octet-stream`**：白名单已包含；若业务方 Content-Type 特殊需在 `ALLOWED_MIMES` 追加。
 - **Head 与 PUT 时序**：前端须先 PUT 成功再 callback；过早 callback 会 404（符合安全预期）。
-- **重复 callback 同一 r2Key**：仍可插入多条 `model_files`（schema 无唯一约束，二期待办）。
+- **重复 callback 同一 objectKey**：仍可插入多条 `model_files`（schema 无唯一约束，二期待办）。
 - **大文件多段上传**：仍为单次 PUT，**二期待办**。
 
 ## 〇之启·二十三、上线前功能一致性修复 2F：作者可查看自己的非公开模型详情（2026-06-02，server/ + web/）
@@ -1881,16 +1892,16 @@
 
 ### 验证结果（均通过）
 - `web/` 内 `pnpm build` Exit code 0；ReadLints 无错误。
-- `/models/me`「我的模型」有数据时点击虚线卡 → 打开 UploadModal；viewerUrl 发布成功 → 列表与 stats 角标更新；选文件无 R2 → 503 固定提示。
+- `/models/me`「我的模型」有数据时点击虚线卡 → 打开 UploadModal；viewerUrl 发布成功 → 列表与 stats 角标更新；选文件无 OSS → 503 固定提示。
 - `/models` 列表页发布入口、UploadModal UI、TrainingModal 未改。
 
 ### 遗留 / 说明
 - **空列表无虚线卡**：「我的模型」为空时仍仅空态文案，首发布可走 `/models` 顶栏（与 Vite 一致）。
-- **真实 R2 直传**：仍待凭证 + CORS 后验收。
+- **真实 OSS 直传**：仍待凭证 + CORS 后验收。
 
 ## 〇之启·十二、Next.js UploadModal 发布模型（步骤 8B，2026-06-01，web/）
 
-> 本步将 Vite `ModelLibrary.tsx` 内嵌 `UploadModal` 迁入 `web/components/models/upload-modal.tsx`；列表页「发布模型」入口接入；viewerUrl iframe 发布可验证；R2 直传代码路径保留。
+> 本步将 Vite `ModelLibrary.tsx` 内嵌 `UploadModal` 迁入 `web/components/models/upload-modal.tsx`；列表页「发布模型」入口接入；viewerUrl iframe 发布可验证；OSS 直传代码路径保留。
 
 ### 新增 / 修改文件
 - 新增 `web/lib/api/uploads.ts`（平移自 `src/lib/api/uploads.ts`）。
@@ -1903,11 +1914,11 @@
 - `web/` 内 `pnpm build` Exit code 0；ReadLints 无错误；`/models` 约 8.09 kB。
 - 未登录「发布模型」→ toast「请先登录后再操作」+ `/auth`；已登录打开弹窗。
 - 仅 viewerUrl（https）发布 → `POST /api/models` 成功 + 列表刷新 + 成功态 UI。
-- 选 `.glb` 无 R2 → presign **503** → toast「R2 对象存储未配置，请先配置对象存储」；不进入成功态。
+- 选 `.glb` 无 OSS → presign **503** → toast「对象存储未配置，请先配置对象存储」；不进入成功态。
 - 关闭/重开弹窗表单重置（条件卸载）；`/models/[id]`、`/models/me`、`TrainingModal` 未改。
 
 ### 遗留 / 说明
-- **真实 R2 直传端到端**：❌ 待服务器注入 R2 凭证 + 桶 CORS 后验收 presign 200 → PUT → callback → 带 `modelFileId` 发布。
+- **真实 OSS 直传端到端**：❌ 待服务器注入 OSS 凭证 + 桶 CORS 后验收 presign 200 → PUT → callback → 带 `modelFileId` 发布。
 - ~~**个人中心「发布新模型」占位卡**~~ → 8C 已接线打开 UploadModal。
 - **成功态文案**：仍写「审核通过后展示」，与 `visibility=public` 立即可见存在产品口径差（与 Vite 一致，UI 未改）。
 
@@ -2071,8 +2082,8 @@
 - **已完成页面**：首页 Home、NavBar、ModelCommunity、ModelLibrary（含详情/发布/训练/个人中心）、AboutUs、AuthPage、ContactPage；网络层 `src/lib/` + `AuthContext` + `SiteConfigContext`（均在 Vite `src/`）。
 - **Next.js web/**：`AppProviders` + `NavBar` + **`/about`、`/contact`、`/auth` 正式 UI**；`/`、`/models`、`/community` 仍为占位。
 - **已接后端（页面层，10H 归档）**：auth · models · categories · likes/favorites · users/me · contact · training-applications · site-config · uploads/model publish（详见「🚩 最终检查点 → 一·续」）。
-- **上传发布**：viewerUrl 发布 ✅；R2 文件路径代码保留 ✅；无 R2 时 presign 503 + 固定提示 ✅；真实 PUT 直传 ❌（待 R2 + CORS）。
-- **未完成（10H 标注）**：真实 R2 直传、Next.js 迁移、后台前端、线上部署（见「🚩 → 二·补」）。
+- **上传发布**：viewerUrl 发布 ✅；OSS 文件路径代码保留 ✅；无 OSS 时 presign 503 + 固定提示 ✅；真实 PUT 直传 ❌（待 OSS + CORS）。
+- **未完成（10H 标注）**：真实 OSS 直传、Next.js 迁移、后台前端、线上部署（见「🚩 → 二·补」）。
 - **构建状态**：`pnpm build` Exit code 0（Vite 原型，约 1627 模块）；后端 `server/` `pnpm build` 通过。
 - **联调环境**：根目录 `pnpm dev`（5173）+ `vite.config.ts` 代理 `/api → localhost:4000` + `deploy/docker-compose.dev.yml` Postgres + `server` API。
 - **communityData.ts**：仅 `typeTagColor` + API 失败降级；**非**全站主数据源。

@@ -1,11 +1,12 @@
 # 数境空间官网 全站前端手动验收清单
 
-> 更新日期：2026-06-01（Next.js 用户侧全站验收文档收口）
+> 更新日期：2026-06-06（已同步当前仓库实现与阿里云 OSS 口径）
 > 适用范围：
 > - **生产目标前端**：`web/` **Next.js 15** App Router（**主验收对象**，见下「测试环境 B」）。
 > - **UI 对照基准**：根目录 `src/` **Vite + React** 原型（Figma 导出版视觉/文案/交互基准，见下「测试环境 A」）。
 > 数据状态：**用户侧业务数据已接 NestJS 后端 API**；`communityData.ts` 仅用于类型配色与接口失败时的精选/分类降级。
 > 使用方式：在「是否通过」列填写 ✅ / ❌；不通过的在「备注」记录现象。**Next.js 为主勾选**；Vite 用于 UI 对照差异时可选复测。
+> 最新口径：对象存储当前实际为 **阿里云 OSS**；文档已统一使用 OSS 命名，界面若仍显示旧对象存储提示，仅表示历史文案残留。
 
 ## 测试环境
 
@@ -61,15 +62,15 @@
 | contact | `GET /api/contact/options`、`POST /api/contact/leads` | ContactPage |
 | training-applications | `POST /api/training-applications` | TrainingModal |
 | site-config | `GET /api/site-config` | 全站 Footer、ContactPage 侧栏 |
-| uploads + publish | `POST /api/uploads/presign|callback` + PUT R2 + `POST /api/models` | UploadModal |
+| uploads + publish | `POST /api/uploads/presign|callback` + 浏览器直传 OSS + `POST /api/models` | UploadModal |
 
 ### 上传发布验收说明
 
 | 能力 | 当前状态 | 对应验收项 |
 |------|----------|------------|
 | **viewerUrl 外链发布** | ✅ **可验收**（Vite + Next.js）：填 `https://` 链接 → `viewerType=iframe` → `POST /api/models` → 列表可见 | **L19** |
-| **R2 文件直传（选模型/封面文件）** | ❌ **待真实 R2 凭证 + 桶 CORS** 后验收；无凭证时 presign **503** 为预期 | **L21**（标 ➖） |
-| **无 R2 时选文件** | ✅ **可验收**：应 toast「R2 对象存储未配置，请先配置对象存储」，不伪造成功 | **L20** |
+| **OSS 文件直传（选模型/封面文件）** | ❌ **待真实 OSS 凭证 + Bucket CORS** 后验收；无凭证时 presign **503** 为预期 | **L21**（标 ➖） |
+| **无 OSS 时选文件** | ✅ **可验收**：应 toast 固定错误提示（当前部分文案仍保留 OSS 历史命名），不伪造成功 | **L20** |
 
 ---
 
@@ -174,8 +175,8 @@
 | L17 | 🔌 | 🔁 | 我的模型/收藏卡片点击 | 进入对应详情；下架收藏灰显不可点 | | |
 | L18 | UI | 📱 | 各弹窗移动端 | 可滚动、可关闭、无横向溢出 | | |
 | L19 | 🔌 | 🔁 | **viewerUrl 发布**（不选文件） | 填 https 查看链接 + 必填项 → `POST /api/models` 成功 → `/models` 列表可见（**当前环境可完整验收**） | | |
-| L20 | 🔌 | 🔁 | **选模型/封面文件**（无 R2 时） | presign **503**，提示「R2 对象存储未配置…」，不伪造成功（**当前环境可验收负向路径**） | | |
-| L21 | 🔌 | ➖ | **R2 文件直传发布**（须真实凭证+CORS） | presign 200 → PUT → callback → 带 fileId 发布成功 | ➖ | **待 R2 配置后验收，不计入当前 Next 用户侧收口** |
+| L20 | 🔌 | 🔁 | **选模型/封面文件**（无 OSS 时） | presign **503**，提示对象存储未配置（当前固定文案仍可能显示 `OSS` 历史命名），不伪造成功（**当前环境可验收负向路径**） | | |
+| L21 | 🔌 | ➖ | **OSS 文件直传发布**（须真实凭证+CORS） | presign 200 → PUT → callback → 带 fileId 发布成功 | ➖ | **待 OSS 配置后验收，不计入当前 Next 用户侧收口** |
 
 ---
 
@@ -274,9 +275,9 @@
 
 | 项 | 说明 |
 |----|------|
-| **真实 R2 文件直传** | 需 R2 凭证 + 桶 CORS；验收项 **L21**；代码路径已保留 |
+| **真实 OSS 文件直传** | 需 OSS 凭证 + 桶 CORS；验收项 **L21**；代码路径已保留 |
 | **后台 Admin 前端** | `/api/admin/*` 无 UI；审核/用户/分类/线索/申请/站点维护 |
-| **真实线上部署** | 生产 Docker、Cloudflare、域名、生产短信与 R2；Next 生产环境 `/api` 须反向代理（dev rewrites 仅开发态） |
+| **真实线上部署** | 生产 Docker、Cloudflare、域名、生产短信与 OSS；Next 生产环境 `/api` 须反向代理（dev rewrites 仅开发态） |
 
 ### 已完成（不再列为迁移阻塞）
 
@@ -300,11 +301,11 @@
 | UI 项移动端 — **Next 主验** | ✅ / ❌ |
 | 🔌 真实接口项（auth/models/表单等）— **Next 主验** | ✅ / ❌ / 有条件通过 |
 | viewerUrl 发布（L19）— **可验收** | ✅ / ❌ / ➖ |
-| R2 503 负向提示（L20） | ✅ / ❌ / ➖ |
-| R2 文件直传（L21）— **待 R2 凭证** | ✅ / ❌ / ➖ |
+| 对象存储 503 负向提示（L20） | ✅ / ❌ / ➖ |
+| OSS 文件直传（L21）— **待 OSS 凭证** | ✅ / ❌ / ➖ |
 | `cd web && pnpm build` | ✅ / ❌ |
 | 根目录 Vite `pnpm build`（可选对照） | ✅ / ❌ / ➖ |
 | 阻塞性问题数量 | |
 | 总体结论 | 通过 / 有条件通过 / 不通过 |
 
-> **有条件通过** 典型口径：Next 用户侧全站 🔌 项通过 + L19/L20 通过 + L21 标 ➖（R2 未配置）+ Admin/部署未做。
+> **有条件通过** 典型口径：Next 用户侧全站 🔌 项通过 + L19/L20 通过 + L21 标 ➖（OSS 未配置）+ Admin/部署未做。

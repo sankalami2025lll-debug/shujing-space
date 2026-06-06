@@ -2,7 +2,7 @@
  * 服务：UploadsService
  * 用途：模型/封面/视频文件的「预签名直传授权」与「上传完成登记」业务。
  * 流程：presign（授权）→ 前端直传对象存储 → callback（HeadObject 确认对象存在后登记 model_files）。
- * 红线：文件实体只存对象存储；数据库只存 r2Key / url / mime / size / originalName 等元信息；禁止无对象登记（2G）。
+ * 红线：文件实体只存对象存储；数据库只存 objectKey / url / mime / size / originalName 等元信息；禁止无对象登记（2G）。
  */
 import { BadRequestException, ForbiddenException, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -11,7 +11,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { PresignDto } from './dto/presign.dto';
 import { UploadCallbackDto } from './dto/upload-callback.dto';
 import { OssService } from './oss.service';
-import { R2Service } from './r2.service';
+import { OssCompatibleService } from './oss-compatible.service';
 import {
   ALLOWED_EXTENSIONS,
   extractExtension,
@@ -24,7 +24,7 @@ import { ObjectStorageService } from './object-storage.interface';
 export interface PresignResult {
   uploadUrl: string; // 预签名 PUT 地址
   objectKey: string; // 生成的对象 key
-  r2Key: string; // 兼容旧前端字段
+  r2Key: string; // deprecated：兼容旧前端字段
   publicUrl: string; // 上传成功后的可访问 URL
   method: 'PUT'; // 前端直传方法
   expiresIn: number; // 预签名有效期（秒）
@@ -36,7 +36,8 @@ export interface PresignResult {
 export interface CallbackResult {
   fileId: number; // 新建 model_files.id
   url: string; // 可访问 URL
-  r2Key: string;
+  objectKey: string; // 正式字段
+  r2Key: string; // deprecated：兼容旧前端字段
   kind: FileKind;
 }
 
@@ -44,17 +45,19 @@ export interface CallbackResult {
 export class UploadsService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly r2: R2Service,
+    private readonly ossCompatible: OssCompatibleService,
     private readonly oss: OssService,
     private readonly config: ConfigService,
   ) {}
 
-  private get storageDriver(): 'r2' | 'oss' {
-    return (this.config.get<'r2' | 'oss'>('storage.driver') ?? 'r2') as 'r2' | 'oss';
+  private get storageDriver(): 'oss-compatible' | 'oss' {
+    return (this.config.get<'oss-compatible' | 'oss'>('storage.driver') ?? 'oss') as
+      | 'oss-compatible'
+      | 'oss';
   }
 
   private get storage(): ObjectStorageService {
-    return this.storageDriver === 'oss' ? this.oss : this.r2;
+    return this.storageDriver === 'oss' ? this.oss : this.ossCompatible;
   }
 
   /**
@@ -63,7 +66,7 @@ export class UploadsService {
    */
   async presign(userId: bigint, dto: PresignDto): Promise<PresignResult> {
     this.assertExtension(dto.kind, dto.fileName);
-    this.assertSize(dto.kind, dto.size);
+    this.assertSize(dto.kind, dto.size, dto.fileName);
 
     const objectKey = this.storage.buildKey(dto.kind, userId, dto.fileName);
     const uploadUrl = await this.storage.presignPut(objectKey, dto.mime);
@@ -83,41 +86,50 @@ export class UploadsService {
 
   /**
    * 上传完成回执（POST /api/uploads/callback，2G）。
-   * 校验 r2Key 归属 → HeadObject 确认对象存在 → 以对象存储元信息登记 model_files；失败不写库。
+   * 校验 objectKey 归属 → HeadObject 确认对象存在 → 以对象存储元信息登记 model_files；失败不写库。
    */
   async callback(userId: bigint, dto: UploadCallbackDto): Promise<CallbackResult> {
+    const objectKey = this.resolveObjectKey(dto);
     // 防越权：key 必须形如 uploads/{userId}/yyyy/MM/...，即由本人 presign 生成
     const expectedPrefix = `uploads/${userId.toString()}/`;
-    if (!dto.r2Key.startsWith(expectedPrefix)) {
-      throw new ForbiddenException('r2Key 与当前用户不匹配，禁止登记');
+    if (!objectKey.startsWith(expectedPrefix)) {
+      throw new ForbiddenException('objectKey 与当前用户不匹配，禁止登记');
     }
     // 扩展名再校验一次（防止 key 与 originalName 被篡改为非法类型）
     this.assertExtension(dto.kind, dto.originalName);
 
-    // 2G：必须在 R2 上确认对象存在；size/mime 以 HeadObject 为准，禁止回退前端上报值（失败不写库）
-    const head = await this.storage.headObject(dto.r2Key);
+    // 2G：必须在对象存储上确认对象存在；size/mime 以 HeadObject 为准，禁止回退前端上报值（失败不写库）
+    const head = await this.storage.headObject(objectKey);
 
-    this.assertSize(dto.kind, head.size);
+    this.assertSize(dto.kind, head.size, dto.originalName);
     this.assertHeadMime(dto.kind, head.mime);
 
     const mime = normalizeMime(head.mime);
-    const url = this.storage.publicUrl(dto.r2Key);
+    const url = this.storage.publicUrl(objectKey);
     const file = await this.prisma.modelFile.create({
       data: {
         userId,
         kind: dto.kind,
         originalName: dto.originalName,
-        r2Key: dto.r2Key,
+        r2Key: objectKey,
         url,
         size: BigInt(head.size),
         mime,
       },
     });
 
-    return { fileId: Number(file.id), url, r2Key: dto.r2Key, kind: dto.kind };
+    return { fileId: Number(file.id), url, objectKey, r2Key: objectKey, kind: dto.kind };
   }
 
   // —— 内部校验 ——
+
+  private resolveObjectKey(dto: UploadCallbackDto): string {
+    const objectKey = dto.objectKey?.trim() || dto.r2Key?.trim() || '';
+    if (!objectKey) {
+      throw new BadRequestException('objectKey 不能为空');
+    }
+    return objectKey;
+  }
 
   // 扩展名白名单校验
   private assertExtension(kind: FileKind, fileName: string): void {
@@ -140,10 +152,17 @@ export class UploadsService {
   }
 
   // 大小上限校验（model / cover 各有上限；video 暂复用 model 上限）
-  private assertSize(kind: FileKind, size: number): void {
+  private assertSize(kind: FileKind, size: number, fileName?: string): void {
     const maxModel = this.config.get<number>('upload.maxModelBytes') ?? 0;
     const maxCover = this.config.get<number>('upload.maxCoverBytes') ?? 0;
-    const limit = kind === 'cover' ? maxCover : maxModel;
+    const zipModelLimit = 1024 * 1024 * 1024;
+    const extension = fileName ? extractExtension(fileName) : '';
+    const limit =
+      kind === 'cover'
+        ? maxCover
+        : extension === 'zip'
+          ? Math.max(maxModel, zipModelLimit)
+          : maxModel;
     if (limit > 0 && size > limit) {
       const limitMb = Math.round(limit / 1024 / 1024);
       throw new BadRequestException(`文件超过大小上限（${limitMb}MB）`);
