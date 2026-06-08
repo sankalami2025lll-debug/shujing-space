@@ -1,7 +1,6 @@
 ---
-description: 页面、路由和跳转规则
+description: 
 alwaysApply: true
-globs: src/app/**/*.{ts,tsx}
 ---
 
 页面对应关系：

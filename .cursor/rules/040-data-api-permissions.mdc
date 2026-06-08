@@ -1,7 +1,6 @@
 ---
-description: 数据结构、后端接口和权限规则
+description: 
 alwaysApply: true
-globs: src/**/*.{ts,tsx}
 ---
 
 数据与接口规则：

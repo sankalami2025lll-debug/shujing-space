@@ -1,6 +1,5 @@
 ---
-description: 每个页面必须写好功能注释和文档对应关系
-globs: src/app/**/*.{ts,tsx}
+description: 
 alwaysApply: true
 ---
 
