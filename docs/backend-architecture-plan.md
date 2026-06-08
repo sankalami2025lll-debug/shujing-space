@@ -134,6 +134,24 @@
 5. 后端 HeadObject / 获取对象信息后登记 `model_files`
 6. 发布模型时 `POST /api/models` 关联 `modelFileId / coverFileId`，或直接使用 `viewerUrl`
 
+### 3.3.1 上传任务持久化（3A-1）
+
+- 当前已新增 `upload_tasks` 作为上传任务外层编排表。
+- 作用：持久化上传任务快照、文件绑定关系、错误信息与中断状态，供前端刷新后恢复任务卡。
+- 边界：
+  - **不替代** `POST /api/uploads/presign`、`POST /api/uploads/callback`、`POST /api/models`
+  - **不承诺** 浏览器刷新后的真正断点续传
+  - 浏览器刷新/关闭导致 PUT 中断时，仅把任务状态收敛为 `interrupted`
+- 当前新增接口：
+  - `POST /api/upload-tasks`
+  - `GET /api/upload-tasks/me`
+  - `POST /api/upload-tasks/:id/status`
+  - `POST /api/upload-tasks/:id/heartbeat`
+  - `POST /api/upload-tasks/:id/files`
+  - `POST /api/upload-tasks/:id/publish`
+  - `POST /api/upload-tasks/:id/cancel`
+  - `POST /api/upload-tasks/:id/interrupted`
+
 ### 3.4 LCC / LCC2 ZIP 处理流程
 
 1. 用户先把 ZIP 当模型文件上传到 OSS
@@ -179,6 +197,14 @@
 
 - `POST /api/uploads/presign`
 - `POST /api/uploads/callback`
+- `POST /api/upload-tasks`
+- `GET /api/upload-tasks/me`
+- `POST /api/upload-tasks/:id/status`
+- `POST /api/upload-tasks/:id/heartbeat`
+- `POST /api/upload-tasks/:id/files`
+- `POST /api/upload-tasks/:id/publish`
+- `POST /api/upload-tasks/:id/cancel`
+- `POST /api/upload-tasks/:id/interrupted`
 
 > 说明：文档统一将对象键记作 `objectKey`，当前均表示 OSS object key。
 
@@ -227,6 +253,7 @@
 - `categories`
 - `models`
 - `model_files`
+- `upload_tasks`
 - `favorites`
 - `likes`
 - `training_applications`
