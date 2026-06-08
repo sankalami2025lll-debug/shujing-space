@@ -13,6 +13,7 @@ import {
   RefreshCcw,
   Ruler,
   ScanSearch,
+  Save,
   Wrench,
 } from "lucide-react";
 import { useMemo, useState } from "react";
@@ -23,10 +24,16 @@ interface ModelViewerToolbarProps {
   onResetView?: () => void;
   onToggleFullscreen?: () => void;
   onTakeScreenshot?: () => void;
+  onSaveLaunchView?: () => void;
+  onToggleHelp?: () => void;
+  isHelpOpen?: boolean;
+  canShowSaveLaunchView?: boolean;
+  saveLaunchViewPending?: boolean;
 }
 
 const TOOL_ITEMS = [
   { key: "reset", label: "重置视角", icon: RefreshCcw, enabledBy: "resetView" },
+  { key: "saveLaunchView", label: "保存启动视图", icon: Save, enabledBy: "saveView" },
   { key: "fullscreen", label: "全屏", icon: Expand, enabledBy: "fullscreen" },
   { key: "screenshot", label: "截图", icon: Camera, enabledBy: "screenshot" },
   { key: "orbit", label: "旋转 / 环绕", icon: Move3D, enabledBy: "orbit" },
@@ -49,15 +56,21 @@ export function ModelViewerToolbar({
   onResetView,
   onToggleFullscreen,
   onTakeScreenshot,
+  onSaveLaunchView,
+  onToggleHelp,
+  isHelpOpen = false,
+  canShowSaveLaunchView = false,
+  saveLaunchViewPending = false,
 }: ModelViewerToolbarProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const toolActions = useMemo(
     () => ({
       reset: onResetView,
+      saveLaunchView: onSaveLaunchView,
       fullscreen: onToggleFullscreen,
       screenshot: onTakeScreenshot,
     }),
-    [onResetView, onTakeScreenshot, onToggleFullscreen],
+    [onResetView, onSaveLaunchView, onTakeScreenshot, onToggleFullscreen],
   );
 
   return (
@@ -87,11 +100,22 @@ export function ModelViewerToolbar({
         }`}
       >
         {TOOL_ITEMS.map((tool) => {
+          if (tool.key === "saveLaunchView" && !canShowSaveLaunchView) {
+            return null;
+          }
           const enabled = capabilities[tool.enabledBy];
           const Icon = tool.icon;
           const onClick = toolActions[tool.key as keyof typeof toolActions];
-          const actionable = enabled && typeof onClick === "function";
-          const title = actionable ? tool.label : `${tool.label}（暂未接入）`;
+          const actionable =
+            enabled &&
+            typeof onClick === "function" &&
+            !(tool.key === "saveLaunchView" && saveLaunchViewPending);
+          const title =
+            tool.key === "saveLaunchView" && saveLaunchViewPending
+              ? "正在保存启动视图"
+              : actionable
+                ? tool.label
+                : `${tool.label}（暂未接入）`;
 
           return (
             <button
@@ -111,6 +135,20 @@ export function ModelViewerToolbar({
             </button>
           );
         })}
+        <button
+          type="button"
+          aria-label={isHelpOpen ? "关闭帮助" : "打开帮助"}
+          title={isHelpOpen ? "关闭帮助" : "打开帮助"}
+          onClick={onToggleHelp}
+          className={`inline-flex h-11 w-11 items-center justify-center rounded-2xl border backdrop-blur-md transition-all ${
+            typeof onToggleHelp === "function"
+              ? "border-white/10 bg-[#0b1118]/85 text-gray-100 shadow-[0_10px_30px_rgba(0,0,0,0.28)] hover:border-cyan-300/30 hover:bg-[#0f1722]/90"
+              : "cursor-not-allowed border-white/[0.08] bg-[#0b1118]/60 text-gray-500 opacity-70"
+          }`}
+          disabled={typeof onToggleHelp !== "function"}
+        >
+          <Info className={`h-4 w-4 ${isHelpOpen ? "text-cyan-200" : ""}`} />
+        </button>
       </div>
     </div>
   );

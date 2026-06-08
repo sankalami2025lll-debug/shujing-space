@@ -37,7 +37,7 @@ import { deleteMyModel } from "@/lib/api/users";
 import { coverStyleByType, formatViews, formatRelativeTime } from "@/lib/format";
 import { typeTagColor } from "@/lib/community-data";
 import { ApiError } from "@/lib/http";
-import type { ModelDetail, ModelListItem } from "@/lib/types";
+import type { ModelDetail, ModelLaunchView, ModelListItem } from "@/lib/types";
 
 function toTagArray(value: unknown): string[] {
   return Array.isArray(value) ? (value as string[]) : [];
@@ -246,6 +246,10 @@ export default function ModelDetailPage({ modelId }: ModelDetailPageProps) {
     }
   }, [deletePending, detail, router, user]);
 
+  const handleLaunchViewSaved = useCallback((launchView: ModelLaunchView) => {
+    setDetail((prev) => (prev ? { ...prev, launchView } : prev));
+  }, []);
+
   if (detailLoading) {
     return (
       <div className="min-h-[calc(100vh-4rem)] md:min-h-[calc(100vh-72px)] flex flex-col items-center justify-center gap-3 text-gray-500 bg-[#0a0a0a]">
@@ -330,7 +334,7 @@ export default function ModelDetailPage({ modelId }: ModelDetailPageProps) {
           </div>
 
           <div className="flex-1 relative overflow-hidden">
-            <ModelViewerShell model={detail} />
+            <ModelViewerShell model={detail} onLaunchViewSaved={handleLaunchViewSaved} />
           </div>
         </div>
 

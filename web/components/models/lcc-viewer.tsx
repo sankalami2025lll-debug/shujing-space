@@ -10,7 +10,11 @@ import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { ModelLoadingOverlay } from "@/components/models/model-loading-overlay";
-import type { ModelViewerHandle } from "@/components/models/viewers/types";
+import type {
+  ModelViewerHandle,
+  ModelViewerMovementInput,
+} from "@/components/models/viewers/types";
+import type { ModelLaunchView } from "@/lib/types";
 
 const LCC_WEB_VERSION = "0.6.0";
 const LCC_WEB_UMD_URL = `/vendor/lcc-web/${LCC_WEB_VERSION}/lcc-${LCC_WEB_VERSION}.umd.js`;
@@ -71,6 +75,7 @@ declare global {
 type LccViewerStatus = "idle" | "loading" | "loaded" | "error";
 type SupportedLccFormat = "lcc" | "lcc2";
 type DefaultViewSource =
+  | "launchView"
   | "defaultCamera"
   | "sdkBounds"
   | "boundsCenterHomeView"
@@ -126,6 +131,7 @@ interface LccViewerProps {
   viewerUrl?: string | null;
   fileFormat?: string | null;
   viewerType?: string | null;
+  launchView?: ModelLaunchView | null;
   defaultCameraJson?: string | null;
   processingBlocked?: boolean;
   processingHint?: string;
@@ -144,9 +150,22 @@ const OFFICIAL_MODEL_MATRIX = new THREE.Matrix4().set(
 const OFFICIAL_CAMERA_POSITION = new THREE.Vector3(0, 2, 0);
 const OFFICIAL_CAMERA_TARGET = new THREE.Vector3(0, 2, 1);
 const OFFICIAL_CAMERA_UP = new THREE.Vector3(0, 1, 0);
+const WORLD_UP = new THREE.Vector3(0, 1, 0);
 const OFFICIAL_VIEW_DIRECTION = OFFICIAL_CAMERA_TARGET.clone()
   .sub(OFFICIAL_CAMERA_POSITION)
   .normalize();
+const EMPTY_MOVEMENT_INPUT: ModelViewerMovementInput = {
+  forward: false,
+  backward: false,
+  left: false,
+  right: false,
+  up: false,
+  down: false,
+};
+
+function hasMovementInput(input: ModelViewerMovementInput) {
+  return input.forward || input.backward || input.left || input.right || input.up || input.down;
+}
 
 function logLccDebug(message: string, payload?: unknown) {
   if (!IS_DEV) return;
@@ -627,6 +646,17 @@ function buildLookAtSnapshot(args: {
   } satisfies CameraSnapshot;
 }
 
+function cloneMovementInput(input: ModelViewerMovementInput): ModelViewerMovementInput {
+  return {
+    forward: input.forward,
+    backward: input.backward,
+    left: input.left,
+    right: input.right,
+    up: input.up,
+    down: input.down,
+  };
+}
+
 function extractPoseSnapshotCandidate(value: unknown): CameraSnapshot | null {
   if (!value || typeof value !== "object") {
     return null;
@@ -689,6 +719,78 @@ function parseDefaultCameraJson(defaultCameraJson: string | null | undefined) {
   } catch {
     return null;
   }
+}
+
+function parseLaunchViewSnapshot(launchView: ModelLaunchView | null | undefined) {
+  if (!launchView || launchView.version !== 1 || launchView.viewerKind !== "lcc") {
+    return null;
+  }
+
+  const position = toVectorTuple(launchView.snapshot?.position);
+  const target = toVectorTuple(launchView.snapshot?.target);
+  const up = toVectorTuple(launchView.snapshot?.up);
+  const near = launchView.snapshot?.near;
+  const far = launchView.snapshot?.far;
+
+  if (
+    !position ||
+    !target ||
+    !up ||
+    !isFiniteNumber(near) ||
+    !isFiniteNumber(far) ||
+    near <= 0 ||
+    far <= 0 ||
+    far < near
+  ) {
+    return null;
+  }
+
+  return {
+    position,
+    target,
+    up,
+    near,
+    far,
+    source: "launchView" as const,
+  } satisfies CameraSnapshot;
+}
+
+function buildLaunchViewFromCamera(
+  camera: THREE.PerspectiveCamera,
+  controls?: OrbitControls | null,
+): ModelLaunchView | null {
+  const target = controls?.target;
+  if (!target) {
+    return null;
+  }
+
+  const position = camera.position.toArray();
+  const targetArray = target.toArray();
+  const up = camera.up.toArray();
+  if (
+    !position.every((value) => Number.isFinite(value)) ||
+    !targetArray.every((value) => Number.isFinite(value)) ||
+    !up.every((value) => Number.isFinite(value)) ||
+    !Number.isFinite(camera.near) ||
+    !Number.isFinite(camera.far) ||
+    camera.near <= 0 ||
+    camera.far <= 0 ||
+    camera.far < camera.near
+  ) {
+    return null;
+  }
+
+  return {
+    version: 1,
+    viewerKind: "lcc",
+    snapshot: {
+      position: position as [number, number, number],
+      target: targetArray as [number, number, number],
+      up: up as [number, number, number],
+      near: camera.near,
+      far: camera.far,
+    },
+  };
 }
 
 async function loadLccSpawnPointSnapshot(
@@ -1026,6 +1128,7 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
   viewerUrl,
   fileFormat,
   viewerType,
+  launchView,
   defaultCameraJson,
   processingBlocked = false,
   processingHint = "",
@@ -1040,6 +1143,15 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
   const lccInstanceRef = useRef<unknown>(null);
   const controlsRef = useRef<OrbitControls | null>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
+  const movementInputRef = useRef<ModelViewerMovementInput>(cloneMovementInput(EMPTY_MOVEMENT_INPUT));
+  const moveSpeedMultiplierRef = useRef(1);
+  const movementBaseStepRef = useRef(0.08);
+  const applyMovementFrameRef = useRef<(deltaSeconds: number) => void>(() => {});
+  const interactionCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const activePointerIdRef = useRef<number | null>(null);
+  const isPointerDraggingRef = useRef(false);
+  const lastFrameTimeRef = useRef<number | null>(null);
+  const canMoveRef = useRef(false);
   const lastLoadedObjectRef = useRef<THREE.Object3D | null>(null);
   const defaultViewRef = useRef<CameraSnapshot | null>(null);
   const currentEntryUrlRef = useRef<string | null>(null);
@@ -1056,6 +1168,7 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
     () => defaultCameraJson?.trim() ?? "",
     [defaultCameraJson],
   );
+  const savedLaunchViewSnapshot = useMemo(() => parseLaunchViewSnapshot(launchView), [launchView]);
   const platformDefaultCameraSnapshot = useMemo(
     () => parseDefaultCameraJson(normalizedDefaultCameraJson || null),
     [normalizedDefaultCameraJson],
@@ -1091,21 +1204,182 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
     }
 
     applyCameraSnapshot(camera, snapshot, controlsRef.current);
+    syncViewerCamera();
     return true;
   };
 
-  useImperativeHandle(
-    ref,
-    () => ({
+  const applyLaunchView = (view: ModelLaunchView) => {
+    const camera = cameraRef.current;
+    if (!camera) {
+      return false;
+    }
+
+    const snapshot = parseLaunchViewSnapshot(view);
+    if (!snapshot) {
+      return false;
+    }
+
+    applyCameraSnapshot(camera, snapshot, controlsRef.current);
+    defaultViewRef.current = snapshot;
+    syncViewerCamera();
+    return true;
+  };
+
+  const setMovementBaseStep = (maxDim: number | null) => {
+    const safeMaxDim = Number.isFinite(maxDim) && maxDim && maxDim > 0 ? maxDim : 20;
+    movementBaseStepRef.current = THREE.MathUtils.clamp(safeMaxDim * 0.0045, 0.03, 6);
+  };
+
+  const clearMovementRuntimeState = () => {
+    movementInputRef.current = cloneMovementInput(EMPTY_MOVEMENT_INPUT);
+    moveSpeedMultiplierRef.current = 1;
+  };
+
+  const syncViewerCamera = () => {
+    const camera = cameraRef.current;
+    if (!camera) {
+      return;
+    }
+    camera.updateMatrixWorld();
+    lccRenderRef.current?.setCamera?.(camera);
+  };
+
+  const stopPointerInteraction = (hardStop = false) => {
+    activePointerIdRef.current = null;
+    isPointerDraggingRef.current = false;
+    const controls = controlsRef.current;
+    if (!controls) {
+      return;
+    }
+
+    controls.update();
+    if (!hardStop || !controls.enabled) {
+      return;
+    }
+
+    controls.enabled = false;
+    controls.update();
+    queueMicrotask(() => {
+      if (isDisposedRef.current || controlsRef.current !== controls) {
+        return;
+      }
+      controls.enabled = true;
+      controls.update();
+    });
+  };
+
+  const translateCameraRig = (translation: THREE.Vector3) => {
+    const camera = cameraRef.current;
+    const controls = controlsRef.current;
+    if (!camera || !controls || translation.lengthSq() <= 0) {
+      return false;
+    }
+
+    camera.position.add(translation);
+    controls.target.add(translation);
+    controls.update();
+    syncViewerCamera();
+    return true;
+  };
+
+  const getForwardVector = () => {
+    const camera = cameraRef.current;
+    if (!camera) {
+      return null;
+    }
+    const forward = new THREE.Vector3();
+    camera.getWorldDirection(forward);
+    return forward.normalize();
+  };
+
+  const getRightVector = () => {
+    const forward = getForwardVector();
+    if (!forward) {
+      return null;
+    }
+
+    const cameraUp = cameraRef.current?.up.clone().normalize() ?? WORLD_UP.clone();
+    const right = new THREE.Vector3().crossVectors(forward, cameraUp);
+    if (right.lengthSq() < 1e-8) {
+      right.crossVectors(forward, WORLD_UP);
+    }
+    if (right.lengthSq() < 1e-8) {
+      return new THREE.Vector3(1, 0, 0);
+    }
+    return right.normalize();
+  };
+
+  const getMovementDistance = (delta?: number) => {
+    if (typeof delta === "number" && Number.isFinite(delta) && delta > 0) {
+      return delta;
+    }
+    return movementBaseStepRef.current * moveSpeedMultiplierRef.current;
+  };
+
+  const moveAlongDirection = (direction: THREE.Vector3 | null, delta?: number) => {
+    if (!direction || direction.lengthSq() <= 0) {
+      return false;
+    }
+    return translateCameraRig(direction.clone().normalize().multiplyScalar(getMovementDistance(delta)));
+  };
+
+  const applyMovementFrame = (deltaSeconds: number) => {
+    if (!canMoveRef.current) {
+      return;
+    }
+
+    const input = movementInputRef.current;
+    if (!input.forward && !input.backward && !input.left && !input.right && !input.up && !input.down) {
+      return;
+    }
+
+    const forward = getForwardVector();
+    const right = getRightVector();
+    if (!forward || !right) {
+      return;
+    }
+
+    const translation = new THREE.Vector3();
+    if (input.forward) translation.add(forward);
+    if (input.backward) translation.sub(forward);
+    if (input.right) translation.add(right);
+    if (input.left) translation.sub(right);
+    if (input.up) translation.add(WORLD_UP);
+    if (input.down) translation.sub(WORLD_UP);
+
+    if (translation.lengthSq() <= 0) {
+      return;
+    }
+
+    const frameScale = Math.min(Math.max(deltaSeconds * 60, 0.25), 4);
+    translateCameraRig(
+      translation.normalize().multiplyScalar(
+        movementBaseStepRef.current * moveSpeedMultiplierRef.current * frameScale,
+      ),
+    );
+  };
+
+  applyMovementFrameRef.current = applyMovementFrame;
+
+  useImperativeHandle(ref, () => ({
       fitView: () => {
         if (!fitCurrentView()) {
           logLccWarn("fitView 暂无可复用的已加载对象，当前版本跳过执行");
         }
       },
+      getCurrentView: () => {
+        const camera = cameraRef.current;
+        if (!camera) {
+          return null;
+        }
+        return buildLaunchViewFromCamera(camera, controlsRef.current);
+      },
+      applyView: (view) => applyLaunchView(view),
       resetView: () => {
         const camera = cameraRef.current;
         if (camera && defaultViewRef.current) {
           applyCameraSnapshot(camera, defaultViewRef.current, controlsRef.current);
+          syncViewerCamera();
           return;
         }
 
@@ -1113,9 +1387,37 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
           logLccWarn("resetView 暂无默认视角快照，也无法执行 bounds fit");
         }
       },
-    }),
-    [],
-  );
+      moveForward: (delta) => {
+        moveAlongDirection(getForwardVector(), delta);
+      },
+      moveBackward: (delta) => {
+        const forward = getForwardVector();
+        moveAlongDirection(forward ? forward.multiplyScalar(-1) : null, delta);
+      },
+      moveLeft: (delta) => {
+        const right = getRightVector();
+        moveAlongDirection(right ? right.multiplyScalar(-1) : null, delta);
+      },
+      moveRight: (delta) => {
+        moveAlongDirection(getRightVector(), delta);
+      },
+      moveUp: (delta) => {
+        moveAlongDirection(WORLD_UP, delta);
+      },
+      moveDown: (delta) => {
+        moveAlongDirection(WORLD_UP.clone().multiplyScalar(-1), delta);
+      },
+      setMoveSpeedMultiplier: (multiplier) => {
+        moveSpeedMultiplierRef.current =
+          Number.isFinite(multiplier) && multiplier > 0 ? multiplier : 1;
+      },
+      setMovementInput: (input) => {
+        movementInputRef.current = cloneMovementInput(input);
+        if (!hasMovementInput(movementInputRef.current)) {
+          lastFrameTimeRef.current = null;
+        }
+      },
+  }));
 
   useEffect(() => {
     let effectDisposed = false;
@@ -1126,6 +1428,7 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
     activeGlobalLoadId = loadId;
     isDisposedRef.current = false;
     let removeResizeListeners = () => {};
+    let removeInteractionListeners = () => {};
 
     const isStaleRequest = () =>
       effectDisposed ||
@@ -1223,6 +1526,8 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
       isDisposedRef.current = true;
       stopLoop(true);
       removeResizeListeners();
+      removeInteractionListeners();
+      stopPointerInteraction(true);
       disposeControls();
       if (isActiveLoadOwner()) {
         currentEntryUrlRef.current = null;
@@ -1237,6 +1542,10 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
       disposeRenderer();
       cameraRef.current = null;
       sceneRef.current = null;
+      interactionCanvasRef.current = null;
+      clearMovementRuntimeState();
+      canMoveRef.current = false;
+      lastFrameTimeRef.current = null;
       lastLoadedObjectRef.current = null;
       defaultViewRef.current = null;
       if (mountRef.current) {
@@ -1270,6 +1579,8 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
       lastProgressLogRef.current = null;
       lastLoadedObjectRef.current = null;
       defaultViewRef.current = null;
+      canMoveRef.current = false;
+      lastFrameTimeRef.current = null;
       setViewerStatus("loading");
       setProgress(0);
       const isLcc2 = lccFormat === "lcc2";
@@ -1364,12 +1675,13 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
         });
 
         const controls = new OrbitControls(camera, currentRenderer.domElement);
-        controls.enableDamping = true;
-        controls.dampingFactor = 0.08;
+        controls.enableDamping = false;
+        controls.autoRotate = false;
         controls.screenSpacePanning = true;
         controls.target.copy(OFFICIAL_CAMERA_TARGET);
         controls.update();
         controlsRef.current = controls;
+        interactionCanvasRef.current = currentRenderer.domElement;
 
         const syncSize = () => {
           if (!mountRef.current || !rendererRef.current) return;
@@ -1391,6 +1703,40 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
           resizeObserverRef.current?.disconnect();
           resizeObserverRef.current = null;
           window.removeEventListener("resize", syncSize);
+        };
+
+        const handlePointerDown = (event: PointerEvent) => {
+          activePointerIdRef.current = event.pointerId;
+          isPointerDraggingRef.current = true;
+        };
+        const handlePointerUp = () => {
+          stopPointerInteraction(false);
+        };
+        const handlePointerCancel = () => {
+          stopPointerInteraction(true);
+        };
+        const handlePointerLeave = () => {
+          if (!isPointerDraggingRef.current) {
+            return;
+          }
+          stopPointerInteraction(true);
+        };
+        const handleWindowBlur = () => {
+          clearMovementRuntimeState();
+          stopPointerInteraction(true);
+        };
+
+        currentRenderer.domElement.addEventListener("pointerdown", handlePointerDown);
+        currentRenderer.domElement.addEventListener("pointerleave", handlePointerLeave);
+        window.addEventListener("pointerup", handlePointerUp);
+        window.addEventListener("pointercancel", handlePointerCancel);
+        window.addEventListener("blur", handleWindowBlur);
+        removeInteractionListeners = () => {
+          currentRenderer.domElement.removeEventListener("pointerdown", handlePointerDown);
+          currentRenderer.domElement.removeEventListener("pointerleave", handlePointerLeave);
+          window.removeEventListener("pointerup", handlePointerUp);
+          window.removeEventListener("pointercancel", handlePointerCancel);
+          window.removeEventListener("blur", handleWindowBlur);
         };
 
         const baseLoadParams: LccLoadParams = {
@@ -1473,11 +1819,13 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
               if (isStaleRequest() || isFailed) return;
 
               let resolvedSnapshot =
+                savedLaunchViewSnapshot ??
                 platformDefaultCameraSnapshot ??
                 boundsCenterHomeView?.snapshot ??
                 null;
               let usedBoundsFallback = false;
               let source: DefaultViewSource | null =
+                savedLaunchViewSnapshot?.source ??
                 platformDefaultCameraSnapshot?.source ??
                 boundsCenterHomeView?.snapshot?.source ??
                 null;
@@ -1491,9 +1839,13 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
               if (resolvedSnapshot) {
                 applyCameraSnapshot(camera, resolvedSnapshot, controlsRef.current);
                 defaultViewRef.current = resolvedSnapshot;
+                syncViewerCamera();
               } else {
                 defaultViewRef.current = null;
               }
+
+              setMovementBaseStep(boundsCenterHomeView?.maxDim ?? null);
+              canMoveRef.current = true;
 
               if (!loadedObject) {
                 logLccWarn("onLoaded 返回值不是 Three Object3D，无法使用 Three bounds 作为兜底", mesh);
@@ -1510,13 +1862,16 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
                 format: currentFormat,
                 useLcc2,
                 defaultViewSource:
-                  platformDefaultCameraSnapshot
+                  savedLaunchViewSnapshot
+                    ? "launchView"
+                    : platformDefaultCameraSnapshot
                     ? "defaultCamera"
                     : boundsCenterHomeView?.snapshot
                       ? "boundsCenterHomeView"
                     : source === "boundsCenterHomeView"
                       ? "boundsCenterHomeView"
                       : "bounds",
+                hasLaunchView: Boolean(savedLaunchViewSnapshot),
                 hasPlatformDefaultCameraJson: Boolean(platformDefaultCameraSnapshot),
                 boundsSource: resolution.boundsSource,
                 center: boundsCenterHomeView?.center ?? null,
@@ -1587,6 +1942,11 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
           }
           animationFrameRef.current = window.requestAnimationFrame(renderFrame);
           try {
+            const now = typeof performance !== "undefined" ? performance.now() : Date.now();
+            const previousTime = lastFrameTimeRef.current ?? now;
+            const deltaSeconds = Math.min(Math.max((now - previousTime) / 1000, 0), 0.1);
+            lastFrameTimeRef.current = now;
+            applyMovementFrameRef.current(deltaSeconds);
             controlsRef.current?.update();
             lccRender.update();
             rendererRef.current.render(scene, camera);
@@ -1630,6 +1990,7 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
     lccFormat,
     lccFormatDecision.source,
     normalizedModelUrl,
+    savedLaunchViewSnapshot,
     platformDefaultCameraSnapshot,
     normalizedViewerUrl,
     processingBlocked,

@@ -1,13 +1,32 @@
 "use client";
 
 import type { ModelViewerKind } from "@/lib/model-viewer-kind";
-import type { ModelDetail } from "@/lib/types";
+import type { ModelDetail, ModelLaunchView } from "@/lib/types";
 
 export type ModelViewerHandle = {
   resetView?: () => void;
   fitView?: () => void;
   enterFullscreen?: () => void;
   takeScreenshot?: () => Promise<string | void> | string | void;
+  getCurrentView?: () => ModelLaunchView | null;
+  applyView?: (view: ModelLaunchView) => boolean;
+  moveForward?: (delta?: number) => void;
+  moveBackward?: (delta?: number) => void;
+  moveLeft?: (delta?: number) => void;
+  moveRight?: (delta?: number) => void;
+  moveUp?: (delta?: number) => void;
+  moveDown?: (delta?: number) => void;
+  setMoveSpeedMultiplier?: (multiplier: number) => void;
+  setMovementInput?: (input: ModelViewerMovementInput) => void;
+};
+
+export type ModelViewerMovementInput = {
+  forward: boolean;
+  backward: boolean;
+  left: boolean;
+  right: boolean;
+  up: boolean;
+  down: boolean;
 };
 
 export type ModelViewerCapabilities = {
@@ -22,6 +41,7 @@ export type ModelViewerCapabilities = {
   section: boolean;
   screenshot: boolean;
   fullscreen: boolean;
+  saveView: boolean;
 };
 
 export interface ModelViewerEngineProps {
@@ -41,6 +61,7 @@ export const EMPTY_VIEWER_CAPABILITIES: ModelViewerCapabilities = {
   section: false,
   screenshot: false,
   fullscreen: false,
+  saveView: false,
 };
 
 export const LCC_VIEWER_CAPABILITIES: ModelViewerCapabilities = {
@@ -50,6 +71,7 @@ export const LCC_VIEWER_CAPABILITIES: ModelViewerCapabilities = {
   pan: true,
   orbit: true,
   fullscreen: true,
+  saveView: true,
 };
 
 export const IFRAME_VIEWER_CAPABILITIES: ModelViewerCapabilities = {

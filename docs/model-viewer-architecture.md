@@ -160,6 +160,99 @@ type ModelViewerCapabilities = {
 - 工具按钮若尚未接入，必须保持 `disabled`，点击不报错
 - `takeScreenshot` 接口已预留，但本轮不强制实现真实截图
 
+## 三点一、模型启动视图保存（第一阶段后端契约）
+
+- 修改时间：`2026-06-06`
+- 本轮范围：
+  - `server/prisma/schema.prisma`
+  - `server/prisma/migrations/*`
+  - `server/src/modules/models/*`
+  - `docs/model-viewer-architecture.md`
+  - `docs/dev-checkpoint.md`
+- 本轮不修改：
+  - `web/components/models/lcc-viewer.tsx`
+  - `web/components/models/model-viewer-shell.tsx`
+  - `web/components/models/model-viewer-toolbar.tsx`
+  - `LCCRender.load(...)`
+  - `dataPath`
+  - `boundsCenterHomeView`
+  - OSS / 上传 / `r2Key / objectKey` 兼容逻辑
+- 后端新增字段：
+  - `models.launch_view_json`
+  - `models.launch_view_updated_at`
+  - `models.launch_view_updated_by`
+- 详情接口新增返回：
+  - `launchView`
+  - `canSaveLaunchView`
+- 新增接口：
+  - `PUT /api/models/:id/launch-view`
+  - `DELETE /api/models/:id/launch-view`
+- 当前权限规则：
+  - 未登录写入/删除：`401`
+  - 非模型归属用户写入/删除：`403`
+  - 模型不存在或已删除：`404`
+  - `launchView` 结构非法：`400`
+  - 所有有权限查看该模型详情的用户都可读取 `launchView`
+- 当前 `launchView` 契约：
+  - `version = 1`
+  - `viewerKind = "lcc"`
+  - `snapshot = { position, target, up, near, far }`
+- 本轮仅完成后端契约与接口：
+  - `ModelViewerHandle` 尚未新增 `getCurrentView / applyView`
+  - 左下角工具栏尚未接“保存启动视图”按钮
+  - `LccViewer` 尚未在打开时优先应用 `launchView`
+- 下一阶段前端接入原则：
+  - `ModelViewerShell` 只负责调用 `viewerHandle.getCurrentView / applyView`
+  - 具体视图读写仍由各 Viewer 自己实现
+  - `LccViewer` 打开时的优先级应为：`launchView -> defaultCameraJson -> boundsCenterHomeView -> bounds`
+
+## 三点二、模型启动视图保存（第二阶段前端接线）
+
+- 修改时间：`2026-06-06`
+- 本轮范围：
+  - `web/lib/types.ts`
+  - `web/components/models/viewers/types.ts`
+  - `web/components/models/model-viewer-shell.tsx`
+  - `web/components/models/model-viewer-toolbar.tsx`
+  - `web/components/models/lcc-viewer.tsx`
+  - `web/components/pages/model-detail-page.tsx`
+  - `docs/model-viewer-architecture.md`
+  - `docs/dev-checkpoint.md`
+- 本轮不修改：
+  - `server/*`
+  - `LCCRender.load(...)`
+  - `dataPath`
+  - `boundsCenterHomeView` 算法本体
+  - Loading
+  - 右侧详情栏
+  - 顶部导航
+- 前端新增类型：
+  - `ModelLaunchView`
+  - `ModelLaunchViewSnapshot`
+  - `ModelDetail.launchView`
+  - `ModelDetail.canSaveLaunchView`
+- `ModelViewerHandle` 新增：
+  - `getCurrentView()`
+  - `applyView(view)`
+- `LccViewer` 当前行为：
+  - 打开模型优先级：`launchView -> defaultCameraJson -> boundsCenterHomeView -> bounds fallback`
+  - `resetView` 回到当前最终默认视图；若已有保存的 `launchView`，则回到保存视图
+  - `getCurrentView()` 直接读取 `camera.position / controls.target / camera.up / near / far`
+  - `applyView(view)` 只接受合法 `launchView`，应用后同步更新 `defaultViewRef`
+- 工具栏规则：
+  - “保存启动视图” 位于左下角“工具”展开项内
+  - 仅当 `canSaveLaunchView=true` 且当前 Viewer `capabilities.saveView=true` 时显示
+  - 非归属用户不显示该按钮
+- 保存流程：
+  - 点击按钮后调用 `viewerHandle.getCurrentView()`
+  - 前端调用 `PUT /api/models/:id/launch-view`
+  - 成功后提示“启动视图已保存”
+  - 成功后立即调用 `viewerHandle.applyView(view)`，无需刷新页面
+- 当前接入范围：
+  - 仅 LCC / LCC2
+  - 暂不接 GLB / IFC / PLY / OSGB
+  - 暂不接前台删除启动视图按钮
+
 ## 四、Viewer 分发规则
 
 文件：`web/lib/model-viewer-kind.ts`
@@ -300,6 +393,60 @@ type ModelViewerCapabilities = {
 
 - 当前这些按钮统一展示为禁用态，title 提示“暂未接入”
 - 后续真实 `GlbViewer` 将直接复用同一套 `Toolbar / Shell / capabilities`，只需补 Viewer 句柄与能力声明
+
+## 七点一、LCC / LCC2 真实操作控制第一版
+
+- 修改时间：`2026-06-06`
+- 本轮范围：
+  - `web/components/models/model-viewer-shell.tsx`
+  - `web/components/models/model-viewer-toolbar.tsx`
+  - `web/components/models/model-viewer-help.tsx`
+  - `web/components/models/lcc-viewer.tsx`
+  - `web/components/models/viewers/types.ts`
+- 本轮不修改：
+  - `server`
+  - 数据库 / Prisma
+  - OSS / 上传
+  - `deploy`
+  - `LCCRender.load(...)`
+  - `dataPath`
+  - `boundsCenterHomeView` 默认视角算法
+  - `model-loading-overlay.tsx`
+  - 右侧详情栏
+  - 顶部导航
+  - 模型详情页整体布局
+- 当前规则：
+  - 左键拖动：旋转视角
+  - 右键拖动：平移视角（继续沿用 OrbitControls 现有行为，不单独重写）
+  - 滚轮：缩放
+  - `W / A / S / D`：前后左右移动
+  - `Q / E`：下降 / 上升
+  - `Shift`：加速
+  - `R`：重置视角
+  - `H`：打开 / 关闭帮助
+  - `Esc`：关闭帮助
+- 分工收口：
+  - `ModelViewerShell` 只负责统一监听键盘事件，并把移动输入 / 速度倍率 / `resetView` / Help 开关转发给当前 Viewer
+  - `LccViewer` 自己实现真实 camera movement：按当前相机方向计算 `forward/right/world up`，并同步平移 `camera.position + controls.target`
+  - 其他格式 Viewer 若未实现对应句柄，则保持静默，不报错、不响应
+- `ModelViewerHandle` 已补充接口：
+  - `moveForward / moveBackward / moveLeft / moveRight / moveUp / moveDown`
+  - `setMoveSpeedMultiplier`
+  - `setMovementInput`
+- 速度策略：
+  - 继续基于当前模型 bounds 尺寸自适应
+  - 当前在 `LccViewer` 内使用 `maxDim` 推导基础移动步长
+  - `Shift` 为约 `3x` 速度倍率
+- Help 入口位置：
+  - 仍位于模型视图左下角现有“工具”模块展开项内
+  - 不新增顶部帮助按钮
+  - 不新增常驻说明面板
+- 默认视角保持不变：
+  - `resetView` 仍回到 `defaultCameraJson -> boundsCenterHomeView -> bounds`
+  - 当前 `LCC / LCC2` 默认打开视角仍以 `boundsCenterHomeView` 为主链路
+- 后续接入原则：
+  - 其他格式 Viewer 继续复用同一套 `Shell -> handle -> capabilities` 结构
+  - 由各自 Viewer 独立实现相机移动，不把 LCC 逻辑外溢到 Shell
 
 ## 八、当前详情页前端 UI 约束
 

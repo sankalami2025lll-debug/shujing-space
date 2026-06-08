@@ -1,6 +1,8 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { toast } from "sonner";
+import { ModelViewerHelp } from "@/components/models/model-viewer-help";
 import { ModelViewerToolbar } from "@/components/models/model-viewer-toolbar";
 import { BimViewer } from "@/components/models/viewers/bim-viewer";
 import { GlbViewer } from "@/components/models/viewers/glb-viewer";
@@ -11,13 +13,48 @@ import { PlyViewer } from "@/components/models/viewers/ply-viewer";
 import { UnsupportedViewer } from "@/components/models/viewers/unsupported-viewer";
 import {
   getViewerCapabilities,
+  type ModelViewerMovementInput,
   type ModelViewerHandle,
 } from "@/components/models/viewers/types";
+import { ApiError, http } from "@/lib/http";
 import { getModelViewerKind } from "@/lib/model-viewer-kind";
-import type { ModelDetail } from "@/lib/types";
+import type { ModelDetail, ModelLaunchView } from "@/lib/types";
 
 interface ModelViewerShellProps {
   model: ModelDetail;
+  onLaunchViewSaved?: (view: ModelLaunchView) => void;
+}
+
+interface SaveLaunchViewResult {
+  launchView: ModelLaunchView;
+  updatedAt: string;
+  updatedBy: number;
+}
+
+const EMPTY_MOVEMENT_INPUT: ModelViewerMovementInput = {
+  forward: false,
+  backward: false,
+  left: false,
+  right: false,
+  up: false,
+  down: false,
+};
+
+function cloneEmptyMovementInput(): ModelViewerMovementInput {
+  return { ...EMPTY_MOVEMENT_INPUT };
+}
+
+function isTypingElement(target: EventTarget | null) {
+  if (!(target instanceof HTMLElement)) {
+    return false;
+  }
+
+  if (target.isContentEditable) {
+    return true;
+  }
+
+  const tagName = target.tagName.toLowerCase();
+  return tagName === "input" || tagName === "textarea" || tagName === "select";
 }
 
 function processingStatusText(status: ModelDetail["processingStatus"]) {
@@ -34,14 +71,29 @@ function processingStatusText(status: ModelDetail["processingStatus"]) {
   }
 }
 
-export function ModelViewerShell({ model }: ModelViewerShellProps) {
+export function ModelViewerShell({ model, onLaunchViewSaved }: ModelViewerShellProps) {
   const viewerViewportRef = useRef<HTMLDivElement | null>(null);
   const viewerHandleRef = useRef<ModelViewerHandle | null>(null);
   const [viewerResetSeed, setViewerResetSeed] = useState(0);
+  const [isHelpOpen, setIsHelpOpen] = useState(false);
+  const [movementInput, setMovementInput] = useState<ModelViewerMovementInput>(EMPTY_MOVEMENT_INPUT);
+  const [moveSpeedMultiplier, setMoveSpeedMultiplier] = useState(1);
+  const [saveLaunchViewPending, setSaveLaunchViewPending] = useState(false);
   const viewerKind = getModelViewerKind(model);
   const processingBlocked = model.processingStatus !== "ready";
   const processingHint = processingStatusText(model.processingStatus);
   const viewerCapabilities = useMemo(() => getViewerCapabilities(viewerKind), [viewerKind]);
+  const isLccViewer = viewerKind === "lcc";
+  const canShowSaveLaunchView =
+    !processingBlocked && model.canSaveLaunchView && viewerCapabilities.saveView;
+
+  const clearMovementState = useCallback(() => {
+    const emptyInput = cloneEmptyMovementInput();
+    setMovementInput(emptyInput);
+    setMoveSpeedMultiplier(1);
+    viewerHandleRef.current?.setMovementInput?.(emptyInput);
+    viewerHandleRef.current?.setMoveSpeedMultiplier?.(1);
+  }, []);
 
   const handleFullscreen = () => {
     const element = viewerViewportRef.current;
@@ -60,7 +112,7 @@ export function ModelViewerShell({ model }: ModelViewerShellProps) {
     element.requestFullscreen().catch(() => {});
   };
 
-  const handleResetView = () => {
+  const handleResetView = useCallback(() => {
     if (viewerCapabilities.resetView) {
       if (viewerHandleRef.current?.resetView) {
         viewerHandleRef.current.resetView();
@@ -78,11 +130,191 @@ export function ModelViewerShell({ model }: ModelViewerShellProps) {
       setViewerResetSeed((value) => value + 1);
       return;
     }
-  };
+  }, [viewerCapabilities.resetView, viewerKind]);
 
   const handleTakeScreenshot = () => {
     void viewerHandleRef.current?.takeScreenshot?.();
   };
+
+  const handleSaveLaunchView = useCallback(async () => {
+    if (saveLaunchViewPending) {
+      return;
+    }
+
+    const currentView = viewerHandleRef.current?.getCurrentView?.();
+    if (!currentView) {
+      toast.error("当前视角暂不支持保存");
+      return;
+    }
+
+    setSaveLaunchViewPending(true);
+    try {
+      const result = await http.put<SaveLaunchViewResult>(
+        `/models/${model.id}/launch-view`,
+        currentView,
+      );
+      const nextView = result.launchView ?? currentView;
+      viewerHandleRef.current?.applyView?.(nextView);
+      onLaunchViewSaved?.(nextView);
+      toast.success("启动视图已保存");
+    } catch (error) {
+      toast.error(error instanceof ApiError ? error.message : "保存启动视图失败，请稍后重试。");
+    } finally {
+      setSaveLaunchViewPending(false);
+    }
+  }, [model.id, onLaunchViewSaved, saveLaunchViewPending]);
+
+  const handleToggleHelp = () => {
+    if (!isLccViewer) return;
+    setIsHelpOpen((value) => {
+      const nextValue = !value;
+      if (nextValue) {
+        clearMovementState();
+      }
+      return nextValue;
+    });
+  };
+
+  useEffect(() => {
+    if (!isLccViewer) {
+      setIsHelpOpen(false);
+      setMovementInput(cloneEmptyMovementInput());
+      setMoveSpeedMultiplier(1);
+    }
+  }, [isLccViewer]);
+
+  useEffect(() => {
+    if (isHelpOpen) {
+      clearMovementState();
+    }
+  }, [clearMovementState, isHelpOpen]);
+
+  useEffect(() => {
+    clearMovementState();
+    setIsHelpOpen(false);
+  }, [clearMovementState, model.id]);
+
+  useEffect(() => {
+    if (!isLccViewer) {
+      return;
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (isTypingElement(event.target)) {
+        return;
+      }
+
+      const key = event.key.toLowerCase();
+      const movementKeyMap: Partial<Record<string, keyof ModelViewerMovementInput>> = {
+        w: "forward",
+        s: "backward",
+        a: "left",
+        d: "right",
+        q: "down",
+        e: "up",
+      };
+      const movementKey = movementKeyMap[key];
+
+      if (isHelpOpen && (key === "shift" || movementKey)) {
+        return;
+      }
+
+      if (key === "shift") {
+        setMoveSpeedMultiplier(3);
+        return;
+      }
+
+      if (key === "r") {
+        handleResetView();
+        return;
+      }
+
+      if (key === "h") {
+        setIsHelpOpen((value) => {
+          const nextValue = !value;
+          if (nextValue) {
+            clearMovementState();
+          }
+          return nextValue;
+        });
+        return;
+      }
+
+      if (event.key === "Escape") {
+        clearMovementState();
+        setIsHelpOpen(false);
+        return;
+      }
+
+      if (!movementKey) {
+        return;
+      }
+
+      setMovementInput((current) =>
+        current[movementKey] ? current : { ...current, [movementKey]: true },
+      );
+    };
+
+    const handleKeyUp = (event: KeyboardEvent) => {
+      if (isTypingElement(event.target)) {
+        return;
+      }
+
+      const key = event.key.toLowerCase();
+      if (key === "shift") {
+        setMoveSpeedMultiplier(1);
+        return;
+      }
+
+      const movementKeyMap: Partial<Record<string, keyof ModelViewerMovementInput>> = {
+        w: "forward",
+        s: "backward",
+        a: "left",
+        d: "right",
+        q: "down",
+        e: "up",
+      };
+      const movementKey = movementKeyMap[key];
+      if (!movementKey) {
+        return;
+      }
+
+      setMovementInput((current) =>
+        current[movementKey] ? { ...current, [movementKey]: false } : current,
+      );
+    };
+
+    const handleWindowBlur = () => {
+      clearMovementState();
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        clearMovementState();
+      }
+    };
+
+    document.addEventListener("keydown", handleKeyDown);
+    document.addEventListener("keyup", handleKeyUp);
+    window.addEventListener("blur", handleWindowBlur);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+      document.removeEventListener("keyup", handleKeyUp);
+      window.removeEventListener("blur", handleWindowBlur);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      clearMovementState();
+    };
+  }, [clearMovementState, handleResetView, isHelpOpen, isLccViewer]);
+
+  useEffect(() => {
+    viewerHandleRef.current?.setMovementInput?.(movementInput);
+  }, [movementInput]);
+
+  useEffect(() => {
+    viewerHandleRef.current?.setMoveSpeedMultiplier?.(moveSpeedMultiplier);
+  }, [moveSpeedMultiplier]);
 
   const renderViewer = () => {
     switch (viewerKind) {
@@ -95,6 +327,8 @@ export function ModelViewerShell({ model }: ModelViewerShellProps) {
             viewerUrl={model.viewerUrl}
             fileFormat={model.fileFormat}
             viewerType={model.viewerType}
+            launchView={model.launchView}
+            defaultCameraJson={model.defaultCameraJson}
             processingBlocked={processingBlocked}
             processingHint={processingHint}
           />
@@ -133,6 +367,7 @@ export function ModelViewerShell({ model }: ModelViewerShellProps) {
     <div className="flex h-full flex-col bg-[#0d0d0d]">
       <div ref={viewerViewportRef} className="relative min-h-[520px] flex-1 overflow-hidden">
         {renderViewer()}
+        <ModelViewerHelp open={isLccViewer && isHelpOpen} />
         <div className="pointer-events-none absolute bottom-4 left-4 z-20">
           <div className="pointer-events-auto">
             <ModelViewerToolbar
@@ -140,6 +375,11 @@ export function ModelViewerShell({ model }: ModelViewerShellProps) {
               onResetView={handleResetView}
               onToggleFullscreen={handleFullscreen}
               onTakeScreenshot={handleTakeScreenshot}
+              onSaveLaunchView={handleSaveLaunchView}
+              onToggleHelp={isLccViewer ? handleToggleHelp : undefined}
+              isHelpOpen={isHelpOpen}
+              canShowSaveLaunchView={canShowSaveLaunchView}
+              saveLaunchViewPending={saveLaunchViewPending}
             />
           </div>
         </div>
