@@ -22,6 +22,8 @@ import {
 import { toast } from "sonner";
 import { useAuth } from "@/components/providers/auth-provider";
 import { UploadModal } from "@/components/models/upload-modal";
+import { UploadTaskCard } from "@/components/models/upload-task-card";
+import { useUploadTaskManager } from "@/components/providers/upload-task-provider";
 import {
   getMyModels,
   getMyPublished,
@@ -33,6 +35,7 @@ import { coverStyleByType, formatRelativeTime } from "@/lib/format";
 import { typeTagColor } from "@/lib/community-data";
 import { ApiError } from "@/lib/http";
 import type { MeStats, MyApplication, MyFavorite, MyModel } from "@/lib/types";
+import type { UploadTask } from "@/lib/upload-task/types";
 
 // MODEL_STATUS_META：模型审核状态（后端英文枚举）→ 中文标签 + 角标配色（用于「我的发布/我的模型」）。
 const MODEL_STATUS_META: Record<string, { label: string; color: string }> = {
@@ -109,6 +112,11 @@ interface Async<T> {
 }
 
 const ASYNC_IDLE = { loading: false, error: null, data: null } as const;
+
+type MyModelListItem =
+  | { kind: "local-task"; key: string; task: UploadTask }
+  | { kind: "persisted-task"; key: string; task: UploadTask }
+  | { kind: "server-model"; key: string; model: MyModel };
 
 // CoverPreview：个人中心模型封面预览；有 coverUrl 时优先显示图片，失败或为空则回退渐变占位。
 function CoverPreview({
@@ -212,6 +220,7 @@ function TabState<T>({
 export default function PersonalCenterPage() {
   const router = useRouter();
   const { user, isAuthed, bootstrapping } = useAuth();
+  const { tasks } = useUploadTaskManager();
 
   // tab：控制当前展示「我的模型 / 我的收藏 / 我的发布 / 我的申请」
   const [tab, setTab] = useState<"models" | "favorites" | "published" | "applications">("models");
@@ -361,6 +370,45 @@ export default function PersonalCenterPage() {
     },
   ];
 
+  const modelList = models.data ?? [];
+  const existingModelIds = new Set(modelList.map((item) => item.id));
+  const unresolvedCreatedModelIds = tasks
+    .filter(
+      (task) =>
+        (task.status === "success" || task.status === "processing") &&
+        task.createdModelId &&
+        !existingModelIds.has(task.createdModelId),
+    )
+    .map((task) => task.createdModelId as number)
+    .sort((a, b) => a - b);
+  const unresolvedCreatedModelIdsKey = unresolvedCreatedModelIds.join(",");
+  const hasUnresolvedCreatedModels = unresolvedCreatedModelIds.length > 0;
+
+  // 后台任务 createModel 成功后，如果服务端列表还没包含该模型，短轮询刷新一次个人中心数据，直到可去重。
+  useEffect(() => {
+    if (bootstrapping || !isAuthed) return;
+    if (tab !== "models") return;
+    if (!hasUnresolvedCreatedModels) return;
+
+    const refresh = () => {
+      loadModels();
+      loadPublished();
+      getMyStats().then(setStats).catch(() => {});
+    };
+
+    refresh();
+    const timer = window.setInterval(refresh, 3000);
+    return () => window.clearInterval(timer);
+  }, [
+    unresolvedCreatedModelIdsKey,
+    hasUnresolvedCreatedModels,
+    tab,
+    bootstrapping,
+    isAuthed,
+    loadModels,
+    loadPublished,
+  ]);
+
   // 自举中或未登录：展示 loading，避免未授权内容闪现
   if (bootstrapping || !isAuthed) {
     return (
@@ -372,6 +420,22 @@ export default function PersonalCenterPage() {
       </div>
     );
   }
+
+  const visibleTasks = tasks.filter(
+    (task) => !task.createdModelId || !existingModelIds.has(task.createdModelId),
+  );
+  const modelItems: MyModelListItem[] = [
+    ...visibleTasks.map((task) => ({
+      kind: task.kind === "local" ? ("local-task" as const) : ("persisted-task" as const),
+      key: `${task.kind}-task-${task.id}`,
+      task,
+    })),
+    ...modelList.map((model) => ({
+      kind: "server-model" as const,
+      key: `model-${model.id}`,
+      model,
+    })),
+  ];
 
   return (
     <div className="min-h-screen bg-[#0a0a0a] text-white overflow-x-hidden">
@@ -418,14 +482,66 @@ export default function PersonalCenterPage() {
           </div>
 
           {tab === "models" && (
-            <TabState state={models} emptyText="你还没有发布过模型" onRetry={loadModels}>
-              {(list) => (
+            <>
+              {models.loading && modelItems.length === 0 && (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {list.map((m) => {
+                  {Array.from({ length: 3 }).map((_, i) => (
+                    <div
+                      key={i}
+                      className="bg-white/[0.03] border border-white/10 rounded-xl overflow-hidden animate-pulse"
+                    >
+                      <div className="h-28 bg-white/5" />
+                      <div className="p-3 space-y-2">
+                        <div className="h-3 bg-white/5 rounded" />
+                        <div className="h-3 bg-white/5 rounded w-2/3" />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {models.error && modelItems.length === 0 && (
+                <div className="text-center py-16 text-gray-500">
+                  <ClipboardList className="w-9 h-9 mx-auto mb-3 opacity-30" />
+                  <p className="text-[14px]">{models.error}</p>
+                  <button
+                    type="button"
+                    onClick={loadModels}
+                    className="mt-4 px-6 py-2.5 rounded-full bg-white/8 border border-white/10 text-[14px] text-gray-200 hover:bg-white/12 hover:border-white/20 transition-all"
+                  >
+                    重新加载
+                  </button>
+                </div>
+              )}
+
+              {modelItems.length > 0 && (
+                <div
+                  data-testid="personal-center-models-grid"
+                  className="grid grid-cols-1 items-start sm:grid-cols-2 lg:grid-cols-3 gap-4"
+                >
+                  {modelItems.map((item) => {
+                    if (item.kind === "local-task" || item.kind === "persisted-task") {
+                      return (
+                        <div
+                          key={item.key}
+                          data-testid={
+                            item.kind === "local-task"
+                              ? "personal-center-local-task-item"
+                              : "personal-center-persisted-task-item"
+                          }
+                          className="w-full self-start"
+                        >
+                          <UploadTaskCard task={item.task} />
+                        </div>
+                      );
+                    }
+
+                    const m = item.model;
                     const meta = resolveMyModelBadge(m);
                     return (
                       <div
-                        key={m.id}
+                        key={item.key}
+                        data-testid="personal-center-server-model-card"
                         className="relative w-full bg-white/[0.03] border border-white/10 rounded-xl overflow-hidden hover:border-white/20 transition-all"
                       >
                         <CoverPreview
@@ -469,7 +585,14 @@ export default function PersonalCenterPage() {
                   </button>
                 </div>
               )}
-            </TabState>
+
+              {!models.loading && !models.error && modelItems.length === 0 && (
+                <div className="text-center py-16 text-gray-500">
+                  <FileBox className="w-9 h-9 mx-auto mb-3 opacity-30" />
+                  <p className="text-[14px]">你还没有发布过模型</p>
+                </div>
+              )}
+            </>
           )}
 
           {tab === "favorites" && (

@@ -11,8 +11,23 @@
 import { getToken, clearToken } from "./token";
 import type { ApiResponse } from "./types";
 
-// API_BASE_URL：后端 API 基址；优先取 NEXT_PUBLIC_API_BASE_URL，缺省回退 "/api"。
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "/api";
+// API_BASE_URL：后端 API 基址；本地联调强制走 /api，避免 shell 中残留远端地址污染 dev bundle。
+function resolveApiBaseUrl(): string {
+  const envBase = process.env.NEXT_PUBLIC_API_BASE_URL?.trim();
+
+  if (typeof window !== "undefined") {
+    const hostname = window.location.hostname;
+    if (hostname === "127.0.0.1" || hostname === "localhost") {
+      return "/api";
+    }
+  }
+
+  if (process.env.NODE_ENV === "development" && envBase === "https://shujing.space/api") {
+    return "/api";
+  }
+
+  return envBase || "/api";
+}
 
 /**
  * ApiError：统一的接口错误类型。
@@ -45,7 +60,7 @@ export interface RequestOptions extends Omit<RequestInit, "body"> {
 // buildUrl：拼接基址与路径，避免出现重复或缺失的斜杠。
 function buildUrl(path: string): string {
   if (/^https?:\/\//i.test(path)) return path;
-  const base = API_BASE_URL.replace(/\/$/, "");
+  const base = resolveApiBaseUrl().replace(/\/$/, "");
   const suffix = path.startsWith("/") ? path : `/${path}`;
   return `${base}${suffix}`;
 }

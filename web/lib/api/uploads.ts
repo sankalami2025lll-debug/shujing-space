@@ -17,6 +17,16 @@ import type {
 export const R2_NOT_CONFIGURED_MESSAGE =
   "对象存储未配置，请先配置对象存储";
 
+export const UPLOAD_ABORTED_MESSAGE = "已取消上传";
+
+// UploadAbortedError：用户主动取消上传时抛出的专用错误，供弹窗区分展示。
+export class UploadAbortedError extends Error {
+  constructor(message = UPLOAD_ABORTED_MESSAGE) {
+    super(message);
+    this.name = "UploadAbortedError";
+  }
+}
+
 // PresignParams：申请预签名入参，对齐后端 PresignDto。
 export interface PresignParams {
   kind: FileKind;
@@ -34,10 +44,22 @@ export interface UploadCallbackParams {
   size: number;
 }
 
+export interface UploadProgress {
+  loaded: number;
+  total: number;
+  percent: number;
+}
+
+export interface UploadPutOptions {
+  signal?: AbortSignal;
+  onProgress?: (progress: UploadProgress) => void;
+}
+
 // presignUpload：申请 R2 预签名 PUT 地址；503 时映射为固定用户文案。
 export function presignUpload(params: PresignParams): Promise<PresignResult> {
   return http
     .post<PresignResult>("/uploads/presign", params)
+    .then((result) => result)
     .catch((e: unknown) => {
       if (e instanceof ApiError && e.status === 503) {
         throw new ApiError(R2_NOT_CONFIGURED_MESSAGE, e.code, e.status);
@@ -61,24 +83,74 @@ export async function putFileToPresignedUrl(
   uploadUrl: string,
   file: File,
   requiredHeaders: Record<string, string>,
+  options: UploadPutOptions = {},
 ): Promise<void> {
   const headers = new Headers(requiredHeaders);
   if (!headers.has("Content-Type")) {
     headers.set("Content-Type", file.type || "application/octet-stream");
   }
-  let res: Response;
-  try {
-    res = await fetch(uploadUrl, { method: "PUT", body: file, headers });
-  } catch {
-    throw new ApiError("文件上传到对象存储失败，请检查网络或稍后重试。", -1, 0);
-  }
-  if (!res.ok) {
-    throw new ApiError(
-      `文件上传到对象存储失败（HTTP ${res.status}）`,
-      -1,
-      res.status,
-    );
-  }
+  const total = file.size;
+
+  await new Promise<void>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    const onAbort = () => {
+      xhr.abort();
+    };
+    const cleanup = () => {
+      if (options.signal) {
+        options.signal.removeEventListener("abort", onAbort);
+      }
+    };
+
+    if (options.signal?.aborted) {
+      reject(new UploadAbortedError());
+      return;
+    }
+
+    xhr.open("PUT", uploadUrl, true);
+    headers.forEach((value, key) => {
+      xhr.setRequestHeader(key, value);
+    });
+
+    xhr.upload.onprogress = (event) => {
+      if (!options.onProgress || !event.lengthComputable) return;
+      options.onProgress({
+        loaded: event.loaded,
+        total: event.total || total,
+        percent: event.total > 0 ? Math.min(100, Math.round((event.loaded / event.total) * 100)) : 0,
+      });
+    };
+
+    xhr.onload = () => {
+      cleanup();
+      if (xhr.status >= 200 && xhr.status < 300) {
+        options.onProgress?.({
+          loaded: total,
+          total,
+          percent: 100,
+        });
+        resolve();
+        return;
+      }
+      reject(new ApiError(`文件上传到对象存储失败（HTTP ${xhr.status}）`, -1, xhr.status));
+    };
+
+    xhr.onerror = () => {
+      cleanup();
+      reject(new ApiError("文件上传到对象存储失败，请检查网络或稍后重试。", -1, 0));
+    };
+
+    xhr.onabort = () => {
+      cleanup();
+      reject(new UploadAbortedError());
+    };
+
+    if (options.signal) {
+      options.signal.addEventListener("abort", onAbort, { once: true });
+    }
+
+    xhr.send(file);
+  });
 }
 
 /**
@@ -88,6 +160,7 @@ export async function putFileToPresignedUrl(
 export async function uploadFileToR2(
   kind: FileKind,
   file: File,
+  options: UploadPutOptions = {},
 ): Promise<UploadCallbackResult> {
   const mime = file.type || "application/octet-stream";
   const presign = await presignUpload({
@@ -96,7 +169,7 @@ export async function uploadFileToR2(
     mime,
     size: file.size,
   });
-  await putFileToPresignedUrl(presign.uploadUrl, file, presign.requiredHeaders);
+  await putFileToPresignedUrl(presign.uploadUrl, file, presign.requiredHeaders, options);
   return uploadCallback({
     kind,
     r2Key: presign.r2Key,
