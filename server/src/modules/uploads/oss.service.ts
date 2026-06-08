@@ -17,7 +17,12 @@ import { randomUUID } from 'node:crypto';
 import OSS from 'ali-oss';
 import { FileKind } from '@prisma/client';
 import { extractExtension } from './upload.constants';
-import { ObjectStorageService, PutObjectResult } from './object-storage.interface';
+import {
+  MultipartInitResult,
+  MultipartPartDescriptor,
+  ObjectStorageService,
+  PutObjectResult,
+} from './object-storage.interface';
 
 interface OssConfig {
   accessKeyId: string;
@@ -37,6 +42,34 @@ interface OssHeadLike {
   res?: {
     headers?: HeaderMap;
   };
+}
+
+interface OssMultipartClient extends OSS {
+  initMultipartUpload(
+    name: string,
+    options?: Record<string, unknown>,
+  ): Promise<{ uploadId: string }>;
+  signatureUrlV4(
+    method: string,
+    expires: number,
+    request?: {
+      headers?: Record<string, string>;
+      queries?: Record<string, string | number>;
+    },
+    objectName?: string,
+    additionalHeaders?: string[],
+  ): Promise<string>;
+  completeMultipartUpload(
+    name: string,
+    uploadId: string,
+    parts: Array<{ number: number; etag: string }>,
+    options?: Record<string, unknown>,
+  ): Promise<unknown>;
+  abortMultipartUpload(
+    name: string,
+    uploadId: string,
+    options?: Record<string, unknown>,
+  ): Promise<unknown>;
 }
 
 @Injectable()
@@ -81,6 +114,10 @@ export class OssService implements ObjectStorageService {
     return this.client;
   }
 
+  private getMultipartClient(): OssMultipartClient {
+    return this.getClient() as OssMultipartClient;
+  }
+
   buildKey(kind: FileKind, userId: bigint, originalName: string): string {
     void kind;
     const ext = extractExtension(originalName);
@@ -107,6 +144,84 @@ export class OssService implements ObjectStorageService {
       expires: this.presignExpires,
       'Content-Type': mime,
     });
+  }
+
+  async initiateMultipartUpload(
+    key: string,
+    mime: string,
+  ): Promise<MultipartInitResult> {
+    this.ensureConfigured();
+    try {
+      const result = await this.getMultipartClient().initMultipartUpload(key, {
+        mime,
+      });
+      if (!result.uploadId) {
+        throw new BadRequestException('对象存储未返回 uploadId');
+      }
+      return { uploadId: result.uploadId };
+    } catch (err: unknown) {
+      if (err instanceof ServiceUnavailableException) throw err;
+      this.logger.warn(`OSS initMultipartUpload failed for key=${key}`, err);
+      throw new BadRequestException('无法初始化 multipart 上传，请稍后重试');
+    }
+  }
+
+  async presignUploadPart(
+    key: string,
+    uploadId: string,
+    partNumber: number,
+  ): Promise<string> {
+    this.ensureConfigured();
+    try {
+      return this.getClient().signatureUrl(key, {
+        method: 'PUT',
+        expires: this.presignExpires,
+        subResource: {
+          partNumber,
+          uploadId,
+        },
+      } as Record<string, unknown> as Record<string, string | number | boolean | undefined>);
+    } catch (err: unknown) {
+      if (err instanceof ServiceUnavailableException) throw err;
+      this.logger.warn(
+        `OSS presignUploadPart failed for key=${key} part=${partNumber}`,
+        err,
+      );
+      throw new BadRequestException('无法生成 multipart 分片上传地址，请稍后重试');
+    }
+  }
+
+  async completeMultipartUpload(
+    key: string,
+    uploadId: string,
+    parts: MultipartPartDescriptor[],
+  ): Promise<void> {
+    this.ensureConfigured();
+    try {
+      await this.getMultipartClient().completeMultipartUpload(
+        key,
+        uploadId,
+        parts.map((part) => ({
+          number: part.partNumber,
+          etag: part.etag,
+        })),
+      );
+    } catch (err: unknown) {
+      if (err instanceof ServiceUnavailableException) throw err;
+      this.logger.warn(`OSS completeMultipartUpload failed for key=${key}`, err);
+      throw new BadRequestException('无法完成 multipart 上传，请稍后重试');
+    }
+  }
+
+  async abortMultipartUpload(key: string, uploadId: string): Promise<void> {
+    this.ensureConfigured();
+    try {
+      await this.getMultipartClient().abortMultipartUpload(key, uploadId);
+    } catch (err: unknown) {
+      if (err instanceof ServiceUnavailableException) throw err;
+      this.logger.warn(`OSS abortMultipartUpload failed for key=${key}`, err);
+      throw new BadRequestException('无法中止 multipart 上传，请稍后重试');
+    }
   }
 
   async headObject(key: string): Promise<{ size: number; mime: string }> {

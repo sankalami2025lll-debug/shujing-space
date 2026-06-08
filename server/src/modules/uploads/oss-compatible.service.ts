@@ -15,17 +15,26 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
+  AbortMultipartUploadCommand,
+  CompleteMultipartUploadCommand,
+  CreateMultipartUploadCommand,
   GetObjectCommand,
   HeadObjectCommand,
   PutObjectCommand,
   S3Client,
+  UploadPartCommand,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { randomUUID } from 'node:crypto';
 import { Readable } from 'node:stream';
 import { FileKind } from '@prisma/client';
 import { extractExtension } from './upload.constants';
-import { ObjectStorageService, PutObjectResult } from './object-storage.interface';
+import {
+  MultipartInitResult,
+  MultipartPartDescriptor,
+  ObjectStorageService,
+  PutObjectResult,
+} from './object-storage.interface';
 
 // 结构化的 OSS 兼容对象存储配置（来自 configuration() 的 oss 段）
 interface OssCompatibleConfig {
@@ -135,6 +144,91 @@ export class OssCompatibleService implements ObjectStorageService {
     return getSignedUrl(this.getClient(), command, {
       expiresIn: this.presignExpires,
     });
+  }
+
+  async initiateMultipartUpload(
+    key: string,
+    mime: string,
+  ): Promise<MultipartInitResult> {
+    this.ensureConfigured();
+    try {
+      const result = await this.getClient().send(
+        new CreateMultipartUploadCommand({
+          Bucket: this.oss.bucket,
+          Key: key,
+          ContentType: mime,
+        }),
+      );
+      if (!result.UploadId) {
+        throw new BadRequestException('对象存储未返回 uploadId');
+      }
+      return { uploadId: result.UploadId };
+    } catch (err: unknown) {
+      if (err instanceof ServiceUnavailableException) throw err;
+      this.logger.warn(`CreateMultipartUpload failed for key=${key}`, err);
+      throw new BadRequestException('无法初始化 multipart 上传，请稍后重试');
+    }
+  }
+
+  async presignUploadPart(
+    key: string,
+    uploadId: string,
+    partNumber: number,
+  ): Promise<string> {
+    this.ensureConfigured();
+    const command = new UploadPartCommand({
+      Bucket: this.oss.bucket,
+      Key: key,
+      UploadId: uploadId,
+      PartNumber: partNumber,
+    });
+    return getSignedUrl(this.getClient(), command, {
+      expiresIn: this.presignExpires,
+    });
+  }
+
+  async completeMultipartUpload(
+    key: string,
+    uploadId: string,
+    parts: MultipartPartDescriptor[],
+  ): Promise<void> {
+    this.ensureConfigured();
+    try {
+      await this.getClient().send(
+        new CompleteMultipartUploadCommand({
+          Bucket: this.oss.bucket,
+          Key: key,
+          UploadId: uploadId,
+          MultipartUpload: {
+            Parts: parts.map((part) => ({
+              PartNumber: part.partNumber,
+              ETag: part.etag,
+            })),
+          },
+        }),
+      );
+    } catch (err: unknown) {
+      if (err instanceof ServiceUnavailableException) throw err;
+      this.logger.warn(`CompleteMultipartUpload failed for key=${key}`, err);
+      throw new BadRequestException('无法完成 multipart 上传，请稍后重试');
+    }
+  }
+
+  async abortMultipartUpload(key: string, uploadId: string): Promise<void> {
+    this.ensureConfigured();
+    try {
+      await this.getClient().send(
+        new AbortMultipartUploadCommand({
+          Bucket: this.oss.bucket,
+          Key: key,
+          UploadId: uploadId,
+        }),
+      );
+    } catch (err: unknown) {
+      if (err instanceof ServiceUnavailableException) throw err;
+      this.logger.warn(`AbortMultipartUpload failed for key=${key}`, err);
+      throw new BadRequestException('无法中止 multipart 上传，请稍后重试');
+    }
   }
 
   /**

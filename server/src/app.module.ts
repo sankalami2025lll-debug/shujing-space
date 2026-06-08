@@ -18,6 +18,7 @@ import { ContactModule } from './modules/contact/contact.module';
 import { TrainingModule } from './modules/training/training.module';
 import { AdminModule } from './modules/admin/admin.module';
 import { SiteConfigModule } from './modules/site-config/site-config.module';
+import { UploadTasksModule } from './modules/upload-tasks/upload-tasks.module';
 
 @Module({
   imports: [
@@ -39,6 +40,8 @@ import { SiteConfigModule } from './modules/site-config/site-config.module';
     ModelsModule,
     // 第 6 步：对象存储上传 /api/uploads/presign、/api/uploads/callback
     UploadsModule,
+    // 第 6 步补充：上传任务持久化 /api/upload-tasks/*
+    UploadTasksModule,
     // 第 7 步·第二阶段：个人中心 /api/users/me/*
     UsersModule,
     // 第 8 步·阶段一：联系线索 /api/contact/*（提交线索 + 表单选项）

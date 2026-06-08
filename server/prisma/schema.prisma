@@ -66,6 +66,44 @@ enum ModelProcessingStatus {
   failed
 }
 
+// 上传任务总体状态：排队 / 运行中 / 后台处理中 / 已发布 / 失败 / 已取消 / 已中断
+enum UploadTaskStatus {
+  queued
+  running
+  processing
+  published
+  failed
+  canceled
+  interrupted
+}
+
+// 上传任务阶段：对齐前端任务卡恢复所需的细粒度阶段
+enum UploadTaskStage {
+  queued
+  presigning_model
+  uploading_model
+  callbacking_model
+  presigning_cover
+  uploading_cover
+  callbacking_cover
+  creating_model
+  processing
+  published
+  failed
+  canceled
+  interrupted
+}
+
+// multipart 会话状态：已初始化 / 上传中 / 已暂停 / 失败 / 已完成 / 已中止
+enum UploadMultipartStatus {
+  initiated
+  uploading
+  paused
+  failed
+  completed
+  aborted
+}
+
 // 上传文件用途：模型文件 / 封面图 / 视频
 enum FileKind {
   model
@@ -119,6 +157,8 @@ model User {
   // 关系
   models               Model[]
   modelFiles           ModelFile[]
+  uploadTasks          UploadTask[]
+  multipartSessions    UploadMultipartSession[]
   favorites            Favorite[]
   likes                Like[]
   trainingApplications TrainingApplication[]
@@ -143,39 +183,43 @@ model Category {
 
 /// models：模型主表（核心）
 model Model {
-  id             BigInt          @id @default(autoincrement())
-  userId         BigInt          @map("user_id") // 发布者
-  categoryId     BigInt?         @map("category_id") // 分类
-  type           String          @db.VarChar(40) // 冗余类型名（与分类一致，兼容原型展示）
-  title          String          @db.VarChar(120) // 标题
-  tags           Json            @default("[]") // 标签数组
-  scenes         Json            @default("[]") // 应用场景多选
-  description    String          @default("") @db.Text // 简介
-  coverUrl       String          @default("") @map("cover_url") @db.VarChar(255) // 封面图 R2 URL（不存二进制）
-  modelUrl       String?         @map("model_url") @db.VarChar(255) // 模型资源 / 外部 Viewer 地址 → 前端 viewerUrl
-  viewerType     ViewerType      @default(none) @map("viewer_type") // 查看器来源
-  allowIframe    Boolean         @default(true) @map("allow_iframe") // 是否允许 iframe 内嵌（兜底用）
-  fileFormat     String?         @map("file_format") @db.VarChar(20) // glb/gltf/ifc/3dtiles/点云
-  viewsCount     Int             @default(0) @map("views_count") // 浏览量
-  likesCount     Int             @default(0) @map("likes_count") // 点赞量
-  favoritesCount Int             @default(0) @map("favorites_count") // 收藏量
-  visibility     ModelVisibility @default(public) // 可见性
-  status         ModelStatus     @default(draft) // 审核状态
-  processingStatus ModelProcessingStatus @default(ready) @map("processing_status") // 后台处理状态：uploaded/processing/ready/failed
-  processingError  String?             @map("processing_error") @db.Text // 后台处理失败原因
-  processedAt      DateTime?           @map("processed_at") @db.Timestamptz(6) // 处理完成时间（ready/failed）
-  rejectReason   String?         @map("reject_reason") @db.Text // 驳回原因（后台审核）
-  deletedAt      DateTime?       @map("deleted_at") @db.Timestamptz(6) // 软删除时间
-  deletedBy      BigInt?         @map("deleted_by") // 执行删除的用户 id（普通用户或管理员）
-  deleteReason   String?         @map("delete_reason") @db.Text // 删除原因（管理员可填）
-  createdAt      DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt      DateTime        @updatedAt @map("updated_at") @db.Timestamptz(6)
+  id                  BigInt                @id @default(autoincrement())
+  userId              BigInt                @map("user_id") // 发布者
+  categoryId          BigInt?               @map("category_id") // 分类
+  type                String                @db.VarChar(40) // 冗余类型名（与分类一致，兼容原型展示）
+  title               String                @db.VarChar(120) // 标题
+  tags                Json                  @default("[]") // 标签数组
+  scenes              Json                  @default("[]") // 应用场景多选
+  description         String                @default("") @db.Text // 简介
+  coverUrl            String                @default("") @map("cover_url") @db.VarChar(255) // 封面图 R2 URL（不存二进制）
+  modelUrl            String?               @map("model_url") @db.VarChar(255) // 模型资源 / 外部 Viewer 地址 → 前端 viewerUrl
+  viewerType          ViewerType            @default(none) @map("viewer_type") // 查看器来源
+  allowIframe         Boolean               @default(true) @map("allow_iframe") // 是否允许 iframe 内嵌（兜底用）
+  fileFormat          String?               @map("file_format") @db.VarChar(20) // glb/gltf/ifc/3dtiles/点云
+  viewsCount          Int                   @default(0) @map("views_count") // 浏览量
+  likesCount          Int                   @default(0) @map("likes_count") // 点赞量
+  favoritesCount      Int                   @default(0) @map("favorites_count") // 收藏量
+  visibility          ModelVisibility       @default(public) // 可见性
+  status              ModelStatus           @default(draft) // 审核状态
+  processingStatus    ModelProcessingStatus @default(ready) @map("processing_status") // 后台处理状态：uploaded/processing/ready/failed
+  processingError     String?               @map("processing_error") @db.Text // 后台处理失败原因
+  processedAt         DateTime?             @map("processed_at") @db.Timestamptz(6) // 处理完成时间（ready/failed）
+  launchViewJson      Json?                 @map("launch_view_json") // 模型启动视图快照（仅保存可序列化视图数据）
+  launchViewUpdatedAt DateTime?             @map("launch_view_updated_at") @db.Timestamptz(6) // 启动视图最近更新时间
+  launchViewUpdatedBy BigInt?               @map("launch_view_updated_by") // 最近保存启动视图的用户 id
+  rejectReason        String?               @map("reject_reason") @db.Text // 驳回原因（后台审核）
+  deletedAt           DateTime?             @map("deleted_at") @db.Timestamptz(6) // 软删除时间
+  deletedBy           BigInt?               @map("deleted_by") // 执行删除的用户 id（普通用户或管理员）
+  deleteReason        String?               @map("delete_reason") @db.Text // 删除原因（管理员可填）
+  createdAt           DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt           DateTime              @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   // 关系
-  user      User       @relation(fields: [userId], references: [id])
-  category  Category?  @relation(fields: [categoryId], references: [id])
-  favorites Favorite[]
-  likes     Like[]
+  user       User        @relation(fields: [userId], references: [id])
+  category   Category?   @relation(fields: [categoryId], references: [id])
+  uploadTask UploadTask? @relation("UploadTaskModel")
+  favorites  Favorite[]
+  likes      Like[]
 
   @@index([type, status])
   @@index([status, createdAt])
@@ -196,10 +240,125 @@ model ModelFile {
   mime         String   @db.VarChar(80) // MIME 类型
   createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
-  user User @relation(fields: [userId], references: [id])
+  user              User                     @relation(fields: [userId], references: [id])
+  modelUploadTasks  UploadTask[]             @relation("UploadTaskModelFile")
+  coverUploadTasks  UploadTask[]             @relation("UploadTaskCoverFile")
+  multipartSessions UploadMultipartSession[] @relation("UploadMultipartSessionModelFile")
 
   @@index([userId])
   @@map("model_files")
+}
+
+/// upload_tasks：上传任务编排表（只持久化任务状态，不承诺真正断点续传）
+model UploadTask {
+  id                    BigInt           @id @default(autoincrement())
+  userId                BigInt           @map("user_id")
+  clientToken           String?          @map("client_token") @db.VarChar(64)
+  title                 String           @db.VarChar(120)
+  type                  String           @db.VarChar(40)
+  scenesJson            Json             @default("[]") @map("scenes_json")
+  description           String           @default("") @db.Text
+  visibility            ModelVisibility
+  viewerUrl             String?          @map("viewer_url") @db.VarChar(255)
+  plannedModelName      String?          @map("planned_model_name") @db.VarChar(255)
+  plannedModelSize      BigInt?          @map("planned_model_size")
+  plannedModelMime      String?          @map("planned_model_mime") @db.VarChar(80)
+  plannedCoverName      String?          @map("planned_cover_name") @db.VarChar(255)
+  plannedCoverSize      BigInt?          @map("planned_cover_size")
+  plannedCoverMime      String?          @map("planned_cover_mime") @db.VarChar(80)
+  status                UploadTaskStatus @default(queued)
+  stage                 UploadTaskStage  @default(queued)
+  currentModelObjectKey String?          @map("current_model_object_key") @db.VarChar(255)
+  currentCoverObjectKey String?          @map("current_cover_object_key") @db.VarChar(255)
+  modelFileId           BigInt?          @map("model_file_id")
+  coverFileId           BigInt?          @map("cover_file_id")
+  modelId               BigInt?          @unique @map("model_id")
+  attemptCount          Int              @default(0) @map("attempt_count")
+  lastErrorStage        UploadTaskStage? @map("last_error_stage")
+  lastErrorCode         String?          @map("last_error_code") @db.VarChar(64)
+  lastErrorMessage      String?          @map("last_error_message") @db.Text
+  startedAt             DateTime?        @map("started_at") @db.Timestamptz(6)
+  lastHeartbeatAt       DateTime?        @map("last_heartbeat_at") @db.Timestamptz(6)
+  interruptedAt         DateTime?        @map("interrupted_at") @db.Timestamptz(6)
+  canceledAt            DateTime?        @map("canceled_at") @db.Timestamptz(6)
+  publishedAt           DateTime?        @map("published_at") @db.Timestamptz(6)
+  createdAt             DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  user              User                     @relation(fields: [userId], references: [id])
+  modelFile         ModelFile?               @relation("UploadTaskModelFile", fields: [modelFileId], references: [id])
+  coverFile         ModelFile?               @relation("UploadTaskCoverFile", fields: [coverFileId], references: [id])
+  model             Model?                   @relation("UploadTaskModel", fields: [modelId], references: [id])
+  multipartSessions UploadMultipartSession[]
+
+  @@unique([userId, clientToken])
+  @@index([userId, createdAt])
+  @@index([userId, status, updatedAt])
+  @@index([status, updatedAt])
+  @@map("upload_tasks")
+}
+
+/// upload_multipart_sessions：multipart 上传会话表（支持真正分片续传）
+model UploadMultipartSession {
+  id                  BigInt                @id @default(autoincrement())
+  uploadTaskId        BigInt                @map("upload_task_id")
+  userId              BigInt                @map("user_id")
+  kind                FileKind
+  objectKey           String                @map("object_key") @db.VarChar(255)
+  ossUploadId         String                @unique @map("oss_upload_id") @db.VarChar(255)
+  originalName        String                @map("original_name") @db.VarChar(255)
+  mime                String                @db.VarChar(80)
+  fileSize            BigInt                @map("file_size")
+  partSize            BigInt                @map("part_size")
+  totalParts          Int                   @map("total_parts")
+  fingerprintAlgo     String?               @map("fingerprint_algo") @db.VarChar(40)
+  fingerprint         String?               @db.VarChar(255)
+  fileLastModified    BigInt?               @map("file_last_modified")
+  status              UploadMultipartStatus @default(initiated)
+  uploadedBytes       BigInt                @default(0) @map("uploaded_bytes")
+  completedPartsCount Int                   @default(0) @map("completed_parts_count")
+  modelFileId         BigInt?               @map("model_file_id")
+  lastErrorCode       String?               @map("last_error_code") @db.VarChar(64)
+  lastErrorMessage    String?               @map("last_error_message") @db.Text
+  isCurrent           Boolean               @default(true) @map("is_current")
+  initiatedAt         DateTime              @default(now()) @map("initiated_at") @db.Timestamptz(6)
+  lastActivityAt      DateTime?             @map("last_activity_at") @db.Timestamptz(6)
+  completedAt         DateTime?             @map("completed_at") @db.Timestamptz(6)
+  abortedAt           DateTime?             @map("aborted_at") @db.Timestamptz(6)
+  createdAt           DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt           DateTime              @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  uploadTask UploadTask            @relation(fields: [uploadTaskId], references: [id])
+  user       User                  @relation(fields: [userId], references: [id])
+  modelFile  ModelFile?            @relation("UploadMultipartSessionModelFile", fields: [modelFileId], references: [id])
+  parts      UploadMultipartPart[]
+
+  @@index([uploadTaskId, kind, createdAt])
+  @@index([userId, status, updatedAt])
+  @@map("upload_multipart_sessions")
+}
+
+/// upload_multipart_parts：multipart 分片表（只保存分片状态与 etag，不存二进制）
+model UploadMultipartPart {
+  id               BigInt    @id @default(autoincrement())
+  sessionId        BigInt    @map("session_id")
+  partNumber       Int       @map("part_number")
+  byteStart        BigInt    @map("byte_start")
+  byteEnd          BigInt    @map("byte_end")
+  partSize         BigInt    @map("part_size")
+  etag             String?   @db.VarChar(255)
+  uploadedAt       DateTime? @map("uploaded_at") @db.Timestamptz(6)
+  attemptCount     Int       @default(0) @map("attempt_count")
+  lastErrorCode    String?   @map("last_error_code") @db.VarChar(64)
+  lastErrorMessage String?   @map("last_error_message") @db.Text
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  session UploadMultipartSession @relation(fields: [sessionId], references: [id])
+
+  @@unique([sessionId, partNumber])
+  @@index([sessionId, partNumber])
+  @@map("upload_multipart_parts")
 }
 
 /// favorites：收藏表
