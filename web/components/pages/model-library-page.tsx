@@ -30,7 +30,7 @@ import type { ModelListItem } from "@/lib/types";
 
 export default function ModelLibraryPage() {
   const router = useRouter();
-  const { isAuthed } = useAuth();
+  const { isAuthed, bootstrapping } = useAuth();
   const { config } = useSiteConfig();
 
   // requireAuth：未登录时提示并跳转登录页（供个人中心/发布/点赞收藏占位）
@@ -150,6 +150,9 @@ export default function ModelLibraryPage() {
   };
 
   const handlePublish = () => {
+    if (bootstrapping) {
+      return;
+    }
     if (!isAuthed) {
       requireAuth();
       return;
@@ -184,9 +187,15 @@ export default function ModelLibraryPage() {
                 <button
                   type="button"
                   onClick={handlePublish}
-                  className="px-5 py-2.5 rounded-full bg-white text-black text-[14px] font-medium hover:bg-gray-100 transition-all"
+                  disabled={bootstrapping}
+                  title={bootstrapping ? "登录状态确认中" : undefined}
+                  className={`px-5 py-2.5 rounded-full text-[14px] font-medium transition-all ${
+                    bootstrapping
+                      ? "bg-white/70 text-black/70 cursor-not-allowed"
+                      : "bg-white text-black hover:bg-gray-100"
+                  }`}
                 >
-                  发布模型
+                  {bootstrapping ? "登录状态确认中" : "发布模型"}
                 </button>
               </div>
             </div>
