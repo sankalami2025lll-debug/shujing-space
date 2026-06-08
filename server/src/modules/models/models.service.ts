@@ -491,6 +491,19 @@ export class ModelsService {
 
   // sort 参数 → Prisma orderBy 映射
   private resolveOrderBy(sort: ModelSortValue): Prisma.ModelOrderByWithRelationInput {
+    switch (sort) {
+      case 'views':
+        return { viewsCount: 'desc' };
+      case 'favorites':
+        return { favoritesCount: 'desc' };
+      case 'latest':
+      case 'recommended':
+      default:
+        // recommended 暂无独立推荐算法，先与 latest 一致按创建时间倒序兜底
+        return { createdAt: 'desc' };
+    }
+  }
+
   private parseLaunchViewOrThrow(payload: unknown): ModelLaunchView {
     const launchView = parseModelLaunchView(payload);
     if (!launchView) {
@@ -544,18 +557,5 @@ export class ModelsService {
     }
 
     return model;
-  }
-
-    switch (sort) {
-      case 'views':
-        return { viewsCount: 'desc' };
-      case 'favorites':
-        return { favoritesCount: 'desc' };
-      case 'latest':
-      case 'recommended':
-      default:
-        // recommended 暂无独立推荐算法，先与 latest 一致按创建时间倒序兜底
-        return { createdAt: 'desc' };
-    }
   }
 }
