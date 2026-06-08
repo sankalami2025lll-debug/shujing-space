@@ -438,6 +438,7 @@ export class ModelsService {
         ...(payload?.viewerType ? { viewerType: payload.viewerType } : {}),
       },
     });
+    await this.syncUploadTaskAfterModelReady(modelId);
   }
 
   // 预留：解析失败后记录失败原因，后续可由后台或引擎重试。
@@ -450,6 +451,7 @@ export class ModelsService {
         processedAt: null,
       },
     });
+    await this.syncUploadTaskAfterModelFailed(modelId, reason);
   }
 
   // 校验外链 viewerUrl：必须 https 且 hostname 命中白名单（上线前安全修复 2D）。
@@ -495,6 +497,36 @@ export class ModelsService {
       throw new BadRequestException('launchView 格式非法');
     }
     return launchView;
+  }
+
+  private async syncUploadTaskAfterModelReady(modelId: bigint): Promise<void> {
+    await this.prisma.uploadTask.updateMany({
+      where: { modelId },
+      data: {
+        status: 'published',
+        stage: 'published',
+        publishedAt: new Date(),
+        lastErrorStage: null,
+        lastErrorCode: null,
+        lastErrorMessage: null,
+      },
+    });
+  }
+
+  private async syncUploadTaskAfterModelFailed(
+    modelId: bigint,
+    reason: string,
+  ): Promise<void> {
+    await this.prisma.uploadTask.updateMany({
+      where: { modelId },
+      data: {
+        status: 'failed',
+        stage: 'failed',
+        lastErrorStage: 'processing',
+        lastErrorCode: null,
+        lastErrorMessage: reason.trim() || '解析失败',
+      },
+    });
   }
 
   private async findLaunchViewOwnedModel(modelId: bigint) {
