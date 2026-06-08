@@ -20,6 +20,7 @@ import {
   User,
   ViewerType,
 } from '@prisma/client';
+import { ModelLaunchView, parseModelLaunchView } from './launch-view.contract';
 
 // Prisma 查询时附带的关联（author 取自 user.nickname，category 取分类信息）
 type ModelWithRelations = Model & {
@@ -81,6 +82,8 @@ export interface ModelDetailVm {
   processingStatus: ModelProcessingStatus;
   processingError?: string | null; // 作者查看自己的模型时附带
   processedAt?: Date | null; // 作者查看自己的模型时附带
+  launchView: ModelLaunchView | null; // 已保存的模型启动视图
+  canSaveLaunchView: boolean; // 当前用户是否可保存启动视图
   isLiked?: boolean; // 当前登录用户是否已点赞（游客不返回）
   isFavorited?: boolean; // 当前登录用户是否已收藏（游客不返回）
   status?: ModelStatus; // 仅作者查看自己的模型时返回
@@ -119,6 +122,7 @@ export function toModelDetailVm(
   interaction?: ModelInteractionFlags,
   includeAuthorFields = false,
 ): ModelDetailVm {
+  const launchView = parseModelLaunchView(m.launchViewJson);
   return {
     id: Number(m.id),
     userId: Number(m.userId),
@@ -141,6 +145,8 @@ export function toModelDetailVm(
     favoritesCount: m.favoritesCount,
     createdAt: m.createdAt,
     processingStatus: m.processingStatus,
+    launchView,
+    canSaveLaunchView: includeAuthorFields,
     ...(interaction
       ? { isLiked: interaction.isLiked, isFavorited: interaction.isFavorited }
       : {}),

@@ -10,12 +10,14 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   HttpStatus,
   Param,
   ParseIntPipe,
   Post,
+  Put,
   Query,
   UseGuards,
 } from '@nestjs/common';
@@ -26,6 +28,7 @@ import { OptionalJwtAuthGuard } from '../auth/guards/optional-jwt-auth.guard';
 import { AuthUser } from '../auth/jwt-payload.interface';
 import { CreateModelDto } from './dto/create-model.dto';
 import { QueryModelsDto } from './dto/query-models.dto';
+import { UpdateLaunchViewDto } from './dto/update-launch-view.dto';
 import { ModelsService } from './models.service';
 
 @ApiTags('models')
@@ -67,6 +70,33 @@ export class ModelsController {
   @ApiOperation({ summary: '发布模型（关联已上传对象存储文件，需登录）' })
   async create(@CurrentUser() user: AuthUser, @Body() dto: CreateModelDto) {
     return this.modelsService.create(user.id, dto);
+  }
+
+  // PUT /api/models/:id/launch-view：保存模型启动视图（需登录且仅作者本人可调用）
+  @Put(':id/launch-view')
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: '保存模型启动视图（需登录且仅模型归属用户可调用）' })
+  async saveLaunchView(
+    @CurrentUser() user: AuthUser,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: UpdateLaunchViewDto,
+  ) {
+    return this.modelsService.saveLaunchView(user.id, BigInt(id), dto);
+  }
+
+  // DELETE /api/models/:id/launch-view：清空模型启动视图（需登录且仅作者本人可调用）
+  @Delete(':id/launch-view')
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: '清空模型启动视图（需登录且仅模型归属用户可调用）' })
+  async clearLaunchView(
+    @CurrentUser() user: AuthUser,
+    @Param('id', ParseIntPipe) id: number,
+  ) {
+    return this.modelsService.clearLaunchView(user.id, BigInt(id));
   }
 
   // POST /api/models/:id/view：记录浏览量（2E）。游客 / 登录均可，无需鉴权（不挂 JwtAuthGuard）。

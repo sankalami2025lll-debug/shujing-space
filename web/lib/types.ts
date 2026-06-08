@@ -59,6 +59,21 @@ export type ViewerType = "iframe" | "sketchfab" | "native" | "none" | "lcc";
 export type ModelVisibility = "public" | "private" | "review";
 export type ModelStatus = "draft" | "pending" | "published" | "rejected";
 export type ModelProcessingStatus = "uploaded" | "processing" | "ready" | "failed";
+export type ModelLaunchViewViewerKind = "lcc";
+
+export interface ModelLaunchViewSnapshot {
+  position: [number, number, number];
+  target: [number, number, number];
+  up: [number, number, number];
+  near: number;
+  far: number;
+}
+
+export interface ModelLaunchView {
+  version: 1;
+  viewerKind: ModelLaunchViewViewerKind;
+  snapshot: ModelLaunchViewSnapshot;
+}
 
 export interface ModelListItem {
   id: number;
@@ -86,6 +101,9 @@ export interface ModelDetail extends ModelListItem {
   fileFormat: string | null;
   category: Category | null;
   processingStatus: ModelProcessingStatus;
+  launchView: ModelLaunchView | null;
+  canSaveLaunchView: boolean;
+  defaultCameraJson?: string | null;
   /** 仅作者查看自己的非公开模型详情时由后端附带（2F）；公开详情不含 */
   status?: ModelStatus;
   visibility?: ModelVisibility;

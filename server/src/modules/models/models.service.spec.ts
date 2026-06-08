@@ -1,6 +1,11 @@
-import { NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { ModelsService } from './models.service';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { LccZipService } from './lcc-zip.service';
 
@@ -147,6 +152,245 @@ describe('ModelsService soft-delete visibility', () => {
 
     expect(result.userId).toBe(Number(authorId));
     expect(result.author).toBe('作者A');
+  });
+
+  it('详情为作者返回 launchView 和 canSaveLaunchView=true', async () => {
+    prisma.model.findFirst.mockResolvedValue({
+      id: modelId,
+      userId: authorId,
+      title: '启动视图模型',
+      type: '三维实景重建',
+      tags: [],
+      scenes: [],
+      description: 'desc',
+      coverUrl: '',
+      modelUrl: 'https://example.com/model.lcc',
+      viewerType: 'native',
+      allowIframe: false,
+      fileFormat: 'lcc',
+      viewsCount: 1,
+      likesCount: 0,
+      favoritesCount: 0,
+      createdAt: new Date('2026-06-02T12:00:00.000Z'),
+      processingStatus: 'ready',
+      processingError: null,
+      processedAt: new Date('2026-06-02T12:05:00.000Z'),
+      launchViewJson: {
+        version: 1,
+        viewerKind: 'lcc',
+        snapshot: {
+          position: [0, 2, 6],
+          target: [0, 2, 0],
+          up: [0, 1, 0],
+          near: 0.1,
+          far: 5000,
+        },
+      },
+      launchViewUpdatedAt: new Date('2026-06-02T12:06:00.000Z'),
+      launchViewUpdatedBy: authorId,
+      status: 'published',
+      visibility: 'public',
+      rejectReason: null,
+      user: { nickname: '作者A' },
+      category: null,
+    });
+
+    const result = await service.findOne(modelId, authorId);
+
+    expect(result.launchView).toEqual({
+      version: 1,
+      viewerKind: 'lcc',
+      snapshot: {
+        position: [0, 2, 6],
+        target: [0, 2, 0],
+        up: [0, 1, 0],
+        near: 0.1,
+        far: 5000,
+      },
+    });
+    expect(result.canSaveLaunchView).toBe(true);
+  });
+
+  it('详情为非作者返回 canSaveLaunchView=false，但仍可读取 launchView', async () => {
+    prisma.model.findFirst.mockResolvedValue({
+      id: modelId,
+      userId: authorId,
+      title: '启动视图模型',
+      type: '三维实景重建',
+      tags: [],
+      scenes: [],
+      description: 'desc',
+      coverUrl: '',
+      modelUrl: 'https://example.com/model.lcc',
+      viewerType: 'native',
+      allowIframe: false,
+      fileFormat: 'lcc',
+      viewsCount: 1,
+      likesCount: 0,
+      favoritesCount: 0,
+      createdAt: new Date('2026-06-02T12:00:00.000Z'),
+      processingStatus: 'ready',
+      processingError: null,
+      processedAt: new Date('2026-06-02T12:05:00.000Z'),
+      launchViewJson: {
+        version: 1,
+        viewerKind: 'lcc',
+        snapshot: {
+          position: [1, 2, 3],
+          target: [4, 5, 6],
+          up: [0, 1, 0],
+          near: 0.1,
+          far: 5000,
+        },
+      },
+      launchViewUpdatedAt: new Date('2026-06-02T12:06:00.000Z'),
+      launchViewUpdatedBy: authorId,
+      status: 'published',
+      visibility: 'public',
+      rejectReason: null,
+      user: { nickname: '作者A' },
+      category: null,
+    });
+
+    const result = await service.findOne(modelId, BigInt(999));
+
+    expect(result.launchView).toEqual({
+      version: 1,
+      viewerKind: 'lcc',
+      snapshot: {
+        position: [1, 2, 3],
+        target: [4, 5, 6],
+        up: [0, 1, 0],
+        near: 0.1,
+        far: 5000,
+      },
+    });
+    expect(result.canSaveLaunchView).toBe(false);
+  });
+
+  it('作者可以保存启动视图', async () => {
+    prisma.model.findUnique.mockResolvedValue({
+      id: modelId,
+      userId: authorId,
+      deletedAt: null,
+    });
+    prisma.model.update.mockResolvedValue({ id: modelId });
+
+    const result = await service.saveLaunchView(authorId, modelId, {
+      version: 1,
+      viewerKind: 'lcc',
+      snapshot: {
+        position: [0, 2, 6],
+        target: [0, 2, 0],
+        up: [0, 1, 0],
+        near: 0.1,
+        far: 5000,
+      },
+    });
+
+    expect(prisma.model.update).toHaveBeenCalledWith({
+      where: { id: modelId },
+      data: {
+        launchViewJson: {
+          version: 1,
+          viewerKind: 'lcc',
+          snapshot: {
+            position: [0, 2, 6],
+            target: [0, 2, 0],
+            up: [0, 1, 0],
+            near: 0.1,
+            far: 5000,
+          },
+        },
+        launchViewUpdatedAt: expect.any(Date),
+        launchViewUpdatedBy: authorId,
+      },
+    });
+    expect(result.launchView.viewerKind).toBe('lcc');
+    expect(result.updatedBy).toBe(Number(authorId));
+  });
+
+  it('非作者保存启动视图返回 403', async () => {
+    prisma.model.findUnique.mockResolvedValue({
+      id: modelId,
+      userId: BigInt(88),
+      deletedAt: null,
+    });
+
+    await expect(
+      service.saveLaunchView(authorId, modelId, {
+        version: 1,
+        viewerKind: 'lcc',
+        snapshot: {
+          position: [0, 2, 6],
+          target: [0, 2, 0],
+          up: [0, 1, 0],
+          near: 0.1,
+          far: 5000,
+        },
+      }),
+    ).rejects.toThrow(ForbiddenException);
+  });
+
+  it('非法 launchView 保存返回 400', async () => {
+    prisma.model.findUnique.mockResolvedValue({
+      id: modelId,
+      userId: authorId,
+      deletedAt: null,
+    });
+
+    await expect(
+      service.saveLaunchView(authorId, modelId, {
+        version: 1,
+        viewerKind: 'lcc',
+        snapshot: {
+          position: [0, 2, 6],
+          target: [0, 2, 0],
+          up: [0, 1, 0],
+          near: 0.1,
+          far: 0,
+        },
+      }),
+    ).rejects.toThrow(BadRequestException);
+  });
+
+  it('模型不存在时保存启动视图返回 404', async () => {
+    prisma.model.findUnique.mockResolvedValue(null);
+
+    await expect(
+      service.saveLaunchView(authorId, modelId, {
+        version: 1,
+        viewerKind: 'lcc',
+        snapshot: {
+          position: [0, 2, 6],
+          target: [0, 2, 0],
+          up: [0, 1, 0],
+          near: 0.1,
+          far: 5000,
+        },
+      }),
+    ).rejects.toThrow(NotFoundException);
+  });
+
+  it('作者可以清空启动视图', async () => {
+    prisma.model.findUnique.mockResolvedValue({
+      id: modelId,
+      userId: authorId,
+      deletedAt: null,
+    });
+    prisma.model.update.mockResolvedValue({ id: modelId });
+
+    const result = await service.clearLaunchView(authorId, modelId);
+
+    expect(prisma.model.update).toHaveBeenCalledWith({
+      where: { id: modelId },
+      data: {
+        launchViewJson: Prisma.JsonNull,
+        launchViewUpdatedAt: null,
+        launchViewUpdatedBy: null,
+      },
+    });
+    expect(result).toEqual({ launchView: null, cleared: true });
   });
 
   it('外链发布默认写入 ready，并记录 processedAt', async () => {

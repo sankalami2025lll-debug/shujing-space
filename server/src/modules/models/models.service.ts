@@ -7,7 +7,12 @@
  *  - 不存在或无权限统一 404，避免泄露非公开模型是否存在。
  * 红线：BigInt 主键统一在 VM 层转 number；本层只出业务真值。
  */
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
   FileKind,
@@ -20,8 +25,10 @@ import {
 import { PrismaService } from '../../prisma/prisma.service';
 import { extractExtension } from '../uploads/upload.constants';
 import { CreateModelDto } from './dto/create-model.dto';
+import { UpdateLaunchViewDto } from './dto/update-launch-view.dto';
 import { isViewerUrlAllowed } from './viewer-url.util';
 import { ModelSortValue, QueryModelsDto } from './dto/query-models.dto';
+import { ModelLaunchView, parseModelLaunchView } from './launch-view.contract';
 import {
   ModelDetailVm,
   ModelInteractionFlags,
@@ -187,6 +194,73 @@ export class ModelsService {
       interactionMap?.get(model.id.toString()),
       isAuthor,
     );
+  }
+
+  /**
+   * 保存模型启动视图（PUT /api/models/:id/launch-view，需登录且仅作者本人可调用）。
+   * - 模型不存在 / 已删除：404
+   * - 非模型归属用户：403
+   * - launchView 格式非法：400
+   */
+  async saveLaunchView(
+    userId: bigint,
+    modelId: bigint,
+    payload: UpdateLaunchViewDto,
+  ): Promise<{
+    launchView: ModelLaunchView;
+    updatedAt: Date;
+    updatedBy: number;
+  }> {
+    const model = await this.findLaunchViewOwnedModel(modelId);
+    if (model.userId !== userId) {
+      throw new ForbiddenException('仅模型归属用户可以保存启动视图');
+    }
+
+    const launchView = this.parseLaunchViewOrThrow(payload);
+    const updatedAt = new Date();
+    await this.prisma.model.update({
+      where: { id: modelId },
+      data: {
+        launchViewJson: launchView as unknown as Prisma.InputJsonValue,
+        launchViewUpdatedAt: updatedAt,
+        launchViewUpdatedBy: userId,
+      },
+    });
+
+    return {
+      launchView,
+      updatedAt,
+      updatedBy: Number(userId),
+    };
+  }
+
+  /**
+   * 清空模型启动视图（DELETE /api/models/:id/launch-view，需登录且仅作者本人可调用）。
+   * - 模型不存在 / 已删除：404
+   * - 非模型归属用户：403
+   */
+  async clearLaunchView(
+    userId: bigint,
+    modelId: bigint,
+  ): Promise<{ launchView: null; cleared: true }> {
+    const model = await this.findLaunchViewOwnedModel(modelId);
+    if (model.userId !== userId) {
+      throw new ForbiddenException('仅模型归属用户可以清空启动视图');
+    }
+
+    await this.prisma.model.update({
+      where: { id: modelId },
+      data: {
+        launchViewJson: Prisma.JsonNull,
+        launchViewUpdatedAt: null,
+        launchViewUpdatedBy: null,
+      },
+    });
+
+    return {
+      launchView: null,
+      cleared: true,
+    };
   }
 
   /**
@@ -415,6 +489,31 @@ export class ModelsService {
 
   // sort 参数 → Prisma orderBy 映射
   private resolveOrderBy(sort: ModelSortValue): Prisma.ModelOrderByWithRelationInput {
+  private parseLaunchViewOrThrow(payload: unknown): ModelLaunchView {
+    const launchView = parseModelLaunchView(payload);
+    if (!launchView) {
+      throw new BadRequestException('launchView 格式非法');
+    }
+    return launchView;
+  }
+
+  private async findLaunchViewOwnedModel(modelId: bigint) {
+    const model = await this.prisma.model.findUnique({
+      where: { id: modelId },
+      select: {
+        id: true,
+        userId: true,
+        deletedAt: true,
+      },
+    });
+
+    if (!model || model.deletedAt) {
+      throw new NotFoundException('模型不存在');
+    }
+
+    return model;
+  }
+
     switch (sort) {
       case 'views':
         return { viewsCount: 'desc' };
