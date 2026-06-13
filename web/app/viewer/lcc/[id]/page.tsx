@@ -20,6 +20,7 @@ import { LccViewer } from "@/components/models/lcc-viewer";
 import { ModelLoadingOverlay } from "@/components/models/model-loading-overlay";
 import { ModelViewerToolbar } from "@/components/models/model-viewer-toolbar";
 import { ModelViewerHelp } from "@/components/models/model-viewer-help";
+import { useAuth } from "@/components/providers/auth-provider";
 import { getModelDetail } from "@/lib/api/models";
 import { getModelViewerKind } from "@/lib/model-viewer-kind";
 import { http, ApiError } from "@/lib/http";
@@ -70,6 +71,7 @@ function isTypingElement(target: EventTarget | null): boolean {
 /* ---------- 页面组件 ---------- */
 
 export default function LccViewerIframePage() {
+  const { user } = useAuth();
   /* ---- URL 参数 ---- */
   const params = useParams();
   const rawId = params?.id;
@@ -426,6 +428,7 @@ export default function LccViewerIframePage() {
             onFitView={handleFitView}
             onToggleFullscreen={handleFullscreen}
             onSaveLaunchView={handleSaveLaunchView}
+            showSaveLaunchView={Boolean(user)}
             onToggleHelp={handleToggleHelp}
             isHelpOpen={isHelpOpen}
             canShowSaveLaunchView={canShowSaveLaunchView}

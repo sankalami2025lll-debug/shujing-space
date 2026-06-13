@@ -2,8 +2,8 @@
 
 import {
   Camera,
-  ChevronRight,
   Expand,
+  Home,
   Info,
   Layers3,
   Map,
@@ -29,6 +29,7 @@ interface ModelViewerToolbarProps {
   onToggleFullscreen?: () => void;
   onTakeScreenshot?: () => void;
   onSaveLaunchView?: () => void;
+  showSaveLaunchView?: boolean;
   onToggleHelp?: () => void;
   isHelpOpen?: boolean;
   canShowSaveLaunchView?: boolean;
@@ -40,7 +41,7 @@ interface ModelViewerToolbarProps {
 }
 
 const TOOL_ITEMS = [
-  { key: "reset", label: "重置视角", icon: RefreshCcw, enabledBy: "resetView" },
+  { key: "reset", label: "回到初始视角", icon: Home, enabledBy: "resetView" },
   { key: "saveLaunchView", label: "保存启动视图", icon: Save, enabledBy: "saveView" },
   { key: "fullscreen", label: "全屏", icon: Expand, enabledBy: "fullscreen" },
   { key: "screenshot", label: "截图", icon: Camera, enabledBy: "screenshot" },
@@ -66,6 +67,7 @@ export function ModelViewerToolbar({
   onToggleFullscreen,
   onTakeScreenshot,
   onSaveLaunchView,
+  showSaveLaunchView = true,
   onToggleHelp,
   isHelpOpen = false,
   canShowSaveLaunchView = false,
@@ -75,6 +77,7 @@ export function ModelViewerToolbar({
   canToggleControlMode = false,
 }: ModelViewerToolbarProps) {
   const [isExpanded, setIsExpanded] = useState(false);
+  const isLccToolbar = canToggleControlMode && typeof onToggleControlMode === "function";
   const toolActions = useMemo(
     () => ({
       reset: onResetView,
@@ -85,6 +88,30 @@ export function ModelViewerToolbar({
     }),
     [onResetView, onFitView, onSaveLaunchView, onTakeScreenshot, onToggleFullscreen],
   );
+  const orderedTools = useMemo(() => {
+    const hiddenKeys = new Set<string>();
+    if (isLccToolbar) {
+      hiddenKeys.add("fullscreen");
+      hiddenKeys.add("zoom");
+    }
+
+    const preferredOrder = isLccToolbar
+      ? ["reset", "saveLaunchView", "screenshot"]
+      : [];
+    const preferredSet = new Set(preferredOrder);
+    const visibleItems = TOOL_ITEMS.filter(
+      (tool) => tool.key !== "walk" && !hiddenKeys.has(tool.key),
+    );
+
+    if (!isLccToolbar) {
+      return visibleItems;
+    }
+
+    return [
+      ...visibleItems.filter((tool) => preferredSet.has(tool.key)),
+      ...visibleItems.filter((tool) => !preferredSet.has(tool.key)),
+    ];
+  }, [isLccToolbar]);
 
   return (
     <div className="flex items-end gap-2">
@@ -94,15 +121,9 @@ export function ModelViewerToolbar({
         aria-expanded={isExpanded}
         title={isExpanded ? "收起工具栏" : "展开工具栏"}
         onClick={() => setIsExpanded((value) => !value)}
-        className="inline-flex h-11 items-center gap-2 rounded-2xl border border-white/10 bg-[#0b1118]/85 px-4 text-[12px] text-white shadow-[0_12px_40px_rgba(0,0,0,0.35)] backdrop-blur-md transition-all hover:border-cyan-300/30 hover:bg-[#0f1722]/90"
+        className="inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-white/10 bg-[#0b1118]/85 text-white shadow-[0_12px_40px_rgba(0,0,0,0.35)] backdrop-blur-md transition-all hover:border-cyan-300/30 hover:bg-[#0f1722]/90"
       >
         <Wrench className="h-4 w-4 text-cyan-100" />
-        <span>工具</span>
-        <ChevronRight
-          className={`h-4 w-4 text-gray-300 transition-transform duration-200 ${
-            isExpanded ? "rotate-90" : ""
-          }`}
-        />
       </button>
 
       <div
@@ -112,14 +133,34 @@ export function ModelViewerToolbar({
             : "pointer-events-none max-w-0 -translate-x-3 opacity-0"
         }`}
       >
-        {TOOL_ITEMS.map((tool) => {
-          if (tool.key === "saveLaunchView" && !canShowSaveLaunchView) {
+        {isLccToolbar ? (
+          <button
+            type="button"
+            aria-label={controlMode === "walk" ? "当前：漫游模式，点击切换观察" : "当前：观察模式，点击切换漫游"}
+            title={controlMode === "walk" ? "漫游模式（WASD + 左键转头）" : "观察模式（轨道旋转）"}
+            onClick={onToggleControlMode}
+            className={`inline-flex h-11 items-center gap-1.5 rounded-2xl border px-3 backdrop-blur-md transition-all ${
+              controlMode === "walk"
+                ? "border-cyan-300/40 bg-cyan-950/50 text-cyan-100 shadow-[0_10px_30px_rgba(0,0,0,0.28)]"
+                : "border-white/10 bg-[#0b1118]/85 text-gray-100 shadow-[0_10px_30px_rgba(0,0,0,0.28)] hover:border-cyan-300/30 hover:bg-[#0f1722]/90"
+            }`}
+          >
+            {controlMode === "walk" ? (
+              <Map className="h-4 w-4" />
+            ) : (
+              <Move3D className="h-4 w-4" />
+            )}
+            <span className="text-[11px]">{controlMode === "walk" ? "漫游" : "观察"}</span>
+          </button>
+        ) : null}
+        {orderedTools.map((tool) => {
+          if (tool.key === "saveLaunchView" && !showSaveLaunchView) {
             return null;
           }
-          if (tool.key === "walk") {
-            return null;
-          }
-          const enabled = capabilities[tool.enabledBy];
+          const enabled =
+            tool.key === "saveLaunchView"
+              ? capabilities[tool.enabledBy] && canShowSaveLaunchView
+              : capabilities[tool.enabledBy];
           const Icon = tool.icon;
           const onClick = toolActions[tool.key as keyof typeof toolActions];
           const actionable =
@@ -129,6 +170,8 @@ export function ModelViewerToolbar({
           const title =
             tool.key === "saveLaunchView" && saveLaunchViewPending
               ? "正在保存启动视图"
+              : tool.key === "saveLaunchView" && !canShowSaveLaunchView
+                ? "保存启动视图（暂不可用）"
               : actionable
                 ? tool.label
                 : `${tool.label}（暂未接入）`;
@@ -151,7 +194,7 @@ export function ModelViewerToolbar({
             </button>
           );
         })}
-        {canToggleControlMode && typeof onToggleControlMode === "function" ? (
+        {!isLccToolbar && canToggleControlMode && typeof onToggleControlMode === "function" ? (
           <button
             type="button"
             aria-label={controlMode === "walk" ? "当前：漫游模式，点击切换观察" : "当前：观察模式，点击切换漫游"}
@@ -171,20 +214,22 @@ export function ModelViewerToolbar({
             <span className="text-[11px]">{controlMode === "walk" ? "漫游" : "观察"}</span>
           </button>
         ) : null}
-        <button
-          type="button"
-          aria-label={isHelpOpen ? "关闭帮助" : "打开帮助"}
-          title={isHelpOpen ? "关闭帮助" : "打开帮助"}
-          onClick={onToggleHelp}
-          className={`inline-flex h-11 w-11 items-center justify-center rounded-2xl border backdrop-blur-md transition-all ${
-            typeof onToggleHelp === "function"
-              ? "border-white/10 bg-[#0b1118]/85 text-gray-100 shadow-[0_10px_30px_rgba(0,0,0,0.28)] hover:border-cyan-300/30 hover:bg-[#0f1722]/90"
-              : "cursor-not-allowed border-white/[0.08] bg-[#0b1118]/60 text-gray-500 opacity-70"
-          }`}
-          disabled={typeof onToggleHelp !== "function"}
-        >
-          <Info className={`h-4 w-4 ${isHelpOpen ? "text-cyan-200" : ""}`} />
-        </button>
+        {!isLccToolbar ? (
+          <button
+            type="button"
+            aria-label={isHelpOpen ? "关闭帮助" : "打开帮助"}
+            title={isHelpOpen ? "关闭帮助" : "打开帮助"}
+            onClick={onToggleHelp}
+            className={`inline-flex h-11 w-11 items-center justify-center rounded-2xl border backdrop-blur-md transition-all ${
+              typeof onToggleHelp === "function"
+                ? "border-white/10 bg-[#0b1118]/85 text-gray-100 shadow-[0_10px_30px_rgba(0,0,0,0.28)] hover:border-cyan-300/30 hover:bg-[#0f1722]/90"
+                : "cursor-not-allowed border-white/[0.08] bg-[#0b1118]/60 text-gray-500 opacity-70"
+            }`}
+            disabled={typeof onToggleHelp !== "function"}
+          >
+            <Info className={`h-4 w-4 ${isHelpOpen ? "text-cyan-200" : ""}`} />
+          </button>
+        ) : null}
       </div>
     </div>
   );

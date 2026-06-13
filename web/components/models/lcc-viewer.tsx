@@ -3322,10 +3322,6 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
         }}
       />
       <div className="pointer-events-none absolute inset-x-0 top-0 h-24 bg-gradient-to-b from-cyan-400/10 to-transparent" />
-      <div className="pointer-events-none absolute left-4 top-4 h-5 w-5 border-l border-t border-cyan-400/35" />
-      <div className="pointer-events-none absolute right-4 top-4 h-5 w-5 border-r border-t border-cyan-400/35" />
-      <div className="pointer-events-none absolute bottom-14 left-4 h-5 w-5 border-b border-l border-cyan-400/35" />
-      <div className="pointer-events-none absolute bottom-14 right-4 h-5 w-5 border-b border-r border-cyan-400/35" />
       {viewerStatus === "loaded" ? (
         <div
           aria-hidden="true"
