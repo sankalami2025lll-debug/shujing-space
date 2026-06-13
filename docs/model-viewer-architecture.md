@@ -1,11 +1,11 @@
 # 统一模型浏览器架构（第一、二阶段 + UI 收口）
 
-> 更新时间：2026-06-06  
+> 更新时间：2026-06-12  
 > 第一阶段目标：先完成“统一壳子 + 引擎接口 + 分发结构”，不一次性接入全部模型引擎。  
 > 第二阶段目标：先稳定“统一工具栏能力接口 + Shell 操作入口”，暂不接新的 GLB 引擎。  
 > 当前详情页 UI：用户前端不显示开发说明模块与顶部标签栏，模型操作统一收口到视图内部左下角折叠工具栏。  
 > 当前状态：模型浏览器 UI 收口、自检与无用代码清理已完成。  
-> 当前原则：不改后端、不改数据库/Prisma、不改 OSS/ZIP 链路、不改 `LccViewer` 核心加载逻辑。
+> 当前原则：不改后端、不改数据库/Prisma、不改 OSS/ZIP 链路；LCC 详情页使用 iframe 独立页隔离 SDK 生命周期，外层只认统一完成协议。
 > 最新口径：模型浏览器相关文档统一以 **阿里云 OSS** 为当前对象存储实现，文档内对象存储相关名称均按 OSS 口径理解。
 
 ## 一、为什么拆 ModelViewerShell
@@ -27,7 +27,7 @@
 
 因此第一阶段改为：
 
-- `ModelViewerShell` 负责统一外壳
+- `ModelViewerShell` 负责**非 LCC 模型**的统一外壳
 - 各 `Viewer` 只负责各自格式引擎
 - `Toolbar / Tabs / InfoPanel / Loading / ErrorState` 归到 Shell 层
 
@@ -45,6 +45,7 @@
 - 统一管理全屏、重置视角的壳层行为
 - 第二阶段将工具栏入口固定到 Viewer 区左下角，默认折叠，仅保留“工具”总入口
 - 当前详情页不渲染开发说明模块、顶部标签栏、信息面板与占位面板
+- 当前 **LCC / LCC2 不再直接经过 `ModelViewerShell`**，而是由详情页切到 `/viewer/lcc/[id]` iframe 独立页
 
 明确不做：
 
@@ -105,6 +106,7 @@
 - 最终统一规则为：黑底极简像素风，只保留 `Logo + 进度条 + 进度条下方跑步小人 + 右侧百分比`
 - 不显示任何加载说明文字、引擎技术信息或额外装饰背景
 - 当前不显示任何中文加载文案
+- 加载专用 Logo 固定使用 `/brand/model-loading-logo.png`
 - 跑步小人保留 4 帧像素动画，位于进度条下方
 - 不在具体 Viewer 中重复实现 Loading，统一由 Shell 层复用同一组件
 - `ModelErrorState` 用于统一接入中 / 暂不支持 / 处理中提示
@@ -252,6 +254,62 @@ type ModelViewerCapabilities = {
   - 仅 LCC / LCC2
   - 暂不接 GLB / IFC / PLY / OSGB
   - 暂不接前台删除启动视图按钮
+
+## 三点三、LCC iframe 独立页与完成协议（2026-06-12）
+
+- 本轮新增独立路由：`web/app/viewer/lcc/[id]/page.tsx`
+- 当前 LCC 查看链路已固定为：
+  - `/models/[id]` 详情页识别 `isLccModel(...)`
+  - 命中后详情页始终挂载 iframe：`/viewer/lcc/[id]`
+  - iframe 内独立请求 `GET /api/models/:id`
+  - iframe 内初始化 `LccViewer`
+- 采用 iframe 的目的：
+  - 隔离 `LCCRender` / `WebGLRenderer` / camera / controls 生命周期
+  - 减少 React SPA 页面内反复挂载/卸载引发的上下文污染
+  - 允许 `/models/[id]` 与 `/viewer/lcc/[id]` 分别采集运行时证据
+- 外层详情页当前协议：
+  - iframe 文档 load 后开始轮询子文档
+  - 仅当子文档根节点满足：
+    - `data-lcc-loaded="true"`
+    - `data-lcc-complete-reason="onLoadedStable"`
+  - 才收起外层唯一一层品牌 Loading
+- 当前边界：
+  - 外层详情页不解析 SDK 进度
+  - 外层详情页不直接判断 canvas 是否已出画
+  - 外层只消费子文档的统一完成协议
+
+## 三点四、LCC 完成态与卡 92% 修复口径（2026-06-12）
+
+- 真实故障现象：
+  - 所有 LCC 模型在 `/models/[id]` 与 `/viewer/lcc/[id]` 中都可能停在约 92%
+  - 运行时表现为 `viewerStatus=loading`、`data-lcc-loaded=false`
+- 运行时结论：
+  - 某些真实场景下 SDK `onLoaded` 未触发
+  - 旧完成链过度依赖 `onLoaded -> stable window -> completeViewerLoading`
+- 当前收口规则：
+  - 正常路径仍优先使用 SDK `onLoaded`
+  - 若 `onLoaded` 缺失，但 canvas 可见、资源窗口稳定、等待超过安全阈值，允许走安全兜底
+  - 兜底后**仍写入**：
+    - `data-lcc-loaded="true"`
+    - `data-lcc-complete-reason="onLoadedStable"`
+  - 外层协议保持不变
+- 当前诊断属性：
+  - `data-lcc-viewer-status`
+  - `data-lcc-loaded`
+  - `data-lcc-complete-reason`
+  - `data-lcc-sdk-loaded`
+  - `data-lcc-debug-*`
+- 当前已知风险：
+  - 外层详情页如果只看到 iframe 内 `error` 而不是 `loaded`，目前仍会继续显示 Loading
+
+## 三点五、LCC 水印当前口径（2026-06-12）
+
+- `XGRIDS` 水印当前判断不是普通 DOM，而是更接近 SDK / 授权链写入画布的品牌层
+- 公开文档未查到正式“去水印 / 品牌控制”开关
+- 当前仓库仅采用内部视觉处理，不视为官方去水印能力：
+  - `LccViewer` 底部微裁切 `8px`
+  - `viewerStatus === "loaded"` 后加 `16px` 底边
+- 该方案仅用于内部展示，不修改 SDK 文件
 
 ## 四、Viewer 分发规则
 

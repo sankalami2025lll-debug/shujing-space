@@ -1,6 +1,6 @@
 # 数境空间官网 阶段开发检查点
 
-> 更新日期：2026-06-06（文档总口径已同步：当前对象存储为阿里云 OSS；历史对象存储表述已统一收口为 OSS 口径）
+> 更新日期：2026-06-12（已补齐 LCC iframe 独立查看器、卡 92% 运行时排查、品牌 Logo 收口与水印内部处理现状）
 > 范围：仅记录已实际落地的改动与事实，供后续 Agent 续接。
 > 索引：LCC Web SDK 接入记录详见 `docs/lcc-web-sdk-integration.md`
 > 索引：模型浏览器统一架构详见 `docs/model-viewer-architecture.md`
@@ -12,11 +12,33 @@
 > 补记：模型浏览器 UI 收口与无用代码清理完成，详见 `docs/model-viewer-architecture.md`
 > 补记：LCC/LCC2 Web SDK 原生 Viewer 已完成封板：用户继续上传 ZIP 成果包，后端解压并保存 `.lcc/.lcc2` 入口文件 URL，前端 `LccViewer` 以入口文件 URL 作为 `dataPath`；不采用目录 `dataPath`，不依赖 `meta.lcc / meta.lcc2 / meta.splat`，LCC/LCC2 共用同一个 `LccViewer`；目录模式残留与误导命名已清理，同步 `unload`、格式切换 `dispose`、全局 load owner 等生命周期保护已保留；`web pnpm build` 已通过。详情见 `docs/lcc-web-sdk-integration.md`
 > 补记：LCC/LCC2 默认视角已最终收口为 `boundsCenterHomeView`，轨迹默认视角与 `spawnPoint.rotation` 试算残留已清理，`spawnPoint` 仅保留诊断；`resetView` 回到 `defaultCameraJson / boundsCenterHomeView / bounds fallback`；本轮无用代码清理与文档记录已完成。详情见 `docs/lcc-web-sdk-integration.md`
+> 补记：2026-06-12 已完成官网品牌 Logo 收口：顶部导航和普通页面 Footer 统一改为整图资源 `/loading/loading-logo-reference1.png`，顶部固定 `60px`、底部固定 `57px`；模型加载动画继续使用 `/brand/model-loading-logo.png`，不得混用。
+> 补记：2026-06-12 已完成 LCC 详情页 iframe 独立查看器收口：`/models/[id]` 下的 LCC/LCC2 模型统一走 `/viewer/lcc/[id]` iframe；外层只保留唯一品牌 Loading，是否收起由子文档 `data-lcc-loaded=true + data-lcc-complete-reason=onLoadedStable` 决定。详情见 `docs/model-viewer-architecture.md`
+> 补记：2026-06-12 已完成“所有 LCC 模型卡在 92%”运行时排查与最小修复：真实根因是某些运行时下 SDK `onLoaded` 未触发，导致原完成链无法进入 `onLoadedStable`；现已增加保持协议不变的安全兜底，最终仍写入 `data-lcc-loaded=true` 与 `data-lcc-complete-reason=onLoadedStable`。本轮验证 `/models/77`、`/viewer/lcc/77` 及额外模型通过；当前环境未注入 `NEXT_PUBLIC_LCC_APP_KEY`，已确认本次故障与 appKey 缺失无关。详情见 `docs/lcc-web-sdk-integration.md`
+> 补记：2026-06-12 已确认 `XGRIDS` 水印并非页面 DOM，而是更接近 SDK / 授权链写入画布的品牌层；公开文档未查到正式去水印开关。当前仓库仅采用内部视觉处理：`lcc-viewer.tsx` 底部微裁切 `8px` + loaded 后 `16px` 底边，属于前端内部遮挡，不是官方去水印方案。详情见 `docs/lcc-watermark-visual-workaround.md`
 > 补记：OSS 命名收口后的上传链路已完成真实环境冒烟：`server/.env` 已切到 `OSS_*`，直连 `127.0.0.1:4000` 验证 `POST /api/uploads/presign` 成功返回 `uploadUrl + objectKey`，`r2Key` 仅保留为 deprecated 兼容别名；随后完成 1x1 PNG 直传阿里云 OSS、`/api/uploads/callback` 回调、测试模型发布、数据库落库核验（`fileUrl / viewerUrl / objectKey` 正常），且 `cd server && pnpm build` 通过。
+> 补记：根据 `docs/review-report-2026-06-06.md` 第一阶段整改，生产部署口径已收口为“`web` 生产默认走 `/api`，由 Nginx/OpenResty 反代到 `server:4000`”；`deploy/.env.prod.example` 已改为与后端真实读取一致的变量名（`PORT / JWT_ACCESS_SECRET / JWT_ACCESS_EXPIRES / MAX_MODEL_SIZE_MB` 等），不再使用旧口径 `SERVER_PORT / JWT_SECRET / JWT_EXPIRES_IN / MAX_FILE_SIZE_MB`。
+> 补记：模型启动视图保存第一阶段已落地后端契约：`models` 新增 `launch_view_json / launch_view_updated_at / launch_view_updated_by`；`GET /api/models/:id` 已返回 `launchView + canSaveLaunchView`；新增 `PUT/DELETE /api/models/:id/launch-view`，仅模型归属用户可写。当前未修改前端 Viewer、`LCCRender.load`、`dataPath`、`boundsCenterHomeView`、OSS/上传链路；`cd server && pnpm build` 通过，定向 Jest（`models.service.spec.ts`、`models.controller.spec.ts`）通过。本地 `prisma migrate dev` 因 `localhost:5432` 不可达未能实际 apply，但迁移 SQL 已补入 `server/prisma/migrations/20260606101500_add_model_launch_view/migration.sql`。
+> 补记：模型启动视图保存第二阶段前端接线已完成：`ModelDetail` 已补 `launchView / canSaveLaunchView`，`ModelViewerHandle` 已补 `getCurrentView / applyView`，`LccViewer` 已接入 `launchView -> defaultCameraJson -> boundsCenterHomeView -> bounds fallback` 打开优先级，且 `resetView` 会回到当前最终默认视图；左下角“工具”展开项已新增“保存启动视图”，仅模型归属用户可见，保存成功后即时更新当前默认视图，无需刷新页面。当前仍未修改 `server`、`LCCRender.load`、`dataPath`、默认视角算法本体、OSS/上传链路。
+> 补记：3A-1「上传任务持久化后端表和 API」已完成第一版后端落地：新增 `upload_tasks` 表、`UploadTaskStatus / UploadTaskStage` 枚举、`/api/upload-tasks/*` 八个接口；支持同用户 `clientToken` 幂等建任务、查询前把超时 `queued/running` 任务自动收敛为 `interrupted`、严格校验任务与 `model_files` 归属、基于任务快照复用 `ModelsService.create` 创建正式模型，并在 `ModelsService.markReady/markFailed` 同步回写任务状态。当前**未修改 web、未修改 UploadTaskProvider/UploadModal/个人中心、未改 OSS presign/callback 主链、未改 LCC/LCC2 Viewer / 启动视图 / dataPath**。本地 `pnpm prisma migrate dev --name add_upload_tasks` 已成功；Windows 下 `pnpm prisma generate` 因 Prisma engine 文件被占用改为 `pnpm prisma generate --no-engine` 成功；`cd server && pnpm build` 通过。
+> 补记：3A-2「前端任务恢复」已完成第一版接线：新增 `web/lib/api/upload-tasks.ts`，`UploadTaskProvider` 会在登录态就绪后调用 `GET /api/upload-tasks/me` 恢复 persisted tasks，并在前端把本地运行态任务、后端恢复任务拆分后再合并为统一卡片视图；个人中心已支持 `local-task / persisted-task / server-model` 三类数据合并展示，并按 `uploadTaskId / clientToken / modelId` 去重，避免与正式模型重复显示。`UploadTaskCard` 已适配 `interrupted / processing / failed / canceled` 刷新后展示，其中 `interrupted` 会显示“已中断 / 上传中断 / 需要重新选择文件”，但**本阶段仍不支持刷新后自动继续 PUT，不做 OSS multipart，不改 UploadModal 提交主链，也未改 server / Prisma / OSS presign/callback / LCC/LCC2 Viewer / 启动视图 / dataPath**。`cd web && pnpm build` 通过。
+> 补记：3A-3「中断 / 重试 / 取消接入」已完成前端第一版：`UploadModal` 提交会先 `POST /api/upload-tasks` 创建后端任务，再把 `uploadTaskId / clientToken` 注入本地任务；`task-runner` 在 `presigning_model / uploading_model / callbacking_model / presigning_cover / uploading_cover / callbacking_cover / creating_model` 各阶段同步后端 `status/stage`，并在上传中定时 `heartbeat`、`callback` 成功后调用 `/upload-tasks/:id/files` 绑定 `fileId`、最终通过 `/upload-tasks/:id/publish` 发布模型。`UploadTaskProvider` 已接入取消时本地 `AbortController` + `/upload-tasks/:id/cancel`、页面关闭时对 running task 尝试 `keepalive` 调用 `/upload-tasks/:id/interrupted`，刷新后依旧只恢复任务卡与 interrupted 提示，不自动续传 PUT；`UploadTaskCard` 对 failed/interrupted 重试会在缺少本地 `File` 时提示重新选择文件。当前**未修改 server / Prisma / OSS presign-callback 后端逻辑 / LCC-LCC2 Viewer / 启动视图 / dataPath**。
+> 补记：3A-3 真实验收已通过：成功 / 取消 / 中断 / 失败四条链路均完成实测并通过，已确认成功链路会先创建 `uploadTask`，随后写入 `status/stage`、`heartbeat`、`files` 绑定与 `/upload-tasks/:id/publish -> modelId`；取消链路会同步后端 `canceled` 且阻止后续 `callback/publish`；刷新/关闭链路会进入 `interrupted` 且不自动继续 PUT；模拟 OSS PUT 失败会进入 `failed` 且不继续 publish。3A 阶段总边界保持不变：**只做上传任务持久化与中断恢复提示，不做真正 OSS 分片断点续传，不做 multipart resume**。
+> 补记：3B-1「后端 multipart 表和 API」已完成第一版基础能力：新增 `upload_multipart_sessions / upload_multipart_parts` 两张表与 `UploadMultipartStatus` 枚举；新增 `/api/upload-tasks/:id/multipart/*` 六个后端接口；`OssService / OssCompatibleService / ObjectStorageService` 已补 `initiateMultipartUpload / presignUploadPart / completeMultipartUpload / abortMultipartUpload` 能力；`complete multipart` 成功后会创建 `model_files` 并仅回写 `upload_tasks.modelFileId / coverFileId`，**不会创建模型、不会 publish**。当前**未修改 web、未接 multipart runner、未改 UploadTaskProvider / UploadModal / UploadTaskCard / 个人中心 UI、未改现有 `/uploads/presign` `/uploads/callback` 小文件链路，也未改 `/upload-tasks/:id/publish` 业务语义**。默认后端参数口径：`MULTIPART_THRESHOLD_MB=64`（仅文档保留，暂未接前端分流）、`MULTIPART_DEFAULT_PART_MB=32`、`MULTIPART_MAX_PARTS=9500`、`partSize = max(16MB, ceil(fileSize / 9500))`。
+> 补记：3B-2「前端大文件 multipart runner」已完成并通过 3010 真实浏览器最终验收：新增 `web/lib/upload-task/multipart-runner.ts` 与 `upload-tasks multipart` API client；`task-runner` 现通过前端配置常量 `MULTIPART_MODEL_MIN_MB` 控制 model 文件是否走 multipart，读取 `NEXT_PUBLIC_MULTIPART_MODEL_MIN_MB`，**默认值为 `0`**，表示当前**所有 model 文件默认都走** `/api/upload-tasks/:id/multipart/*` 新链路。multipart runner 现保持 **fetch PUT part + 60 秒超时 + 并发=1 + 单分片最多重试 3 次**，按后端 `partSize` 对 `File.slice()` 分片、只上传 `missingParts`、`PUT part` 读取 `ETag` 后回写 `parts/:partNumber/complete`，所有分片完成后调用 `multipart complete` 获取 `modelFileId`，随后仍通过 `/upload-tasks/:id/publish` 创建正式模型。当前 **cover 仍走旧 `presign -> PUT -> callback` 小文件链路，旧 model 单 PUT 链路仍保留为配置回退能力**；取消大文件上传时会中断当前分片 PUT，并额外调用 `multipart abort`，失败时不会 publish。**3B-2 范围不包含刷新后自动续传 / 断点续传，3B-3 再做。** 最终通过证据保留于 `tmp-browser-fixtures/results/postfix-acceptance-1780908337322.json`。当前**未修改 server / Prisma / UploadModal UI / UploadTaskCard UI / 个人中心 UI / LCC-LCC2 Viewer / 启动视图 / dataPath / 旧 `/uploads/presign` `/uploads/callback` 逻辑**。
+> 补记：3B-3A「恢复卡片 + 重新选择文件 + fingerprint 校验」已完成第一版：后端 `GET /api/upload-tasks/:id/multipart/model` 现返回 `fileName/originalName/fileSize/fileLastModified/fingerprintAlgo/fingerprint/partSize/totalParts/uploadedBytes/completedPartsCount/uploadedParts/missingParts/canResume`，并新增 `POST /api/upload-tasks/:id/multipart/model/verify-file` 用于校验重新选择的模型文件；前端新增 `web/lib/upload-task/fingerprint.ts`，按 **<3MB 整文件 hash / >=3MB 取前1MB+中间1MB+末尾1MB** 生成 `sample-sha256-v1` 指纹。个人中心 `UploadTaskCard` 对 `interrupted/failed && canResume=true` 展示“继续上传”，选择错误文件会拒绝，选择正确文件后只进入本地 `resume_ready` / “文件校验通过，可继续上传” 状态。**3B-3A 到此为止，不上传 missing parts、不调用 multipart complete、不 publish。** 验收证据保留于 `tmp-browser-fixtures/results/resume-ready-1780911174900.json`。
+> 补记：3B-3B「恢复上传 missing parts + multipart complete + publish」已完成并通过 **3010 真实浏览器验收**：`UploadTaskProvider.prepareResumeTask` 在 3B-3A 校验通过后会继续进入 `resumeTask(taskId, file)`，先读取 `GET /api/upload-tasks/:id/multipart/model` 的 `uploadedParts/missingParts/partSize/totalParts/uploadedBytes`，再把 session 交给 `resumeMultipartUploadTask(...)`。恢复 runner 现以 `uploadedBytes / file.size` 初始化进度，仅对 `missingParts` 调 `/multipart/model/parts/presign -> PUT -> parts/:partNumber/complete`，**不会重传 `uploadedParts`**；若 `missingParts=[]`，则不再上传任何分片，直接调用 `multipart complete`。`multipart complete` 成功后复用后端已回写的 `upload_tasks.modelFileId`，前端再调用 `/upload-tasks/:id/publish`；若任务已有 `modelId`，后端 `publish` 继续幂等返回，避免重复建模。真实验收已确认：**中断后只续传 missing parts、`missingParts=[]` 可直接 complete、failed 任务可继续、canceled 任务不可继续、publish 后任务卡会按 `createdModelId` 去重隐藏并显示正式模型卡**。最终通过证据保留于 `tmp-browser-fixtures/results/resume-missing-parts-1780914415706.json`，对应验收脚本保留于 `tmp-browser-fixtures/verify-3b3b-resume-missing-parts.cjs`。当前 **未修改 UploadModal 主发布流程、未改 task-runner 新上传主流程、未改旧 `/uploads/presign` `/uploads/callback` cover 链路、未提升 multipart 并发（仍为 1）**；3B-3C 再做异常全量回归 / 清理策略。
+> 补记：3B-3C「异常全量回归 / 清理策略」已完成第一轮真实浏览器收口：新增 `tmp-browser-fixtures/verify-3b3c-exception-regression.cjs`，并产出证据 `tmp-browser-fixtures/results/resume-exception-regression-1780916462570.json`。本轮确认：**再次刷新/多次中断后仍只续传剩余 `missingParts`；`complete` 成功但 `publish` 失败后可不重传 part、可重试 `publish`；`publish` 成功但个人中心列表刷新失败时，本地任务卡仍显示处理中，刷新页面后正式模型卡出现且任务卡去重隐藏；错误文件的 `name/size/fingerprint` 三类不一致均继续拒绝，且不触发 part PUT / complete / publish；`canceled` 任务仍不可恢复；恢复链路未触发旧 model `/uploads/presign`，cover 旧链路不受影响。** 本轮最小修复包含：`upload-task-provider.tsx` 增加 resume 并发门闩，避免重复点击触发多次 verify/presign；同时将 `uploadId`/multipart 会话失效的失败提示统一为「上传会话已失效，请重新发布」。多标签页同时恢复锁 **本轮未实现**，先记为 **3B-4 后续优化**（建议前端 BroadcastChannel/本地锁 + 后端 session owner/lease 冲突保护）。孤儿 multipart 清理策略也已明确：`aborted` 会话优先调 OSS AbortMultipartUpload 清理；`failed` 长时间未恢复与 `initiated/uploading` 超期未活动会话转入 `aborted/expired`；`completed` session 与已发布模型文件不做对象删除。
 
 ## 🚩 最终检查点（重开新对话前，先读本节）
 
 > 本节为「重开新对话」的交接快照。下方各节为历史明细，可按需深入。
+
+### 当前待处理风险（2026-06-12 代码体检）
+
+- ⚠️ **非 LCC Viewer 延迟挂载兜底仍有缺口**：`model-detail-page.tsx` 的 `viewerReady` 检查在达到最大 `requestAnimationFrame` 尝试次数后只会停止轮询，但不会强制挂载 `ModelViewerShell`；若布局稳定慢于预期，普通模型可能一直停在外层 Loading。
+- ⚠️ **LCC iframe 外层 Loading 会遮住内层 error 态**：当前外层只在子文档满足 `data-lcc-loaded=true + completeReason=onLoadedStable` 时才隐藏；如果 iframe 内部真实进入 `error`，外层仍会继续显示 Loading，用户看不到子文档错误信息。
+- ℹ️ **LCC 运行时调试属性当前仍保留在生产 DOM**：`lcc-viewer.tsx` 会持续写入 `data-lcc-debug-*` 诊断属性，便于继续排查加载链问题，但会增加少量 DOM 变更噪音；后续如确认稳定，可考虑按环境变量再做收口。
 
 ### 零、当前阶段快照（2026-06-01，Next.js 本地验收通过）
 
@@ -33,6 +55,7 @@
 - ✅ **`web/` 本地运行已恢复正常**（`3000` + `4000` + DB 联调通过）。
 - ✅ **全局样式问题已解决**：自 Vite `src/styles/` 迁移 `web/styles/{fonts,tailwind,theme}.css`，`globals.css` 链式引入；Tailwind 扫描 `app/` / `components/` / `lib/`；shadcn CSS 变量与 `@layer base` 已生效（详见「第 11 步·全局样式修复」「〇之启·十六·全局样式」）。
 - ⚠️ **样式修复后须清缓存重启才生效**：结束占用 **3000** 的旧 `next dev` 进程 → 删除 `web/.next` → `cd web && pnpm dev` → 硬刷新浏览器。
+- ⚠️ **本地 3010 联调启动规则**：本地联调默认使用 `/api`，不要在 shell 残留 `NEXT_PUBLIC_API_BASE_URL=https://shujing.space/api`；启动 `3010` 前先执行 `Remove-Item Env:NEXT_PUBLIC_API_BASE_URL -ErrorAction SilentlyContinue`，再运行 `pnpm dev -- --hostname 127.0.0.1 --port 3010`。
 
 #### Admin 前端阶段 1（后台壳子 + 管理员守卫，2026-06-03）
 
@@ -581,8 +604,10 @@
 | **viewerUrl 外链发布** | ✅ 已可用（Vite `src/` + Next.js `web/`）：填 `https://` 在线查看链接 + `viewerType=iframe`，`POST /api/models` 成功后在 `GET /api/models` 可见。 |
 | **OSS 文件上传代码路径** | ✅ 已保留（Vite + Next.js）：`presign` → 浏览器 `PUT` 预签名 URL → `callback` → `createModel(modelFileId/coverFileId)`；实现于 `*/lib/api/uploads.ts` + `UploadModal`。 |
 | **无真实 OSS 凭证时** | `POST /api/uploads/presign` 返回 **503**；前端映射固定提示「对象存储未配置，请先配置对象存储」，**无本地兜底、不伪造上传**。 |
-| **真实文件直传端到端** | ❌ 未完成：需服务器注入 **OSS 凭证** + OSS Bucket **CORS** 允许浏览器 PUT；配置前勿将「选模型/封面文件发布」计为验收通过。 |
-| **其它说明** | 选封面/模型文件会走 presign，无 OSS 时即失败；成功态文案仍写「审核通过后展示」，与 `visibility=public` 立即可见存在产品口径差（UI 未改）。 |
+| **真实文件直传端到端** | ✅ 已完成：`model` 文件默认走 multipart（`NEXT_PUBLIC_MULTIPART_MODEL_MIN_MB=0`），3010 真实浏览器下已验证小模型成功、大模型 3 part 成功、取消 abort 成功、part 失败不 publish；`cover` 仍走旧 `presign -> PUT -> callback` 链路。 |
+| **其它说明** | multipart runner 当前固定 **fetch PUT + 并发=1 + 60s timeout**，以稳定性优先；3B-3A 已完成“继续上传”识别、重新选文件与 fingerprint 校验，3B-3B 已完成并通过 3010 真实验收：只续传 `missingParts`、`missingParts=[]` 直接 `complete`、`failed` 可继续、`canceled` 不可继续、`publish` 后任务卡去重隐藏；3B-3C 已完成第一轮异常全量回归：再次刷新仍只补剩余分片、`publish` 可重试、列表刷新失败后刷新页面可去重、重复点击已加门闩、`uploadId` 失效有明确失败提示；多标签页恢复锁留待 3B-4 优化，孤儿 multipart 清理策略已在 checkpoint 明确。 |
+
+> 补记：上传体系 3A 至 3B-3C 已完成总归档，详见 `docs/upload-system-final-acceptance.md`。
 
 ### 一·续三、Next.js `web/` 用户侧迁移清单（步骤 0–8C，2026-06-01 收口）
 
@@ -614,26 +639,25 @@
 
 ### 一·补、风险点 / dev 库（延续）
 
-- **本地无真实 OSS 凭证**：浏览器「直传 OSS」环节未真实端到端验证（后端 dummy/空配置下 presign 503 已验）。
-- **上线前置**：注入真实 OSS 凭证 + OSS Bucket CORS + `OSS_PUBLIC_BASE` 可访问域。
+- **上传链路现状**：3010 本地真实浏览器已完成 model multipart + cover 旧链路端到端验收；当前稳定策略为 multipart 并发=1。
+- **上线前置**：继续保持真实 OSS 凭证、OSS Bucket CORS 与 `OSS_PUBLIC_BASE` 配置一致，避免本地/线上环境漂移。
 - **dev 库测试残留**：测试模型 **id≥11**（含 10G 冒烟 id=17/18 等）、联调注册用户、线索/申请冒烟行；验收前可按需 `migrate reset` + `seed` 或手动清理。
 - **孤儿 `model_files`**：上传登记但未发布的文件暂无清理，留二期。
-- **大文件**：当前单次预签名 PUT；多段上传留二期。
+- **大文件**：3B-2 已切到 multipart；刷新后自动续传 / 断点续传留 3B-3。
 - **审核流**：`public`→`published` 直接公开；`review`→`pending` 需 **admin API** 审核，无前台管理页。
 
 ### 二、下一步任务（Next.js 本地验收通过后）
 
 > **Vite 用户侧 API 接入已闭环（10A–10G）**；**Next.js 用户侧页面迁移 + 全局样式 + 本地 `:3000` 验收已闭环**。下列为**当前主线**。
 
-1. **配置真实阿里云 OSS 凭证与桶 CORS**（`OSS_*` 环境变量 + OSS 控制台 CORS 允许浏览器 PUT）。
-2. **验证真实文件上传**：presign 200 → 浏览器 PUT → callback → 带 `modelFileId`/`coverFileId` 发布（清单 **L21**）。
-3. **后台 Admin 前端**：对接已有 `/api/admin/*`（模型审核、用户、分类、线索、申请、站点配置）。
-4. **真实线上部署**（后续）：生产 Docker Compose + 1Panel + Cloudflare + 真实短信；Next 生产 `/api` 反向代理（dev rewrites 不用于生产）。
-5. **可选**：按 `docs/frontend-acceptance-checklist.md` 在 **`http://localhost:3000`** 全量勾选；UI 对照 **`http://localhost:5173`**。
+1. **3B-3 刷新后自动续传 / 断点续传**：在现有 multipart 会话基础上补恢复策略与 UX。
+2. **后台 Admin 前端**：对接已有 `/api/admin/*`（模型审核、用户、分类、线索、申请、站点配置）。
+3. **真实线上部署**（后续）：生产 Docker Compose + 1Panel + Cloudflare + 真实短信；Next 生产 `/api` 反向代理（dev rewrites 不用于生产）。
+4. **可选**：按 `docs/frontend-acceptance-checklist.md` 在 **`http://localhost:3000`** 全量勾选；UI 对照 **`http://localhost:5173`**。
 
 ### 二·补、未完成项
 
-- ❌ **真实 OSS 文件直传**（浏览器 PUT + 带文件发布 + 封面 URL 展示）— 清单 L21
+- ✅ **真实 OSS 文件直传**（model multipart + cover 旧链路）— 3010 已验收通过
 - ✅ **Next.js 用户侧页面迁移 + API 接入 + 全局样式 + 本地 `:3000` 验收**
 - ❌ **后台 Admin 前端**（`/admin/*` UI）
 - ❌ **真实线上部署**（生产环境、域名、SSL、生产短信/OSS）

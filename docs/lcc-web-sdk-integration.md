@@ -1,9 +1,10 @@
 # LCC Web SDK 接入记录
 
-> 记录日期：2026-06-06
+> 记录日期：2026-06-12
 > 记录范围：LCC Web SDK 第一步接入，仅包含 SDK 目录判定、静态文件落位、统一 `LccViewer` 外壳准备、文档补录。
 > 明确未改范围：`server/`、数据库、OSS、`deploy/.env.prod`。
 > 最新口径：当前对象存储实际为 **阿里云 OSS**；文档统一使用 `OSS_* / objectKey / oss-compatible.service.ts` 作为对象存储命名。
+> 最新补记：2026-06-12 已补齐 iframe 独立查看器、卡 92% 运行时排查、appKey 验证、水印来源判断与内部视觉处理记录。
 
 ## 1. SDK 原始路径
 
@@ -118,6 +119,83 @@
 
 - 本次记录对应的是**LCC Web SDK 第一步接入**，目标是先把 SDK 目录结构判断清楚，并把统一组件和静态资源入口准备好。
 - 本次没有继续扩展业务逻辑，也没有修改后端、数据库、OSS 或部署环境文件。
+
+---
+
+## 12A. 开发记录（2026-06-12：LCC iframe 独立查看器与卡 92% 修复）
+
+- 本次目标：
+  - 将 LCC/LCC2 详情查看从详情页内直挂收口为 iframe 独立页
+  - 真实排查“所有 LCC 模型卡在 92%”问题
+  - 在不改后端 / 数据库 / SDK 文件的前提下完成最小修复
+- 关键文件：
+  - `web/app/viewer/lcc/[id]/page.tsx`
+  - `web/components/pages/model-detail-page.tsx`
+  - `web/components/models/lcc-viewer.tsx`
+  - `web/components/models/model-loading-overlay.tsx`
+- 当前链路：
+  - `/models/[id]` 命中 LCC 后始终挂载 iframe `/viewer/lcc/[id]`
+  - iframe 内单独请求 `GET /api/models/:id`
+  - `LccViewer` 将完成态写入根节点：
+    - `data-lcc-viewer-status`
+    - `data-lcc-loaded`
+    - `data-lcc-complete-reason`
+    - `data-lcc-sdk-loaded`
+  - 详情页外层只在 `data-lcc-loaded=true && data-lcc-complete-reason=onLoadedStable` 时关闭唯一品牌 Loading
+- 真实根因：
+  - 问题不是单个模型数据损坏
+  - 真实运行时中，SDK `onLoaded` 会偶发不触发
+  - 原链路过度依赖 `onLoaded -> stable window -> completeViewerLoading`
+  - 结果是模型资源已下载，但无法到达完成态
+- 当前修复策略：
+  - 保留原 `onLoadedStable` 协议不变
+  - 当 `onLoaded` 缺失，但画布可见、资源窗口稳定、等待超过安全阈值时，允许走安全兜底
+  - 兜底仍调用 `completeViewerLoading("onLoadedStable")`
+  - 因此外层无需改协议
+- 当前运行时验证结果：
+  - `/models/77`
+  - `/viewer/lcc/77`
+  - 额外抽测模型
+  - 均已验证不再长期停在 92%，且 `data-lcc-loaded=true`
+- 当前已知风险：
+  - 外层详情页只认 `loaded + onLoadedStable`；若子文档进入 `error`，外层仍会继续显示 Loading，错误态会被遮住
+
+## 12B. appKey 验证结论（2026-06-12）
+
+- 当前环境变量为：`NEXT_PUBLIC_LCC_APP_KEY` 未注入
+- 真实抓取中：
+  - `data-lcc-debug-appkey="absent"`
+  - 故障仍可稳定复现并被修复
+- 当前结论：
+  - 本轮“卡 92%”与 appKey 缺失无直接关系
+  - 业务侧继续保持“无 appKey 时不传 `appKey` 字段”的条件展开
+  - 暂未发现 `...(LCC_APP_KEY ? { appKey: LCC_APP_KEY } : {})` 对本轮故障构成决定性影响
+
+## 12C. 水印来源与品牌控制结论（2026-06-12）
+
+- 真实页面检查结论：
+  - `XGRIDS` 未作为普通 DOM 文本节点出现
+  - 更接近 SDK / 授权链输出到 canvas 的品牌层
+- 官方资料检查结论：
+  - 公开文档未查到正式“去水印 / 品牌控制”方案
+  - 但 SDK 产物内存在 `appKey / waterMark / isVerifySig` 相关内部字段，说明水印更像授权链行为
+- 当前口径：
+  - 不能把“直接删水印”视作公开支持的前端能力
+  - 若需正式去除，应优先向 XGRIDS 官方确认授权等级与 `appKey` 能力
+
+## 12D. 当前内部视觉处理（2026-06-12）
+
+- 仅内部前端视觉处理，不修改 SDK：
+  - `LCC_WATERMARK_CROP_PX = 8`
+  - `LCC_WATERMARK_BOTTOM_BAR_PX = 16`
+- 实施位置：
+  - `web/components/models/lcc-viewer.tsx`
+- 实施方式：
+  - `mountRef` 所在画布区域通过 `overflow-hidden` 做底部微裁切
+  - 在 `viewerStatus === "loaded"` 后附加一条 `16px` 底边
+- 当前状态：
+  - 该方案仅作为内部视觉收口存在
+  - 不是官方去水印方案
 
 ---
 
