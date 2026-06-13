@@ -14,6 +14,7 @@ import {
   Share2,
   Bookmark,
   ArrowLeft,
+  Expand,
   Eye,
   Heart,
   User,
@@ -93,6 +94,7 @@ export default function ModelDetailPage({ modelId }: ModelDetailPageProps) {
   // viewerReady / viewerMountSeed / viewerHostRef：延迟挂载 ModelViewerShell
   // 客户端路由进入详情页时，viewer 容器需要等布局稳定后才能正确初始化
   // 否则首次 renderer.setSize 读到 clientWidth/clientHeight 为 0，导致模型不可见
+  const modelViewerAreaRef = useRef<HTMLDivElement | null>(null);
   const viewerHostRef = useRef<HTMLDivElement | null>(null);
   const [viewerReady, setViewerReady] = useState(false);
   const [viewerMountSeed, setViewerMountSeed] = useState(0);
@@ -248,6 +250,21 @@ export default function ModelDetailPage({ modelId }: ModelDetailPageProps) {
     () => `${detail?.id ?? "pending"}-${detail?.viewerUrl || ""}`,
     [detail?.id, detail?.viewerUrl],
   );
+  const handleViewerFullscreen = useCallback(async () => {
+    const viewerArea = modelViewerAreaRef.current;
+    if (!viewerArea) return;
+
+    try {
+      if (document.fullscreenElement === viewerArea) {
+        await document.exitFullscreen();
+        return;
+      }
+
+      await viewerArea.requestFullscreen();
+    } catch {
+      toast.error("当前浏览器暂不支持全屏");
+    }
+  }, []);
 
   // LCC iframe 外层 loading：只根据模型切换重置，不参与 iframe key，避免重复 reload。
   useEffect(() => {
@@ -437,6 +454,7 @@ export default function ModelDetailPage({ modelId }: ModelDetailPageProps) {
     <div className="min-h-[calc(100dvh-4rem)] md:min-h-[calc(100dvh-72px)] bg-[#0a0a0a] text-white lg:h-[calc(100dvh-72px)] lg:overflow-hidden">
       <div className="flex flex-col lg:h-full lg:min-h-0 lg:flex-row">
         <div
+          ref={modelViewerAreaRef}
           id="model-viewer-area"
           className="relative flex flex-1 flex-col bg-[#0d0d0d] border-b border-white/10 lg:h-full lg:min-h-0 lg:border-b-0 lg:border-r"
         >
@@ -454,11 +472,11 @@ export default function ModelDetailPage({ modelId }: ModelDetailPageProps) {
               )}
               <button
                 type="button"
-                onClick={handleShare}
-                title="分享"
+                onClick={handleViewerFullscreen}
+                title="全屏"
                 className="w-8 h-8 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center hover:bg-white/10 hover:border-white/20 transition-all"
               >
-                <Share2 className="w-4 h-4 text-gray-400" />
+                <Expand className="w-4 h-4 text-gray-400" />
               </button>
             </div>
           </div>
