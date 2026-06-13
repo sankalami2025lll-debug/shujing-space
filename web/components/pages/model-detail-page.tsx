@@ -2,16 +2,15 @@
 
 /**
  * 页面名称：模型详情页 ModelDetail
- * 页面用途：展示单个模型的三维 Viewer、元信息与相关推荐
- * 主要功能：GET /api/models/:id、iframe 内嵌 / 占位 / 新窗口打开、全屏/重置/分享、相关推荐
+ * 页面用途：展示单个模型的三维 Viewer 与元信息
+ * 主要功能：GET /api/models/:id、iframe 内嵌 / 占位 / 新窗口打开、全屏/重置/分享
  * 对应文档：页面功能注释文档/06_模型详情_ModelDetail.md
  * 说明：步骤 7C 已接收藏写接口与 TrainingModal。全站 NavBar 由 SiteChrome 挂载。
  */
-import { useState, useEffect, useCallback, useRef, type MouseEvent } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo, type MouseEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
-  Grid3X3,
   Share2,
   Bookmark,
   ArrowLeft,
@@ -23,21 +22,22 @@ import {
   X,
 } from "lucide-react";
 import { toast } from "sonner";
+import { ModelLoadingOverlay } from "@/components/models/model-loading-overlay";
 import { ModelViewerShell } from "@/components/models/model-viewer-shell";
 import { TrainingModal } from "@/components/models/training-modal";
 import { useAuth } from "@/components/providers/auth-provider";
 import {
   getModelDetail,
-  getModels,
   favoriteModel,
   unfavoriteModel,
   recordModelView,
 } from "@/lib/api/models";
 import { deleteMyModel } from "@/lib/api/users";
-import { coverStyleByType, formatViews, formatRelativeTime } from "@/lib/format";
+import { formatViews, formatRelativeTime } from "@/lib/format";
 import { typeTagColor } from "@/lib/community-data";
+import { isLccModel } from "@/lib/model-viewer-kind";
 import { ApiError } from "@/lib/http";
-import type { ModelDetail, ModelLaunchView, ModelListItem } from "@/lib/types";
+import type { ModelDetail, ModelLaunchView } from "@/lib/types";
 
 function toTagArray(value: unknown): string[] {
   return Array.isArray(value) ? (value as string[]) : [];
@@ -75,7 +75,6 @@ export default function ModelDetailPage({ modelId }: ModelDetailPageProps) {
   const idValid = Number.isFinite(numericId) && numericId > 0;
 
   const [detail, setDetail] = useState<ModelDetail | null>(null);
-  const [related, setRelated] = useState<ModelListItem[]>([]);
   const [detailLoading, setDetailLoading] = useState(true);
   const [detailError, setDetailError] = useState<string | null>(null);
 
@@ -90,6 +89,19 @@ export default function ModelDetailPage({ modelId }: ModelDetailPageProps) {
   const [showTraining, setShowTraining] = useState(false);
   // viewedRef：记录已打点的模型 id，避免 React 严格模式 / 重渲染导致重复打点（本次会话内最小去重）
   const viewedRef = useRef<number | null>(null);
+
+  // viewerReady / viewerMountSeed / viewerHostRef：延迟挂载 ModelViewerShell
+  // 客户端路由进入详情页时，viewer 容器需要等布局稳定后才能正确初始化
+  // 否则首次 renderer.setSize 读到 clientWidth/clientHeight 为 0，导致模型不可见
+  const viewerHostRef = useRef<HTMLDivElement | null>(null);
+  const [viewerReady, setViewerReady] = useState(false);
+  const [viewerMountSeed, setViewerMountSeed] = useState(0);
+  // lccIframeModelLoaded：仅表示 iframe 内 LCC 模型真正 loaded，不表示 iframe 文档已加载
+  const [lccIframeModelLoaded, setLccIframeModelLoaded] = useState(false);
+  // lccIframeViewerErrored：仅用于外层透出 iframe 内真实 error 态，避免品牌 Loading 永久遮住错误信息
+  const [lccIframeViewerErrored, setLccIframeViewerErrored] = useState(false);
+  const lccIframeRef = useRef<HTMLIFrameElement | null>(null);
+  const lccIframeVisibilityPollRef = useRef<number | null>(null);
 
   const requireAuth = useCallback(() => {
     toast.error("请先登录后再操作");
@@ -154,23 +166,68 @@ export default function ModelDetailPage({ modelId }: ModelDetailPageProps) {
       });
   }, [detail, idValid, numericId]);
 
-  // 相关推荐：后端暂无 /related，从列表接口取若干条并排除当前模型
+  /**
+   * viewerReady 延迟挂载：等待 viewer 外层容器布局稳定后再渲染 ModelViewerShell。
+   * 客户端路由进入时，DOM 尚未完成布局，直接挂载 WebGL renderer 会读到错误的容器尺寸。
+   * detail.id / viewerUrl / modelUrl / fileFormat 任一变化时重新走延迟挂载流程。
+   */
   useEffect(() => {
-    if (!idValid) return;
-    let active = true;
-    getModels({ page: 1, pageSize: 8, sort: "recommended" })
-      .then((res) => {
-        if (active && res?.list) {
-          setRelated(res.list.filter((m) => m.id !== numericId).slice(0, 4));
-        }
-      })
-      .catch(() => {
-        // 推荐区失败静默，不影响主详情
-      });
-    return () => {
-      active = false;
+    // 模型数据变化时先重置 viewerReady，确保旧实例完全卸载后再挂载新实例
+    setViewerReady(false);
+
+    let disposed = false;
+    let attempts = 0;
+    const maxAttempts = 30;
+    const forceMountViewer = () => {
+      setViewerMountSeed((value) => value + 1);
+      setViewerReady(true);
     };
-  }, [idValid, numericId]);
+
+    const check = () => {
+      if (disposed) return;
+
+      const el = viewerHostRef.current;
+      if (!el) {
+        // 容器还未挂载，继续等待
+        if (attempts++ < maxAttempts) {
+          requestAnimationFrame(check);
+        } else {
+          forceMountViewer();
+        }
+        return;
+      }
+
+      const rect = el.getBoundingClientRect();
+      const width = rect?.width ?? 0;
+      const height = rect?.height ?? 0;
+
+      if (width > 100 && height > 100) {
+        // 尺寸有效：延迟一帧确保浏览器完成合成，然后挂载
+        requestAnimationFrame(() => {
+          if (disposed) return;
+          forceMountViewer();
+        });
+        return;
+      }
+
+      if (attempts++ < maxAttempts) {
+        requestAnimationFrame(check);
+        return;
+      }
+      // 超过最大尝试次数后强制进入挂载分支，避免非 LCC 模型永远停在外层 Loading。
+      forceMountViewer();
+    };
+
+    // 跳过 2 帧等布局初始化
+    requestAnimationFrame(() => {
+      requestAnimationFrame(check);
+    });
+
+    return () => {
+      disposed = true;
+      setViewerReady(false);
+    };
+  }, [detail?.id, detail?.viewerUrl, detail?.fileFormat]);
 
   useEffect(() => {
     if (!detail) return;
@@ -178,6 +235,81 @@ export default function ModelDetailPage({ modelId }: ModelDetailPageProps) {
     setSaved(detail.isFavorited ?? false);
     setFavs(detail.favoritesCount);
   }, [detail]);
+
+  // isLccModel：统一识别 LCC/LCC2；命中后当前详情页一律进入 iframe 路由 /viewer/lcc/[id]
+  const isLcc = isLccModel({
+    viewerType: detail?.viewerType ?? "none",
+    fileFormat: detail?.fileFormat ?? "",
+    viewerUrl: detail?.viewerUrl ?? "",
+  });
+  const showLccOuterOverlay = isLcc && !lccIframeModelLoaded && !lccIframeViewerErrored;
+  const lccExpectedPath = detail?.id ? `/viewer/lcc/${detail.id}` : null;
+  const lccIframeKey = useMemo(
+    () => `${detail?.id ?? "pending"}-${detail?.viewerUrl || ""}`,
+    [detail?.id, detail?.viewerUrl],
+  );
+
+  // LCC iframe 外层 loading：只根据模型切换重置，不参与 iframe key，避免重复 reload。
+  useEffect(() => {
+    if (!detail || !isLcc) return;
+
+    if (lccIframeVisibilityPollRef.current !== null) {
+      window.clearInterval(lccIframeVisibilityPollRef.current);
+      lccIframeVisibilityPollRef.current = null;
+    }
+    setLccIframeModelLoaded(false);
+    setLccIframeViewerErrored(false);
+
+    return () => {
+      if (lccIframeVisibilityPollRef.current !== null) {
+        window.clearInterval(lccIframeVisibilityPollRef.current);
+        lccIframeVisibilityPollRef.current = null;
+      }
+    };
+  }, [detail, isLcc]);
+
+  const handleLccIframeLoad = useCallback(() => {
+    if (lccIframeVisibilityPollRef.current !== null) {
+      window.clearInterval(lccIframeVisibilityPollRef.current);
+      lccIframeVisibilityPollRef.current = null;
+    }
+    // 每次 iframe 文档 load 都先重置为未完成，只允许后续 data-lcc-loaded 轮询将其置为 true。
+    setLccIframeModelLoaded(false);
+    setLccIframeViewerErrored(false);
+
+    const pollIframeModelLoaded = () => {
+      const frame = lccIframeRef.current;
+      const iframeDoc = frame?.contentDocument;
+      const childLocation = iframeDoc?.location?.pathname ?? null;
+      if (!iframeDoc || childLocation !== lccExpectedPath) return;
+
+      const childRoot = iframeDoc.querySelector("[data-lcc-viewer-status]");
+      const childViewerStatus = childRoot?.getAttribute("data-lcc-viewer-status");
+      const childLoaded = childRoot?.getAttribute("data-lcc-loaded") === "true";
+      const childReasonStable =
+        childRoot?.getAttribute("data-lcc-complete-reason") === "onLoadedStable";
+      if (childViewerStatus === "error") {
+        setLccIframeViewerErrored(true);
+        if (lccIframeVisibilityPollRef.current !== null) {
+          window.clearInterval(lccIframeVisibilityPollRef.current);
+          lccIframeVisibilityPollRef.current = null;
+        }
+        return;
+      }
+      if (!childRoot || !childLoaded || !childReasonStable) return;
+
+      setLccIframeModelLoaded(true);
+      if (lccIframeVisibilityPollRef.current !== null) {
+        window.clearInterval(lccIframeVisibilityPollRef.current);
+        lccIframeVisibilityPollRef.current = null;
+      }
+    };
+
+    // iframe onLoad 只负责开始轮询子文档状态；是否关闭外层 Loading 只看 data-lcc-loaded。
+    lccIframeVisibilityPollRef.current = window.setInterval(() => {
+      pollIframeModelLoaded();
+    }, 250);
+  }, [lccExpectedPath]);
 
   // 删除确认弹窗：支持 Esc 关闭；删除请求进行中不允许关闭，避免状态混乱。
   useEffect(() => {
@@ -252,9 +384,8 @@ export default function ModelDetailPage({ modelId }: ModelDetailPageProps) {
 
   if (detailLoading) {
     return (
-      <div className="min-h-[calc(100vh-4rem)] md:min-h-[calc(100vh-72px)] flex flex-col items-center justify-center gap-3 text-gray-500 bg-[#0a0a0a]">
-        <Loader2 className="w-7 h-7 animate-spin" />
-        <p className="text-[14px]">正在加载模型详情…</p>
+      <div className="relative min-h-[calc(100vh-4rem)] md:min-h-[calc(100vh-72px)] bg-[#0a0a0a]">
+        <ModelLoadingOverlay visible showText={false} />
       </div>
     );
   }
@@ -262,7 +393,7 @@ export default function ModelDetailPage({ modelId }: ModelDetailPageProps) {
   if (!detail) {
     return (
       <div className="min-h-[calc(100vh-4rem)] md:min-h-[calc(100vh-72px)] flex flex-col items-center justify-center gap-3 py-32 text-gray-500 bg-[#0a0a0a]">
-        <Grid3X3 className="w-10 h-10 opacity-30" />
+        <div className="w-10 h-10 rounded-2xl border border-white/10 bg-white/5" />
         <p className="text-[15px]">{detailError ?? "模型不存在或暂未公开"}</p>
         <Link
           href="/models"
@@ -283,7 +414,6 @@ export default function ModelDetailPage({ modelId }: ModelDetailPageProps) {
       ? detail.description
       : `这是一个高质量的${detail.type}模型，适用于${sceneLabels.join("、") || "多种"}等场景。模型数据精度高，可在线流畅浏览。`;
   const isAuthor = !!user && user.id === detail.userId;
-
   const handleShare = async () => {
     const url = window.location.href;
     if (navigator.share) {
@@ -304,11 +434,11 @@ export default function ModelDetailPage({ modelId }: ModelDetailPageProps) {
   };
 
   return (
-    <div className="min-h-screen bg-[#0a0a0a] text-white">
-      <div className="flex flex-col lg:flex-row lg:h-[calc(100vh-64px)]">
+    <div className="min-h-[calc(100dvh-4rem)] md:min-h-[calc(100dvh-72px)] bg-[#0a0a0a] text-white lg:h-[calc(100dvh-72px)] lg:overflow-hidden">
+      <div className="flex flex-col lg:h-full lg:min-h-0 lg:flex-row">
         <div
           id="model-viewer-area"
-          className="flex-1 relative bg-[#0d0d0d] border-b lg:border-b-0 lg:border-r border-white/10 flex flex-col"
+          className="relative flex flex-1 flex-col bg-[#0d0d0d] border-b border-white/10 lg:h-full lg:min-h-0 lg:border-b-0 lg:border-r"
         >
           <div className="flex items-center justify-between px-4 h-12 flex-shrink-0 border-b border-white/[0.06] bg-[#0d0d0d] z-10">
             <Link
@@ -333,12 +463,53 @@ export default function ModelDetailPage({ modelId }: ModelDetailPageProps) {
             </div>
           </div>
 
-          <div className="flex-1 relative overflow-hidden">
-            <ModelViewerShell model={detail} onLaunchViewSaved={handleLaunchViewSaved} />
+          <div
+            ref={viewerHostRef}
+            className="relative min-h-[60vh] flex-1 overflow-hidden lg:h-full lg:min-h-0"
+          >
+            {isLcc ? (
+              <div
+                className="relative h-full w-full"
+                data-lcc-detail-model-loaded={lccIframeModelLoaded ? "true" : "false"}
+                data-lcc-detail-show-overlay={showLccOuterOverlay ? "true" : "false"}
+              >
+                {/* LCC/LCC2 模型：iframe 始终挂载；外层只保留唯一一层品牌 Loading。 */}
+                <iframe
+                  ref={lccIframeRef}
+                  key={lccIframeKey}
+                  src={`/viewer/lcc/${detail.id}`}
+                  className="h-full w-full border-0"
+                  allow="fullscreen"
+                  title={detail.title}
+                  onLoad={handleLccIframeLoad}
+                />
+                <div
+                  data-lcc-outer-overlay="true"
+                  className={
+                    showLccOuterOverlay
+                      ? "absolute inset-0 z-20 opacity-100 pointer-events-auto transition-opacity duration-300"
+                      : "absolute inset-0 z-20 opacity-0 pointer-events-none transition-opacity duration-300"
+                  }
+                >
+                  <ModelLoadingOverlay visible showText={false} />
+                </div>
+              </div>
+            ) : (
+              viewerReady ? (
+                // 非 LCC 模型（glb/ply/bim/osgb/iframe 等）：保留原有 ModelViewerShell 逻辑
+                <ModelViewerShell
+                  key={`${detail.id}-${detail.viewerUrl || ""}-${detail.fileFormat || "none"}-${viewerMountSeed}`}
+                  model={detail}
+                  onLaunchViewSaved={handleLaunchViewSaved}
+                />
+              ) : (
+                <ModelLoadingOverlay visible showText={false} />
+              )
+            )}
           </div>
         </div>
 
-        <div className="w-full lg:w-80 flex-shrink-0 overflow-y-auto">
+        <div className="w-full lg:h-full lg:min-h-0 lg:w-80 lg:flex-shrink-0 lg:overflow-y-auto">
           <div className="p-5 space-y-4">
             <div>
               <span
@@ -455,48 +626,6 @@ export default function ModelDetailPage({ modelId }: ModelDetailPageProps) {
           </div>
         </div>
       </div>
-
-      {related.length > 0 && (
-        <div className="max-w-[1200px] mx-auto px-5 md:px-6 py-12">
-          <h3 className="text-[18px] font-semibold mb-6">相关推荐</h3>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            {related.map((m) => {
-              const rc = coverStyleByType(m.type, m.id);
-              return (
-                <Link
-                  key={m.id}
-                  href={`/models/${m.id}`}
-                  className="group bg-white/[0.03] border border-white/10 rounded-xl overflow-hidden hover:border-white/20 transition-all text-left w-full block"
-                >
-                  <div
-                    className={`h-28 bg-gradient-to-br ${rc.color} flex items-center justify-center`}
-                  >
-                    <Grid3X3 className="w-6 h-6 text-white/20" />
-                  </div>
-                  <div className="p-3">
-                    <span
-                      className={`px-2 py-0.5 rounded-full text-[10px] border ${typeTagColor[m.type] || "bg-white/10 text-white/60 border-white/10"}`}
-                    >
-                      {m.type}
-                    </span>
-                    <p className="mt-2 text-[13px] font-medium line-clamp-1">{m.title}</p>
-                    <div className="flex items-center gap-3 mt-1 text-[11px] text-gray-500">
-                      <span className="flex items-center gap-1">
-                        <Eye className="w-3 h-3" />
-                        {formatViews(m.viewsCount)}
-                      </span>
-                      <span className="flex items-center gap-1">
-                        <Heart className="w-3 h-3" />
-                        {m.likesCount}
-                      </span>
-                    </div>
-                  </div>
-                </Link>
-              );
-            })}
-          </div>
-        </div>
-      )}
       {confirmOpen && (
         <div
           className="fixed inset-0 z-[70] flex items-center justify-center p-4"

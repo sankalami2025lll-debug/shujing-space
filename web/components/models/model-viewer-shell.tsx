@@ -13,6 +13,7 @@ import { PlyViewer } from "@/components/models/viewers/ply-viewer";
 import { UnsupportedViewer } from "@/components/models/viewers/unsupported-viewer";
 import {
   getViewerCapabilities,
+  type ModelViewerControlMode,
   type ModelViewerMovementInput,
   type ModelViewerHandle,
 } from "@/components/models/viewers/types";
@@ -79,6 +80,7 @@ export function ModelViewerShell({ model, onLaunchViewSaved }: ModelViewerShellP
   const [movementInput, setMovementInput] = useState<ModelViewerMovementInput>(EMPTY_MOVEMENT_INPUT);
   const [moveSpeedMultiplier, setMoveSpeedMultiplier] = useState(1);
   const [saveLaunchViewPending, setSaveLaunchViewPending] = useState(false);
+  const [controlMode, setControlMode] = useState<ModelViewerControlMode>("orbit");
   const viewerKind = getModelViewerKind(model);
   const processingBlocked = model.processingStatus !== "ready";
   const processingHint = processingStatusText(model.processingStatus);
@@ -132,6 +134,17 @@ export function ModelViewerShell({ model, onLaunchViewSaved }: ModelViewerShellP
     }
   }, [viewerCapabilities.resetView, viewerKind]);
 
+  const handleFitView = useCallback(() => {
+    if (!viewerCapabilities.fitView) {
+      return;
+    }
+    if (viewerHandleRef.current?.fitView) {
+      viewerHandleRef.current.fitView();
+      return;
+    }
+    handleResetView();
+  }, [handleResetView, viewerCapabilities.fitView]);
+
   const handleTakeScreenshot = () => {
     void viewerHandleRef.current?.takeScreenshot?.();
   };
@@ -141,12 +154,13 @@ export function ModelViewerShell({ model, onLaunchViewSaved }: ModelViewerShellP
       return;
     }
 
-    const currentView = viewerHandleRef.current?.getCurrentView?.();
-    if (!currentView) {
-      toast.error("当前视角暂不支持保存");
+    const saveResult = viewerHandleRef.current?.getLaunchViewForSave?.();
+    if (!saveResult?.ok) {
+      toast.error(saveResult?.message ?? "当前视角暂不支持保存");
       return;
     }
 
+    const currentView = saveResult.view;
     setSaveLaunchViewPending(true);
     try {
       const result = await http.put<SaveLaunchViewResult>(
@@ -154,7 +168,8 @@ export function ModelViewerShell({ model, onLaunchViewSaved }: ModelViewerShellP
         currentView,
       );
       const nextView = result.launchView ?? currentView;
-      viewerHandleRef.current?.applyView?.(nextView);
+      // 保存成功后只更新内存默认视角，不重新 apply，避免画面跳变或模型消失
+      viewerHandleRef.current?.commitSavedLaunchView?.(nextView);
       onLaunchViewSaved?.(nextView);
       toast.success("启动视图已保存");
     } catch (error) {
@@ -175,6 +190,12 @@ export function ModelViewerShell({ model, onLaunchViewSaved }: ModelViewerShellP
     });
   };
 
+  const handleToggleControlMode = useCallback(() => {
+    if (!isLccViewer) return;
+    clearMovementState();
+    setControlMode((current) => (current === "orbit" ? "walk" : "orbit"));
+  }, [clearMovementState, isLccViewer]);
+
   useEffect(() => {
     if (!isLccViewer) {
       setIsHelpOpen(false);
@@ -192,6 +213,7 @@ export function ModelViewerShell({ model, onLaunchViewSaved }: ModelViewerShellP
   useEffect(() => {
     clearMovementState();
     setIsHelpOpen(false);
+    setControlMode("orbit");
   }, [clearMovementState, model.id]);
 
   useEffect(() => {
@@ -219,8 +241,14 @@ export function ModelViewerShell({ model, onLaunchViewSaved }: ModelViewerShellP
         return;
       }
 
+      // WASD / QE / Shift 仅在漫游模式下生效
+      if (controlMode !== "walk" && (key === "shift" || movementKey)) {
+        return;
+      }
+
+      // Shift 加速倍率：2x
       if (key === "shift") {
-        setMoveSpeedMultiplier(3);
+        setMoveSpeedMultiplier(2);
         return;
       }
 
@@ -306,22 +334,36 @@ export function ModelViewerShell({ model, onLaunchViewSaved }: ModelViewerShellP
       document.removeEventListener("visibilitychange", handleVisibilityChange);
       clearMovementState();
     };
-  }, [clearMovementState, handleResetView, isHelpOpen, isLccViewer]);
+  }, [clearMovementState, controlMode, handleResetView, isHelpOpen, isLccViewer]);
 
   useEffect(() => {
+    if (controlMode !== "walk") {
+      viewerHandleRef.current?.setMovementInput?.(cloneEmptyMovementInput());
+      return;
+    }
     viewerHandleRef.current?.setMovementInput?.(movementInput);
-  }, [movementInput]);
+  }, [controlMode, movementInput]);
 
   useEffect(() => {
+    if (controlMode !== "walk") {
+      viewerHandleRef.current?.setMoveSpeedMultiplier?.(1);
+      return;
+    }
     viewerHandleRef.current?.setMoveSpeedMultiplier?.(moveSpeedMultiplier);
-  }, [moveSpeedMultiplier]);
+  }, [controlMode, moveSpeedMultiplier]);
+
+  useEffect(() => {
+    viewerHandleRef.current?.setControlMode?.(controlMode);
+  }, [controlMode]);
 
   const renderViewer = () => {
     switch (viewerKind) {
       case "lcc":
+        // 架构说明：当前模型详情页中的 LCC/LCC2 已统一走 /viewer/lcc/[id] iframe 页面。
+        // 这里保留 LCC 分支仅用于兼容非详情页复用场景，后续不要把详情页问题的主修复入口放在此处。
         return (
           <LccViewer
-            key={viewerResetSeed}
+            key={`${model.id}-${model.viewerUrl || ""}-${model.fileFormat || "none"}-${viewerResetSeed}`}
             ref={viewerHandleRef}
             modelUrl={model.viewerUrl}
             viewerUrl={model.viewerUrl}
@@ -330,7 +372,7 @@ export function ModelViewerShell({ model, onLaunchViewSaved }: ModelViewerShellP
             launchView={model.launchView}
             defaultCameraJson={model.defaultCameraJson}
             processingBlocked={processingBlocked}
-            processingHint={processingHint}
+            controlMode={controlMode}
           />
         );
       case "glb":
@@ -344,7 +386,7 @@ export function ModelViewerShell({ model, onLaunchViewSaved }: ModelViewerShellP
       case "iframe":
         return (
           <IframeViewer
-            key={viewerResetSeed}
+            key={`${model.id}-${model.viewerUrl || ""}-${model.fileFormat || "none"}-${viewerResetSeed}`}
             ref={viewerHandleRef}
             model={model}
             processingHint={processingHint}
@@ -373,6 +415,7 @@ export function ModelViewerShell({ model, onLaunchViewSaved }: ModelViewerShellP
             <ModelViewerToolbar
               capabilities={viewerCapabilities}
               onResetView={handleResetView}
+              onFitView={handleFitView}
               onToggleFullscreen={handleFullscreen}
               onTakeScreenshot={handleTakeScreenshot}
               onSaveLaunchView={handleSaveLaunchView}
@@ -380,6 +423,9 @@ export function ModelViewerShell({ model, onLaunchViewSaved }: ModelViewerShellP
               isHelpOpen={isHelpOpen}
               canShowSaveLaunchView={canShowSaveLaunchView}
               saveLaunchViewPending={saveLaunchViewPending}
+              controlMode={controlMode}
+              onToggleControlMode={isLccViewer ? handleToggleControlMode : undefined}
+              canToggleControlMode={isLccViewer && !processingBlocked}
             />
           </div>
         </div>

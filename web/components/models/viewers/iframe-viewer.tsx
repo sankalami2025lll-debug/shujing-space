@@ -7,7 +7,6 @@ import type { ModelViewerEngineProps, ModelViewerHandle } from "@/components/mod
 export const IframeViewer = forwardRef<ModelViewerHandle, ModelViewerEngineProps>(
   function IframeViewer({ model }, ref) {
     const [iframeState, setIframeState] = useState<"loading" | "ready" | "error">("loading");
-    const [viewKey, setViewKey] = useState(0);
 
     useImperativeHandle(
       ref,
@@ -22,7 +21,6 @@ export const IframeViewer = forwardRef<ModelViewerHandle, ModelViewerEngineProps
     return (
       <div className="absolute inset-0 overflow-hidden bg-[#0d0d0d]">
         <iframe
-          key={viewKey}
           title={`${model.title} 三维在线查看器`}
           src={model.viewerUrl as string}
           loading="lazy"
@@ -37,16 +35,9 @@ export const IframeViewer = forwardRef<ModelViewerHandle, ModelViewerEngineProps
         <ModelLoadingOverlay
           visible={iframeState !== "ready"}
           status={iframeState === "error" ? "error" : "loading"}
-          title={iframeState === "error" ? "模型加载失败" : "模型加载中"}
-          description={iframeState === "error" ? "请刷新后重试" : "正在载入三维场景"}
-          onRetry={
-            iframeState === "error"
-              ? () => {
-                  setIframeState("loading");
-                  setViewKey((value) => value + 1);
-                }
-              : undefined
-          }
+          title={iframeState === "error" ? "模型加载失败" : undefined}
+          description={iframeState === "error" ? "请刷新后重试" : undefined}
+          showText={iframeState === "error"}
         />
       </div>
     );

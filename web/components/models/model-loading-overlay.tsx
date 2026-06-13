@@ -10,8 +10,8 @@ interface ModelLoadingOverlayProps {
   progress?: number;
   title?: string;
   description?: string;
+  showText?: boolean;
   visible?: boolean;
-  onRetry?: () => void;
 }
 
 const RUNNER_FRAMES = [
@@ -133,10 +133,10 @@ function PixelPercent({ value }: { value: string }) {
 export function ModelLoadingOverlay({
   status = "loading",
   progress,
-  title: _title,
-  description: _description,
+  title,
+  description,
+  showText = true,
   visible = true,
-  onRetry: _onRetry,
 }: ModelLoadingOverlayProps) {
   const [fallbackProgress, setFallbackProgress] = useState(0);
   const [runnerFrameIndex, setRunnerFrameIndex] = useState(0);
@@ -216,7 +216,7 @@ export function ModelLoadingOverlay({
       <div className="relative flex w-[720px] max-w-[80vw] flex-col items-center justify-center">
         <div className="mb-[-8px] flex w-[420px] max-w-[58vw] items-center justify-center overflow-visible">
           <Image
-            src="/loading/loading-logo-reference.png"
+            src="/brand/model-loading-logo.png"
             alt="数境空间 DIGIREALM SPACE"
             width={1536}
             height={1024}
@@ -252,7 +252,23 @@ export function ModelLoadingOverlay({
             <PixelPercent value={`${progressPercent}%`} />
           </div>
         </div>
+
+        {showText && (title || description) && (
+          <div className="mt-4 flex flex-col items-center gap-1 text-center">
+            {title && (
+              <p className="text-[18px] font-medium tracking-[0.18em] text-white">
+                {title}
+              </p>
+            )}
+            {description && (
+              <p className="text-[12px] tracking-[0.22em] text-white/58">
+                {description}
+              </p>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
 }
+

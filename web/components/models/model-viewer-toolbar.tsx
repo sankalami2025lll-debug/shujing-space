@@ -17,11 +17,15 @@ import {
   Wrench,
 } from "lucide-react";
 import { useMemo, useState } from "react";
-import type { ModelViewerCapabilities } from "@/components/models/viewers/types";
+import type {
+  ModelViewerCapabilities,
+  ModelViewerControlMode,
+} from "@/components/models/viewers/types";
 
 interface ModelViewerToolbarProps {
   capabilities: ModelViewerCapabilities;
   onResetView?: () => void;
+  onFitView?: () => void;
   onToggleFullscreen?: () => void;
   onTakeScreenshot?: () => void;
   onSaveLaunchView?: () => void;
@@ -29,6 +33,10 @@ interface ModelViewerToolbarProps {
   isHelpOpen?: boolean;
   canShowSaveLaunchView?: boolean;
   saveLaunchViewPending?: boolean;
+  /** 观察 / 漫游模式切换（LCC viewer） */
+  controlMode?: ModelViewerControlMode;
+  onToggleControlMode?: () => void;
+  canToggleControlMode?: boolean;
 }
 
 const TOOL_ITEMS = [
@@ -39,7 +47,7 @@ const TOOL_ITEMS = [
   { key: "orbit", label: "旋转 / 环绕", icon: Move3D, enabledBy: "orbit" },
   { key: "pan", label: "平移", icon: Maximize, enabledBy: "pan" },
   { key: "zoom", label: "缩放", icon: ScanSearch, enabledBy: "zoom" },
-  { key: "walk", label: "漫游", icon: Map, enabledBy: "walk" },
+  { key: "walk", label: "漫游模式", icon: Map, enabledBy: "walk" },
   { key: "measure", label: "测量", icon: Ruler, enabledBy: "measure" },
   { key: "annotation", label: "标注", icon: PenSquare, enabledBy: "annotation" },
   { key: "layer", label: "图层", icon: Layers3, enabledBy: "layer" },
@@ -54,6 +62,7 @@ const TOOL_ITEMS = [
 export function ModelViewerToolbar({
   capabilities,
   onResetView,
+  onFitView,
   onToggleFullscreen,
   onTakeScreenshot,
   onSaveLaunchView,
@@ -61,16 +70,20 @@ export function ModelViewerToolbar({
   isHelpOpen = false,
   canShowSaveLaunchView = false,
   saveLaunchViewPending = false,
+  controlMode = "orbit",
+  onToggleControlMode,
+  canToggleControlMode = false,
 }: ModelViewerToolbarProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const toolActions = useMemo(
     () => ({
       reset: onResetView,
+      fitView: onFitView,
       saveLaunchView: onSaveLaunchView,
       fullscreen: onToggleFullscreen,
       screenshot: onTakeScreenshot,
     }),
-    [onResetView, onSaveLaunchView, onTakeScreenshot, onToggleFullscreen],
+    [onResetView, onFitView, onSaveLaunchView, onTakeScreenshot, onToggleFullscreen],
   );
 
   return (
@@ -101,6 +114,9 @@ export function ModelViewerToolbar({
       >
         {TOOL_ITEMS.map((tool) => {
           if (tool.key === "saveLaunchView" && !canShowSaveLaunchView) {
+            return null;
+          }
+          if (tool.key === "walk") {
             return null;
           }
           const enabled = capabilities[tool.enabledBy];
@@ -135,6 +151,26 @@ export function ModelViewerToolbar({
             </button>
           );
         })}
+        {canToggleControlMode && typeof onToggleControlMode === "function" ? (
+          <button
+            type="button"
+            aria-label={controlMode === "walk" ? "当前：漫游模式，点击切换观察" : "当前：观察模式，点击切换漫游"}
+            title={controlMode === "walk" ? "漫游模式（WASD + 左键转头）" : "观察模式（轨道旋转）"}
+            onClick={onToggleControlMode}
+            className={`inline-flex h-11 items-center gap-1.5 rounded-2xl border px-3 backdrop-blur-md transition-all ${
+              controlMode === "walk"
+                ? "border-cyan-300/40 bg-cyan-950/50 text-cyan-100 shadow-[0_10px_30px_rgba(0,0,0,0.28)]"
+                : "border-white/10 bg-[#0b1118]/85 text-gray-100 shadow-[0_10px_30px_rgba(0,0,0,0.28)] hover:border-cyan-300/30 hover:bg-[#0f1722]/90"
+            }`}
+          >
+            {controlMode === "walk" ? (
+              <Map className="h-4 w-4" />
+            ) : (
+              <Move3D className="h-4 w-4" />
+            )}
+            <span className="text-[11px]">{controlMode === "walk" ? "漫游" : "观察"}</span>
+          </button>
+        ) : null}
         <button
           type="button"
           aria-label={isHelpOpen ? "关闭帮助" : "打开帮助"}

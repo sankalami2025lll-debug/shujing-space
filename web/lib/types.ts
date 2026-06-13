@@ -75,6 +75,11 @@ export interface ModelLaunchView {
   snapshot: ModelLaunchViewSnapshot;
 }
 
+/** 保存启动视图前的校验结果（LCC Viewer getLaunchViewForSave） */
+export type LaunchViewSaveResult =
+  | { ok: true; view: ModelLaunchView }
+  | { ok: false; message: string };
+
 export interface ModelListItem {
   id: number;
   title: string;
