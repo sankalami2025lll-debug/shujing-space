@@ -234,7 +234,7 @@ export default function AuthPage() {
       <nav className="fixed top-0 left-0 right-0 z-50 backdrop-blur-xl bg-black/60 border-b border-white/10 h-14 md:h-16 px-5 md:px-10 flex items-center justify-between">
         <Link href="/" className="flex items-center gap-2.5">
           <img
-            src="/logo.png"
+            src="/brand/company-logo-transparent.png"
             alt="数境空间"
             className="h-7 w-auto object-contain"
             style={{ mixBlendMode: "screen" }}
@@ -697,3 +697,4 @@ export default function AuthPage() {
     </div>
   );
 }
+

@@ -82,17 +82,13 @@ export default function NavBar() {
         <Link
           href="/"
           onClick={close}
-          className="flex items-center gap-2.5 flex-shrink-0"
+          className="flex h-full items-center"
         >
           <img
-            src="/logo.png"
+            src="/loading/loading-logo-reference1.png"
             alt="数境空间"
-            className="h-7 md:h-8 w-auto object-contain"
-            style={{ mixBlendMode: "screen" }}
+            className="h-[60px] w-auto object-contain"
           />
-          <span className="text-[18px] md:text-[22px] font-medium tracking-wide">
-            数境空间
-          </span>
         </Link>
 
         {/* PC 端主导航：当前页面对应项显示冰蓝下划线高亮 */}
@@ -237,3 +233,4 @@ export default function NavBar() {
     </nav>
   );
 }
+

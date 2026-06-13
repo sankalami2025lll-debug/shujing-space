@@ -19,6 +19,10 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="zh-CN" className="dark" suppressHydrationWarning>
+      <head>
+        <link rel="dns-prefetch" href="https://shujingspace.oss-cn-shenzhen.aliyuncs.com" />
+        <link rel="preconnect" href="https://shujingspace.oss-cn-shenzhen.aliyuncs.com" crossOrigin="" />
+      </head>
       <body>
         <AppProviders>
           <SiteChrome>{children}</SiteChrome>

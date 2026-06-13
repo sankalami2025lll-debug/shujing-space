@@ -354,14 +354,12 @@ export default function ModelLibraryPage() {
           <div className="max-w-[1200px] mx-auto px-5 md:px-6">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mb-8">
               <div>
-                <div className="flex items-center gap-3 mb-4">
+                <div className="flex items-center mb-4">
                   <img
-                    src="/logo.png"
+                    src="/loading/loading-logo-reference1.png"
                     alt="数境空间"
-                    className="h-6 w-auto object-contain"
-                    style={{ mixBlendMode: "screen" }}
+                    className="h-[57px] w-auto object-contain"
                   />
-                  <span className="text-[16px] font-medium">数境空间</span>
                 </div>
                 <p className="text-[13px] text-gray-500">{config.companyName}</p>
               </div>
@@ -417,3 +415,4 @@ export default function ModelLibraryPage() {
     </div>
   );
 }
+
