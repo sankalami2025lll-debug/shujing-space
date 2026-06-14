@@ -1,6 +1,6 @@
 # 数境空间官网 阶段开发检查点
 
-> 更新日期：2026-06-12（已补齐 LCC iframe 独立查看器、卡 92% 运行时排查、品牌 Logo 收口与水印内部处理现状）
+> 更新日期：2026-06-14（已补齐上传稳定性修复、重复卡片修复、失败模型删除）
 > 范围：仅记录已实际落地的改动与事实，供后续 Agent 续接。
 > 索引：LCC Web SDK 接入记录详见 `docs/lcc-web-sdk-integration.md`
 > 索引：模型浏览器统一架构详见 `docs/model-viewer-architecture.md`
@@ -67,6 +67,36 @@
 - `model-loading-overlay.tsx`、Loading 动画
 - Logo、水印
 - iframe 加载架构
+
+### 本轮上传稳定性修复完成内容（2026-06-14）
+
+#### 补记
+> 补记：上传稳定性修复：`publish` 接口不再同步执行 LCC/LCC2 ZIP 解压处理。`modelsService.create` 中移除了 LCC ZIP 的同步处理块，拆为独立的 `processLccZip` 方法；`uploadTasksService.publish` 中在创建 model 后立即回写 `modelId` 到 `upload_tasks`（确保幂等），再将 LCC ZIP 处理改为后台异步执行，不阻塞 HTTP 响应。非 ZIP 文件发布后 `uploadTask.status` 为 `published`，ZIP 文件发布后为 `processing`。前端 publish 请求不再因后端 ZIP 处理超时而失败。详情见 `docs/backend-architecture-plan.md` §3.4。
+> 补记：重复卡片修复：`personal-center-page.tsx` 中 `visibleTasks` 过滤条件改为 `createdModelId == null`，已关联 Model 的 UploadTask 不再显示在上传任务区，避免与下方 Model 卡片重复展示。对应的当前 commit: `bd33b8c`。
+> 补记：失败模型删除：`personal-center-page.tsx` 中失败模型卡片（`processingStatus === 'failed'`）增加红色弱强调的"删除"按钮，复用已有 `DELETE /api/users/me/models/:id` 软删除接口，含确认框与防重复点击。对应的当前 commit: `8865467`。
+
+#### 提交记录
+- `bd33b8c` fix: hide upload tasks after model creation
+- `8865467` fix: allow deleting failed models in profile
+
+#### 已落地改动
+
+| # | 改动 | 位置 | commit |
+|---|------|------|--------|
+| 1 | `modelsService.create` 移除 LCC ZIP 同步处理 | `server/src/modules/models/models.service.ts` | (待提交) |
+| 2 | 新增 `modelsService.processLccZip` 异步处理方法 | `server/src/modules/models/models.service.ts` | (待提交) |
+| 3 | `publish` 中 LCC ZIP 改为后台异步执行 | `server/src/modules/upload-tasks/upload-tasks.service.ts` | (待提交) |
+| 4 | ZIP 文件 publish 后 `uploadTask.status = processing` | `server/src/modules/upload-tasks/upload-tasks.service.ts` | (待提交) |
+| 5 | 个人中心上传任务区只显示 `createdModelId == null` | `web/components/pages/personal-center-page.tsx` | `bd33b8c` |
+| 6 | 失败模型卡片增加删除按钮（软删除） | `web/components/pages/personal-center-page.tsx` | `8865467` |
+
+#### 禁止改动清单（本轮）
+- 上传链路 OSS presign/callback 主流程
+- multipart runner 并发/分片策略
+- LCC/LCC2 Viewer 加载逻辑/水印
+- 数据库结构 / Prisma schema
+- 前端 UploadModal / upload-task-provider 主发布逻辑
+- 后端认证/用户/管理模块
 
 ### 零、当前阶段快照（2026-06-01，Next.js 本地验收通过）
 

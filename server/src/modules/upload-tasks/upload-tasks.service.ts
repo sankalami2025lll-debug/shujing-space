@@ -328,7 +328,7 @@ export class UploadTasksService {
       },
     });
 
-    const model = await this.modelsService.create(userId, {
+    const createdModel = await this.modelsService.create(userId, {
       title: task.title,
       type: task.type,
       scenes: this.parseStringArray(task.scenesJson),
@@ -345,41 +345,61 @@ export class UploadTasksService {
         : {}),
     });
 
-    const nextStatus =
-      model.processingStatus === ModelProcessingStatus.ready
-        ? UploadTaskStatus.published
-        : model.processingStatus === ModelProcessingStatus.failed
-          ? UploadTaskStatus.failed
-          : UploadTaskStatus.processing;
-    const nextStage =
-      nextStatus === UploadTaskStatus.published
-        ? UploadTaskStage.published
-        : nextStatus === UploadTaskStatus.failed
-          ? UploadTaskStage.failed
-          : UploadTaskStage.processing;
+    const modelId = BigInt(createdModel.id);
+
+    // 先回写 modelId，确保重试 publish 时被幂等拦截
+    await this.prisma.uploadTask.update({
+      where: { id: task.id },
+      data: {
+        modelId,
+        status: UploadTaskStatus.processing,
+        stage: UploadTaskStage.processing,
+      },
+    });
+
+    // 如果文件是 ZIP，在后台异步执行 LCC/LCC2 解压处理（不阻塞 HTTP 响应）
+    if (task.modelFileId && createdModel.fileFormat === 'zip') {
+      this.prisma.modelFile.findUnique({
+        where: { id: task.modelFileId },
+        select: { r2Key: true },
+      }).then((modelFile) => {
+        const objectKey = modelFile?.r2Key ?? '';
+        if (objectKey) {
+          this.modelsService.processLccZip(modelId, objectKey, 'zip').catch(() => {
+            // 异步处理失败已经由 processLccZip 内部写入 markFailed，无需额外处理
+          });
+        }
+      }).catch(() => {
+        // 查询 modelFile 失败不阻塞 publish 响应
+      });
+    }
+
+    // ZIP 文件的 LCC 处理已在后台异步执行，因此发布后 processingStatus 始终为 processing。
+    // 非 ZIP 文件（glb / gltf / ply / osgb / 3dtiles / iframe 等）在 create 时已设为 ready。
+    const isZipFile = task.modelFileId != null && createdModel.fileFormat === 'zip';
+    const nextStatus = isZipFile
+      ? UploadTaskStatus.processing
+      : UploadTaskStatus.published;
+    const nextStage = isZipFile
+      ? UploadTaskStage.processing
+      : UploadTaskStage.published;
 
     const updated = await this.prisma.uploadTask.update({
       where: { id: task.id },
       data: {
-        modelId: BigInt(model.id),
         status: nextStatus,
         stage: nextStage,
-        publishedAt:
-          nextStatus === UploadTaskStatus.published ? new Date() : null,
-        lastErrorStage:
-          nextStatus === UploadTaskStatus.failed
-            ? UploadTaskStage.processing
-            : null,
+        publishedAt: isZipFile ? null : new Date(),
+        lastErrorStage: null,
         lastErrorCode: null,
-        lastErrorMessage:
-          nextStatus === UploadTaskStatus.failed
-            ? model.processingError ?? '模型处理失败'
-            : null,
+        lastErrorMessage: null,
       },
       include: {
         coverFile: { select: { url: true } },
       },
     });
+
+    const model = await this.modelsService.findOne(modelId, userId);
 
     return {
       task: toUploadTaskVm(updated),

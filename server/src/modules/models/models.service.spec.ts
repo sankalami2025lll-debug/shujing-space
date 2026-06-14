@@ -25,6 +25,9 @@ describe('ModelsService soft-delete visibility', () => {
     category: {
       findUnique: jest.Mock;
     };
+    uploadTask: {
+      updateMany: jest.Mock;
+    };
     $transaction: jest.Mock;
     like: { findMany: jest.Mock };
     favorite: { findMany: jest.Mock };
@@ -49,6 +52,9 @@ describe('ModelsService soft-delete visibility', () => {
       },
       category: {
         findUnique: jest.fn().mockResolvedValue(null),
+      },
+      uploadTask: {
+        updateMany: jest.fn().mockResolvedValue({ count: 0 }),
       },
       $transaction: jest.fn(),
       like: { findMany: jest.fn().mockResolvedValue([]) },
@@ -552,81 +558,7 @@ describe('ModelsService soft-delete visibility', () => {
   });
 
   it('ZIP 上传成功时回写 LCC 入口地址与格式', async () => {
-    prisma.model.findUnique = jest.fn().mockResolvedValue({
-      id: modelId,
-      userId: authorId,
-      title: 'LCC ZIP 模型',
-      type: 'BIM',
-      tags: [],
-      scenes: [],
-      description: '',
-      coverUrl: '',
-      modelUrl: 'https://example.com/processed/meta.lcc',
-      viewerType: 'native',
-      allowIframe: true,
-      fileFormat: 'lcc',
-      viewsCount: 0,
-      likesCount: 0,
-      favoritesCount: 0,
-      createdAt: new Date('2026-06-02T12:00:00.000Z'),
-      processingStatus: 'ready',
-      processingError: null,
-      processedAt: new Date('2026-06-02T12:03:00.000Z'),
-      status: 'published',
-      visibility: 'public',
-      rejectReason: null,
-      user: { nickname: '作者A' },
-      category: null,
-    });
-    prisma.model.create.mockResolvedValue({
-      id: modelId,
-      userId: authorId,
-      title: 'LCC ZIP 模型',
-      type: 'BIM',
-      tags: [],
-      scenes: [],
-      description: '',
-      coverUrl: '',
-      modelUrl: 'https://example.com/source.zip',
-      viewerType: 'native',
-      allowIframe: true,
-      fileFormat: 'zip',
-      viewsCount: 0,
-      likesCount: 0,
-      favoritesCount: 0,
-      createdAt: new Date('2026-06-02T12:00:00.000Z'),
-      processingStatus: 'processing',
-      processingError: null,
-      processedAt: null,
-      status: 'published',
-      visibility: 'public',
-      rejectReason: null,
-      user: { nickname: '作者A' },
-      category: null,
-    });
     prisma.model.update.mockResolvedValue({ id: modelId });
-    (service as unknown as {
-      findOwnedFile: (
-        userId: bigint,
-        fileId: number,
-        kind: string,
-      ) => Promise<{ id: bigint; originalName: string; url: string; objectKey: string }>;
-    }).findOwnedFile = async (_userId: bigint, fileId: number, kind: string) => {
-      if (kind === 'model') {
-        return {
-          id: BigInt(fileId),
-          originalName: 'scene.zip',
-          url: 'https://example.com/source.zip',
-          objectKey: 'uploads/7/2026/06/source.zip',
-        };
-      }
-      return {
-        id: BigInt(fileId),
-        originalName: 'cover.png',
-        url: 'https://example.com/cover.png',
-        objectKey: 'uploads/7/2026/06/cover.png',
-      };
-    };
     lccZipService.processUploadedZip.mockResolvedValue({
       entryUrl: 'https://example.com/processed/meta.lcc',
       fileFormat: 'lcc',
@@ -634,12 +566,11 @@ describe('ModelsService soft-delete visibility', () => {
       uploadedFileCount: 2,
     });
 
-    const result = await service.create(authorId, {
-      title: 'LCC ZIP 模型',
-      type: 'BIM',
-      visibility: 'public',
-      modelFileId: 11,
-    });
+    await service.processLccZip(
+      modelId,
+      'uploads/7/2026/06/source.zip',
+      'zip',
+    );
 
     expect(lccZipService.processUploadedZip).toHaveBeenCalledWith(
       modelId,
@@ -654,96 +585,19 @@ describe('ModelsService soft-delete visibility', () => {
         viewerType: 'native',
       }),
     });
-    expect(result.fileFormat).toBe('lcc');
-    expect(result.viewerUrl).toBe('https://example.com/processed/meta.lcc');
   });
 
   it('ZIP 处理失败时写入 failed 与失败原因', async () => {
-    prisma.model.findUnique = jest.fn().mockResolvedValue({
-      id: modelId,
-      userId: authorId,
-      title: '失败 ZIP 模型',
-      type: 'BIM',
-      tags: [],
-      scenes: [],
-      description: '',
-      coverUrl: '',
-      modelUrl: 'https://example.com/source.zip',
-      viewerType: 'native',
-      allowIframe: true,
-      fileFormat: 'zip',
-      viewsCount: 0,
-      likesCount: 0,
-      favoritesCount: 0,
-      createdAt: new Date('2026-06-02T12:00:00.000Z'),
-      processingStatus: 'failed',
-      processingError: '未找到 LCC/LCC2 入口文件',
-      processedAt: null,
-      status: 'published',
-      visibility: 'public',
-      rejectReason: null,
-      user: { nickname: '作者A' },
-      category: null,
-    });
-    prisma.model.create.mockResolvedValue({
-      id: modelId,
-      userId: authorId,
-      title: '失败 ZIP 模型',
-      type: 'BIM',
-      tags: [],
-      scenes: [],
-      description: '',
-      coverUrl: '',
-      modelUrl: 'https://example.com/source.zip',
-      viewerType: 'native',
-      allowIframe: true,
-      fileFormat: 'zip',
-      viewsCount: 0,
-      likesCount: 0,
-      favoritesCount: 0,
-      createdAt: new Date('2026-06-02T12:00:00.000Z'),
-      processingStatus: 'processing',
-      processingError: null,
-      processedAt: null,
-      status: 'published',
-      visibility: 'public',
-      rejectReason: null,
-      user: { nickname: '作者A' },
-      category: null,
-    });
     prisma.model.update.mockResolvedValue({ id: modelId });
-    (service as unknown as {
-      findOwnedFile: (
-        userId: bigint,
-        fileId: number,
-        kind: string,
-      ) => Promise<{ id: bigint; originalName: string; url: string; objectKey: string }>;
-    }).findOwnedFile = async (_userId: bigint, fileId: number, kind: string) => {
-      if (kind === 'model') {
-        return {
-          id: BigInt(fileId),
-          originalName: 'scene.zip',
-          url: 'https://example.com/source.zip',
-          objectKey: 'uploads/7/2026/06/source.zip',
-        };
-      }
-      return {
-        id: BigInt(fileId),
-        originalName: 'cover.png',
-        url: 'https://example.com/cover.png',
-        objectKey: 'uploads/7/2026/06/cover.png',
-      };
-    };
     lccZipService.processUploadedZip.mockRejectedValue(
       new Error('未找到 LCC/LCC2 入口文件'),
     );
 
-    const result = await service.create(authorId, {
-      title: '失败 ZIP 模型',
-      type: 'BIM',
-      visibility: 'public',
-      modelFileId: 11,
-    });
+    await service.processLccZip(
+      modelId,
+      'uploads/7/2026/06/source.zip',
+      'zip',
+    );
 
     expect(prisma.model.update).toHaveBeenCalledWith({
       where: { id: modelId },
@@ -753,7 +607,15 @@ describe('ModelsService soft-delete visibility', () => {
         processedAt: null,
       },
     });
-    expect(result.processingStatus).toBe('failed');
-    expect(result.processingError).toBe('未找到 LCC/LCC2 入口文件');
+  });
+
+  it('非 ZIP 文件跳过 LCC 处理', async () => {
+    await service.processLccZip(
+      modelId,
+      'uploads/7/2026/06/scene.glb',
+      'glb',
+    );
+
+    expect(lccZipService.processUploadedZip).not.toHaveBeenCalled();
   });
 });

@@ -326,7 +326,7 @@ export class ModelsService {
         categoryId: category ? category.id : null,
         type: dto.type,
         title: dto.title,
-        tags: [], // 发布表单暂不收集 tags，留空数组
+        tags: [],
         scenes: dto.scenes ?? [],
         description: dto.description ?? '',
         coverUrl,
@@ -345,39 +345,6 @@ export class ModelsService {
         category: { select: { id: true, name: true, slug: true } },
       },
     });
-
-    if (modelFile && this.shouldProcessAsLccZip(fileFormat)) {
-      try {
-        const processed = await this.lccZipService.processUploadedZip(
-          created.id,
-          this.getStoredObjectKey(modelFile),
-        );
-        await this.markReady(created.id, {
-          viewerUrl: processed.entryUrl,
-          modelUrl: processed.entryUrl,
-          fileFormat: processed.fileFormat,
-          viewerType: ViewerType.native,
-        });
-      } catch (error) {
-        const reason =
-          error instanceof Error && error.message.trim()
-            ? error.message.trim()
-            : 'LCC/LCC2 ZIP 成果包处理失败';
-        await this.markFailed(created.id, reason);
-      }
-
-      const updated = await this.prisma.model.findUnique({
-        where: { id: created.id },
-        include: {
-          user: { select: { nickname: true } },
-          category: { select: { id: true, name: true, slug: true } },
-        },
-      });
-      if (!updated) {
-        throw new NotFoundException('模型不存在');
-      }
-      return toModelDetailVm(updated, undefined, true);
-    }
 
     return toModelDetailVm(created, undefined, true);
   }
@@ -402,6 +369,36 @@ export class ModelsService {
       select: { viewsCount: true },
     });
     return { viewsCount: updated.viewsCount };
+  }
+
+  // 对已创建的 model 执行 LCC/LCC2 ZIP 处理（下载、解压、上传处理结果并标记 ready/failed）。
+  // 发布者（uploadTasksService.publish）应在 modelId 回写 uploadTask 之后才调用此方法，
+  // 这样即使处理期间超时导致重试 publish，也会因 task.modelId 已存在而被幂等拦截，不会重复创建 model。
+  async processLccZip(
+    modelId: bigint,
+    objectKey: string,
+    fileFormat: string | null,
+  ): Promise<void> {
+    if (!this.shouldProcessAsLccZip(fileFormat)) return;
+
+    try {
+      const processed = await this.lccZipService.processUploadedZip(
+        modelId,
+        objectKey,
+      );
+      await this.markReady(modelId, {
+        viewerUrl: processed.entryUrl,
+        modelUrl: processed.entryUrl,
+        fileFormat: processed.fileFormat,
+        viewerType: ViewerType.native,
+      });
+    } catch (error) {
+      const reason =
+        error instanceof Error && error.message.trim()
+          ? error.message.trim()
+          : 'LCC/LCC2 ZIP 成果包处理失败';
+      await this.markFailed(modelId, reason);
+    }
   }
 
   // 预留：解析任务开始后把模型标记为 processing。

@@ -1,6 +1,6 @@
 # 数境空间官网 后端架构与部署方案（当前实现与生产目标）
 
-> 更新日期：2026-06-06
+> 更新日期：2026-06-14
 > 状态：已按当前仓库实际实现重写；本文档为 `web/`、`server/`、对象存储、部署目标和接口口径的最新总说明。
 > 适用：前后端开发、联调、部署运维、文档续写。
 > 说明：项目当前同时保留根目录 `src/` Vite 原型与 `web/` Next.js 正式前端；文档统一使用 `OSS_* / objectKey / oss-compatible.service.ts` 作为当前对象存储命名，当前存储后端为 **阿里云 OSS**。
@@ -155,15 +155,23 @@
 ### 3.4 LCC / LCC2 ZIP 处理流程
 
 1. 用户先把 ZIP 当模型文件上传到 OSS
-2. `POST /api/models` 时若识别到 ZIP，会触发 `LccZipService`
-3. 后端从 OSS 下载 ZIP，安全解压到临时目录
-4. 识别唯一 `.lcc` 或 `.lcc2` 入口文件
-5. 保持完整目录结构重新上传到 `processed/lcc/{modelId}/...`
-6. 回写：
+2. `POST /api/uploads/presign + PUT + callback` 完成文件上传登记
+3. `POST /api/upload-tasks/:id/publish` 创建 `models` 记录并立即回写 `modelId` 到 `upload_tasks`
+4. 若文件是 ZIP，`publish` 接口快速返回（`processingStatus=processing`），LCC ZIP 处理在后台**异步**执行
+5. 后端后台任务从 OSS 下载 ZIP，安全解压到临时目录
+6. 识别唯一 `.lcc` 或 `.lcc2` 入口文件
+7. 保持完整目录结构重新上传到 `processed/lcc/{modelId}/...`
+8. 回写：
    - `modelUrl` = `.lcc / .lcc2` 入口文件 OSS URL
    - `fileFormat` = `lcc / lcc2`
    - `viewerType` = `native`
-   - `processingStatus` = `ready / failed`
+   - `processingStatus` = `ready`（成功）或 `failed`（处理异常）
+9. 处理完毕更新**同一条** `models` 记录，不创建新模型
+
+> 设计要点：
+> - `publish` 接口不因 LCC ZIP 处理耗时阻塞 HTTP 请求，前端不会因超时而误判为上传失败
+> - 异步处理仍确保 `modelId` 在 `processLccZip` 执行前已写入 `upload_tasks`，重试 `publish` 时被幂等拦截
+> - 上传成功后 ZIP 解析失败显示为"解析失败"，不是"上传失败"
 
 ---
 
