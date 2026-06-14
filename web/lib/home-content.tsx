@@ -26,6 +26,11 @@ export interface ModalItem {
   gradientFrom: string;
   gradientTo: string;
   icon: ReactNode;
+  // media：弹窗左侧展示的素材配置
+  media?: {
+    type: "video" | "image";
+    src: string;
+  };
 }
 
 // platformCards：业务平台三张卡片数据
@@ -40,6 +45,7 @@ export const platformCards: ModalItem[] = [
     gradientFrom: "from-cyan-900/40",
     gradientTo: "to-slate-900/60",
     icon: <Cloud className="w-6 h-6" />,
+    media: { type: "video", src: "/首页_业务平台/云端轻量化平台.mp4" },
   },
   {
     category: "业务平台",
@@ -51,6 +57,7 @@ export const platformCards: ModalItem[] = [
     gradientFrom: "from-blue-900/40",
     gradientTo: "to-slate-900/60",
     icon: <Network className="w-6 h-6" />,
+    media: { type: "video", src: "https://shujingspace.oss-cn-shenzhen.aliyuncs.com/shujing-space/media/%E9%A6%96%E9%A1%B5_%E4%B8%9A%E5%8A%A1%E5%B9%B3%E5%8F%B0/%E6%95%B0%E5%AD%97%E5%AD%AA%E7%94%9F%E7%AE%A1%E7%90%86%E5%B9%B3%E5%8F%B0.mp4" },
   },
   {
     category: "业务平台",
@@ -62,10 +69,13 @@ export const platformCards: ModalItem[] = [
     gradientFrom: "from-violet-900/40",
     gradientTo: "to-slate-900/60",
     icon: <Brain className="w-6 h-6" />,
+    media: { type: "image", src: "/首页_业务平台/具身智能空间训练平台.png" },
   },
 ];
 
 // scenarioCards：业务场景弹窗完整数据（含渐变与 videoTitle）
+const SCENE_MEDIA_BASE = "/首页_业务模块的封面/弹窗模块素材";
+
 export const scenarioCards: ModalItem[] = [
   {
     category: "业务场景",
@@ -77,6 +87,7 @@ export const scenarioCards: ModalItem[] = [
     gradientFrom: "from-stone-800/60",
     gradientTo: "to-gray-900/60",
     icon: <Building2 className="w-6 h-6" />,
+    media: { type: "image", src: `${SCENE_MEDIA_BASE}/工程改造.png` },
   },
   {
     category: "业务场景",
@@ -88,6 +99,7 @@ export const scenarioCards: ModalItem[] = [
     gradientFrom: "from-emerald-900/40",
     gradientTo: "to-slate-900/60",
     icon: <Mountain className="w-6 h-6" />,
+    media: { type: "image", src: `${SCENE_MEDIA_BASE}/数字文旅.png` },
   },
   {
     category: "业务场景",
@@ -99,6 +111,7 @@ export const scenarioCards: ModalItem[] = [
     gradientFrom: "from-rose-900/30",
     gradientTo: "to-gray-900/60",
     icon: <Camera className="w-6 h-6" />,
+    media: { type: "video", src: `${SCENE_MEDIA_BASE}/影视游戏.mp4` },
   },
   {
     category: "业务场景",
@@ -110,6 +123,7 @@ export const scenarioCards: ModalItem[] = [
     gradientFrom: "from-amber-900/30",
     gradientTo: "to-slate-900/60",
     icon: <Archive className="w-6 h-6" />,
+    media: { type: "image", src: `${SCENE_MEDIA_BASE}/数字存档.png` },
   },
   {
     category: "业务场景",
@@ -121,6 +135,7 @@ export const scenarioCards: ModalItem[] = [
     gradientFrom: "from-slate-800/60",
     gradientTo: "to-gray-900/60",
     icon: <Home className="w-6 h-6" />,
+    media: { type: "video", src: "https://shujingspace.oss-cn-shenzhen.aliyuncs.com/shujing-space/media/%E9%A6%96%E9%A1%B5_%E4%B8%9A%E5%8A%A1%E6%A8%A1%E5%9D%97%E7%9A%84%E5%B0%81%E9%9D%A2/%E5%BC%B9%E7%AA%97%E6%A8%A1%E5%9D%97%E7%B4%A0%E6%9D%90/%E4%BA%91%E4%B8%8A%E8%90%A5%E9%94%80.mp4" },
   },
   {
     category: "业务场景",
@@ -132,6 +147,7 @@ export const scenarioCards: ModalItem[] = [
     gradientFrom: "from-violet-900/40",
     gradientTo: "to-slate-900/60",
     icon: <Brain className="w-6 h-6" />,
+    media: { type: "image", src: `${SCENE_MEDIA_BASE}/具身智能空间训练平台.png` },
   },
 ];
 

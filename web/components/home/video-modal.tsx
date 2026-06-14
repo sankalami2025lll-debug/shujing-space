@@ -18,9 +18,15 @@ interface VideoModalProps {
 
 export function VideoModal({ item, onClose }: VideoModalProps) {
   const router = useRouter();
-  // playing：是否处于模拟播放中；progress：模拟进度条百分比 0–100
+  // playing：是否处于播放中（仅 video 类型使用）；progress：模拟进度条百分比 0–100
   const [playing, setPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
+  const [videoFailed, setVideoFailed] = useState(false);
+  const [imgFailed, setImgFailed] = useState(false);
+
+  const hasMedia = Boolean(item.media);
+  const isVideo = hasMedia && item.media!.type === "video";
+  const isImage = hasMedia && item.media!.type === "image";
 
   // handleClose：关闭弹窗并重置播放状态（遮罩 / 关闭钮 / Esc 共用）
   const handleClose = useCallback(() => {
@@ -37,9 +43,9 @@ export function VideoModal({ item, onClose }: VideoModalProps) {
     return () => document.removeEventListener("keydown", handler);
   }, [handleClose]);
 
-  // 模拟播放进度：playing 为真时定时推进 progress
+  // 模拟播放进度：playing 为真时定时推进 progress（仅无视频源的占位使用）
   useEffect(() => {
-    if (!playing) return;
+    if (!playing || isVideo) return;
     const interval = setInterval(() => {
       setProgress((p) => {
         if (p >= 100) {
@@ -50,13 +56,7 @@ export function VideoModal({ item, onClose }: VideoModalProps) {
       });
     }, 100);
     return () => clearInterval(interval);
-  }, [playing]);
-
-  // handleNavigateContact：具身智能弹窗底部「申请训练数据服务」→ 联系页
-  const handleNavigateContact = () => {
-    handleClose();
-    router.push("/contact");
-  };
+  }, [playing, isVideo]);
 
   return (
     <div
@@ -84,83 +84,129 @@ export function VideoModal({ item, onClose }: VideoModalProps) {
           <X className="w-4 h-4 text-gray-400" />
         </button>
 
-        {/* 左侧：模拟视频区域（65%） */}
+        {/* 左侧：素材展示区域（65%） */}
         <div className="w-full sm:w-[65%] flex-shrink-0 flex flex-col">
-          <div
-            className={`relative flex-1 bg-gradient-to-br ${item.gradientFrom} ${item.gradientTo} overflow-hidden`}
-            style={{ minHeight: 220, aspectRatio: "16/9" }}
-          >
-            <div
-              className="absolute inset-0 opacity-10"
-              style={{
-                backgroundImage:
-                  "linear-gradient(rgba(255,255,255,0.06) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.06) 1px, transparent 1px)",
-                backgroundSize: "32px 32px",
-              }}
-            />
-            <div className="absolute top-3 left-3 w-4 h-4 border-t border-l border-cyan-500/30" />
-            <div className="absolute top-3 right-3 w-4 h-4 border-t border-r border-cyan-500/30" />
-            <div className="absolute bottom-8 left-3 w-4 h-4 border-b border-l border-cyan-500/30" />
-            <div className="absolute bottom-8 right-3 w-4 h-4 border-b border-r border-cyan-500/30" />
-            <div className="absolute inset-0 flex items-center justify-center">
-              <div className="flex flex-col items-center gap-4">
-                <div className="w-16 h-16 rounded-2xl bg-white/5 border border-white/10 backdrop-blur-sm flex items-center justify-center text-white/30">
-                  {item.icon}
-                </div>
-                {!playing && (
-                  <p className="text-white/30 text-[13px]">{item.videoTitle}</p>
-                )}
-                {playing && (
-                  <p className="text-cyan-400/60 text-[13px]">正在播放...</p>
-                )}
-              </div>
-            </div>
-            <button
-              type="button"
-              onClick={() => setPlaying(!playing)}
-              className="absolute inset-0 flex items-center justify-center group"
-            >
-              <div
-                className={`w-14 h-14 rounded-full border flex items-center justify-center transition-all duration-300 ${playing ? "bg-white/5 border-white/15 opacity-0 group-hover:opacity-100" : "bg-white/10 border-white/20 hover:bg-white/15 hover:border-cyan-500/30"}`}
-              >
-                {playing ? (
-                  <Pause className="w-5 h-5 text-white/70" />
+          {/* 视频类型：渲染真实 <video> */}
+          {isVideo ? (
+            <>
+              <div className="relative flex-1 bg-black overflow-hidden" style={{ minHeight: 220, aspectRatio: "16/9" }}>
+                {videoFailed ? (
+                  <div className="absolute inset-0 flex items-center justify-center bg-zinc-900">
+                    <span className="text-gray-600 text-[13px]">视频加载失败</span>
+                  </div>
                 ) : (
-                  <Play className="w-5 h-5 text-white ml-0.5" />
+                  <video
+                    key={item.media!.src}
+                    src={item.media!.src}
+                    className="absolute inset-0 w-full h-full object-cover"
+                    controls
+                    playsInline
+                    preload="auto"
+                    onError={() => setVideoFailed(true)}
+                  />
                 )}
               </div>
-            </button>
-          </div>
-
-          <div className="h-10 bg-[#0a0a0a] border-t border-white/5 flex items-center px-4 gap-3">
-            <button
-              type="button"
-              onClick={() => setPlaying(!playing)}
-              className="text-gray-500 hover:text-white transition-colors flex-shrink-0"
-            >
-              {playing ? (
-                <Pause className="w-3.5 h-3.5" />
-              ) : (
-                <Play className="w-3.5 h-3.5" />
-              )}
-            </button>
-            <div className="flex-1 h-1 bg-white/5 rounded-full overflow-hidden">
+              {/* 视频类型不需要额外的进度条，由浏览器原生控件处理 */}
+            </>
+          ) : isImage ? (
+            <>
+              <div className="relative flex-1 bg-zinc-900 overflow-hidden" style={{ minHeight: 220, aspectRatio: "16/9" }}>
+                {imgFailed ? (
+                  <div className="absolute inset-0 flex items-center justify-center">
+                    <span className="text-gray-600 text-[13px]">图片加载失败</span>
+                  </div>
+                ) : (
+                  <img
+                    key={item.media!.src}
+                    src={item.media!.src}
+                    alt={item.title}
+                    className="absolute inset-0 w-full h-full object-cover"
+                    onError={() => setImgFailed(true)}
+                  />
+                )}
+              </div>
+              {/* 图片类型没有进度条 */}
+            </>
+          ) : (
+            /* 无 media 配置（业务场景）：保留原有模拟视频占位 */
+            <>
               <div
-                className="h-full bg-gradient-to-r from-cyan-500/60 to-cyan-400/40 rounded-full transition-all duration-100"
-                style={{ width: `${progress}%` }}
-              />
-            </div>
-            <span className="text-[11px] text-gray-600 flex-shrink-0">
-              {Math.floor((progress * 1.8) / 60)
-                .toString()
-                .padStart(2, "0")}
-              :
-              {Math.floor((progress * 1.8) % 60)
-                .toString()
-                .padStart(2, "0")}{" "}
-              / 03:00
-            </span>
-          </div>
+                className={`relative flex-1 bg-gradient-to-br ${item.gradientFrom} ${item.gradientTo} overflow-hidden`}
+                style={{ minHeight: 220, aspectRatio: "16/9" }}
+              >
+                <div
+                  className="absolute inset-0 opacity-10"
+                  style={{
+                    backgroundImage:
+                      "linear-gradient(rgba(255,255,255,0.06) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.06) 1px, transparent 1px)",
+                    backgroundSize: "32px 32px",
+                  }}
+                />
+                <div className="absolute top-3 left-3 w-4 h-4 border-t border-l border-cyan-500/30" />
+                <div className="absolute top-3 right-3 w-4 h-4 border-t border-r border-cyan-500/30" />
+                <div className="absolute bottom-8 left-3 w-4 h-4 border-b border-l border-cyan-500/30" />
+                <div className="absolute bottom-8 right-3 w-4 h-4 border-b border-r border-cyan-500/30" />
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <div className="flex flex-col items-center gap-4">
+                    <div className="w-16 h-16 rounded-2xl bg-white/5 border border-white/10 backdrop-blur-sm flex items-center justify-center text-white/30">
+                      {item.icon}
+                    </div>
+                    {!playing && (
+                      <p className="text-white/30 text-[13px]">{item.videoTitle}</p>
+                    )}
+                    {playing && (
+                      <p className="text-cyan-400/60 text-[13px]">正在播放...</p>
+                    )}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setPlaying(!playing)}
+                  className="absolute inset-0 flex items-center justify-center group"
+                >
+                  <div
+                    className={`w-14 h-14 rounded-full border flex items-center justify-center transition-all duration-300 ${playing ? "bg-white/5 border-white/15 opacity-0 group-hover:opacity-100" : "bg-white/10 border-white/20 hover:bg-white/15 hover:border-cyan-500/30"}`}
+                  >
+                    {playing ? (
+                      <Pause className="w-5 h-5 text-white/70" />
+                    ) : (
+                      <Play className="w-5 h-5 text-white ml-0.5" />
+                    )}
+                  </div>
+                </button>
+              </div>
+
+              <div className="h-10 bg-[#0a0a0a] border-t border-white/5 flex items-center px-4 gap-3">
+                <button
+                  type="button"
+                  onClick={() => setPlaying(!playing)}
+                  className="text-gray-500 hover:text-white transition-colors flex-shrink-0"
+                >
+                  {playing ? (
+                    <Pause className="w-3.5 h-3.5" />
+                  ) : (
+                    <Play className="w-3.5 h-3.5" />
+                  )}
+                </button>
+                <div className="flex-1 h-1 bg-white/5 rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-gradient-to-r from-cyan-500/60 to-cyan-400/40 rounded-full transition-all duration-100"
+                    style={{ width: `${progress}%` }}
+                  />
+                </div>
+                <span className="text-[11px] text-gray-600 flex-shrink-0">
+                  {Math.floor((progress * 1.8) / 60)
+                    .toString()
+                    .padStart(2, "0")}
+                  :
+                  {Math.floor((progress * 1.8) % 60)
+                    .toString()
+                    .padStart(2, "0")}{" "}
+                  / 03:00
+                </span>
+              </div>
+            </>
+          )}
         </div>
 
         {/* 右侧：说明面板（35%） */}
@@ -197,10 +243,10 @@ export function VideoModal({ item, onClose }: VideoModalProps) {
               {item.isEmbodied ? (
                 <button
                   type="button"
-                  onClick={handleNavigateContact}
-                  className="w-full py-2.5 rounded-full bg-violet-500/15 border border-violet-500/25 text-violet-400 text-[14px] hover:bg-violet-500/25 transition-all"
+                  disabled
+                  className="w-full py-2.5 rounded-full bg-white/8 border border-white/10 text-white/55 text-[14px] cursor-not-allowed"
                 >
-                  申请训练数据服务
+                  功能开发中，敬请期待
                 </button>
               ) : (
                 <button

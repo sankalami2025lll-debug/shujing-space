@@ -29,3 +29,7 @@ Thumbs.db
 .idea/
 .vscode/*
 !.vscode/extensions.json
+
+# 大文件（通过 OSS 引用，不存 git）
+web/public/首页_业务平台/数字孪生管理平台.mp4
+web/public/首页_业务模块的封面/弹窗模块素材/云上营销.mp4

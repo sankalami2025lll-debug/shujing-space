@@ -6,6 +6,7 @@
  * 主要功能：Hero 首屏、业务平台卡片（点击打开视频弹窗）、业务场景卡片、CTA 转化区、Footer、VideoModal 视频说明弹窗
  * 对应文档：页面功能注释文档/02_首页_Home.md、页面功能注释文档/03_顶部导航_NavBar.md
  * 说明：全站 NavBar 由 layout SiteChrome 挂载；本页不含 NavBar（对齐 Next 4A 架构）。
+ *        业务场景卡片顶部展示对应封面图，图片来自 /首页_业务模块的封面/ 目录。
  */
 import { useState } from "react";
 import Link from "next/link";
@@ -18,6 +19,34 @@ import {
   scenarios,
   type ModalItem,
 } from "@/lib/home-content";
+
+// businessSceneImages：业务场景卡片封面图，以 title 为 key 映射图片路径
+const businessSceneImages: Record<string, string> = {
+  "工程改造": "/首页_业务模块的封面/工程改造.png",
+  "数字文旅": "/首页_业务模块的封面/数字文旅.png",
+  "游戏影视": "/首页_业务模块的封面/影视游戏.png",
+  "数字存档": "/首页_业务模块的封面/数字存档.png",
+  "云上营销": "/首页_业务模块的封面/云上营销.png",
+  "具身智能空间训练场景": "/首页_业务模块的封面/具身智能空间训练场景.png",
+};
+
+// ScenarioCardImage：业务场景卡片封面图（含加载失败深色占位 fallback）
+function ScenarioCardImage({ src, alt }: { src: string; alt: string }) {
+  const [failed, setFailed] = useState(false);
+  if (failed) {
+    return (
+      <div className="absolute inset-0 w-full h-full bg-gradient-to-br from-zinc-800 to-zinc-900" />
+    );
+  }
+  return (
+    <img
+      src={src}
+      alt={alt}
+      className="absolute inset-0 w-full h-full object-cover"
+      onError={() => setFailed(true)}
+    />
+  );
+}
 
 export default function HomePage() {
   // activeModal：当前打开的业务说明弹窗数据，null 表示关闭
@@ -141,22 +170,10 @@ export default function HomePage() {
                   onClick={() => modalItem && setActiveModal(modalItem)}
                   className="group relative w-full min-w-0 p-0 flex flex-col bg-gradient-to-b from-white/[0.03] to-transparent rounded-[16px] border border-white/10 overflow-hidden hover:border-cyan-500/30 transition-all duration-300 text-left cursor-pointer"
                 >
-                  {/* 顶部展示区域：absolute 背景层铺满，避免 button 默认内边距造成左上空白 */}
-                  <div className="relative w-full aspect-[16/7] min-h-[110px] shrink-0 overflow-hidden">
-                    <div className="absolute inset-0 w-full h-full bg-gradient-to-br from-gray-800 to-gray-900" />
-                    <div className="absolute inset-0 flex items-center justify-center text-white/15 pointer-events-none">
-                      {s.icon && (
-                        <div className="w-10 h-10 flex items-center justify-center">
-                          {s.icon}
-                        </div>
-                      )}
-                    </div>
+                  {/* 顶部展示区域：封面图 + 渐变遮罩 */}
+                  <div className="relative w-full aspect-[16/7] min-h-[110px] shrink-0 overflow-hidden bg-zinc-900">
+                    <ScenarioCardImage src={businessSceneImages[s.title]} alt={s.title} />
                     <div className="absolute inset-0 bg-gradient-to-t from-black/80 to-transparent pointer-events-none" />
-                    <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none">
-                      <div className="w-10 h-10 rounded-full bg-white/10 border border-white/20 flex items-center justify-center backdrop-blur-sm">
-                        <Play className="w-4 h-4 text-white ml-0.5" />
-                      </div>
-                    </div>
                   </div>
                   <div className="p-3 md:p-4 w-full">
                     <h3 className="text-[13px] md:text-[15px] font-semibold mb-1 flex items-center gap-1.5">
