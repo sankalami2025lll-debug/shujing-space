@@ -6,8 +6,9 @@
  * 主要功能：Hero、数据类型、精选模型（GET /api/models 推荐 6 条）、服务能力、CTA、Footer
  * 对应文档：页面功能注释文档/04_模型社区入口页_ModelCommunity.md、页面功能注释文档/13_模型数据结构_communityData.md
  * 说明：全站 NavBar 由 layout SiteChrome 挂载；精选模型点击跳转 /models/[id]。
+ *        服务能力区左侧图片轮播绑定 services 数组索引，点击服务卡片切换到对应图片。
  */
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import Link from "next/link";
 import {
   ArrowRight,
@@ -227,85 +228,121 @@ const services = [
   },
 ];
 
-function SpaceVisual() {
+/**
+ * ServiceImageCarousel：服务能力区左侧图片展示组件
+ * 功能：未点击时自动轮播 5 张服务模块图；点击某服务卡片后锁定对应图片；点击其他服务切换到新图片。
+ * 图片路径：/模型社区_我们提供的不只是模型/{文件名}
+ * 图片索引与 services 数组一一对应
+ */
+const IMAGE_BASE = "/模型社区_我们提供的不只是模型";
+const IMAGE_FILES = [
+  "实景重建.png",              // index 0 → services[0] 实景重建
+  "BIM 模型处理.png",          // index 1 → services[1] BIM 模型处理
+  "构件级模型处理.png",        // index 2 → services[2] 构件级模型处理
+  "数字孪生平台接入.png",      // index 3 → services[3] 数字孪生平台接入
+  "具身智能空间训练数据处理.png", // index 4 → services[4] 具身智能空间训练数据处理
+];
+
+function ServiceImageCarousel({
+  activeIndex,
+}: {
+  activeIndex: number | null;
+}) {
+  // currentIndex：实际显示的图片下标，activeIndex 优先，否则走自动轮播
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const [imgFailed, setImgFailed] = useState(false);
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // 清理轮播定时器
+  const clearTimer = useCallback(() => {
+    if (intervalRef.current !== null) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
+  }, []);
+
+  // 启动自动轮播（每 4 秒切换）
+  const startAutoPlay = useCallback(() => {
+    clearTimer();
+    intervalRef.current = setInterval(() => {
+      setCurrentIndex((prev) => (prev + 1) % IMAGE_FILES.length);
+    }, 4000);
+  }, [clearTimer]);
+
+  // 用户点击服务卡片时，锁定显示并停止自动轮播
+  useEffect(() => {
+    if (activeIndex !== null) {
+      clearTimer();
+      setCurrentIndex(activeIndex);
+    } else {
+      // activeIndex 为 null 时恢复自动轮播
+      startAutoPlay();
+    }
+    return clearTimer;
+  }, [activeIndex, clearTimer, startAutoPlay]);
+
+  // 图片切换时重置错误状态
+  useEffect(() => {
+    setImgFailed(false);
+  }, [currentIndex]);
+
+  const src = `${IMAGE_BASE}/${IMAGE_FILES[currentIndex]}`;
+
+  // 深色占位背景（加载失败时显示）
+  if (imgFailed) {
+    return (
+      <div className="relative w-full h-full min-h-[420px] rounded-[22px] border border-white/10 overflow-hidden bg-zinc-900 flex items-center justify-center">
+        <span className="text-gray-600 text-[13px]">图片加载失败</span>
+      </div>
+    );
+  }
+
   return (
-    <div className="relative w-full h-full min-h-[420px] rounded-[22px] border border-white/10 overflow-hidden bg-gradient-to-br from-zinc-900 via-slate-900 to-zinc-950">
-      <div
-        className="absolute inset-0 opacity-[0.14]"
-        style={{
-          backgroundImage:
-            "linear-gradient(rgba(255,255,255,0.3) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.3) 1px, transparent 1px)",
-          backgroundSize: "36px 36px",
-        }}
+    <div className="relative w-full h-full min-h-[420px] rounded-[22px] border border-white/10 overflow-hidden bg-zinc-900">
+      <img
+        key={src}
+        src={src}
+        alt={IMAGE_FILES[currentIndex].replace(".png", "")}
+        className="absolute inset-0 w-full h-full object-cover transition-opacity duration-500"
+        onError={() => setImgFailed(true)}
       />
-      <div
-        className="absolute inset-0"
-        style={{
-          background:
-            "radial-gradient(ellipse at 50% 38%, rgba(96,165,250,0.09) 0%, transparent 65%)",
-        }}
-      />
-      <svg
-        className="absolute inset-0 w-full h-full"
-        viewBox="0 0 360 460"
-        fill="none"
-        preserveAspectRatio="xMidYMid meet"
-      >
-        <g stroke="rgba(255,255,255,0.15)" strokeWidth="0.7">
-          <rect x="90" y="140" width="70" height="155" />
-          <line x1="90" y1="140" x2="72" y2="124" />
-          <line x1="160" y1="140" x2="142" y2="124" />
-          <line x1="160" y1="295" x2="142" y2="279" />
-          <line x1="90" y1="295" x2="72" y2="279" />
-          <rect x="72" y="124" width="70" height="155" />
-          <rect x="200" y="90" width="70" height="205" />
-          <line x1="200" y1="90" x2="182" y2="74" />
-          <line x1="270" y1="90" x2="252" y2="74" />
-          <rect x="182" y="74" width="70" height="205" />
-        </g>
-        <g stroke="rgba(96,165,250,0.45)" strokeWidth="0.9">
-          <line x1="72" y1="124" x2="182" y2="74" />
-          <line x1="142" y1="124" x2="252" y2="74" />
-        </g>
-        <g stroke="rgba(96,165,250,0.35)" strokeWidth="0.8" strokeDasharray="4 4">
-          <line x1="72" y1="279" x2="182" y2="279" />
-          <line x1="72" y1="279" x2="72" y2="295" />
-        </g>
-        <circle cx="182" cy="74" r="2.5" fill="rgba(96,165,250,0.6)" />
-        <circle cx="252" cy="74" r="2.5" fill="rgba(96,165,250,0.6)" />
-        <circle cx="142" cy="124" r="2" fill="rgba(255,255,255,0.3)" />
-        <g stroke="rgba(96,165,250,0.25)" strokeWidth="0.6">
-          <polyline points="30,400 75,385 125,389 175,380 225,383 275,376 320,380 348,373" />
-        </g>
-        <g stroke="rgba(255,255,255,0.08)" strokeWidth="0.5">
-          <line x1="30" y1="360" x2="330" y2="360" />
-          <line x1="30" y1="380" x2="330" y2="380" />
-        </g>
-      </svg>
-      <div className="absolute inset-0 bg-gradient-to-t from-black/55 via-transparent to-transparent" />
-      <div className="absolute bottom-5 left-5 right-5 flex items-center justify-between">
-        <span className="text-[11px] text-gray-600 tracking-wider">三维空间数字化</span>
-        <div className="flex gap-1">
-          {[...Array(4)].map((_, i) => (
-            <div
-              key={i}
-              className="h-px rounded-full"
-              style={{
-                width: `${14 + i * 5}px`,
-                background:
-                  i < 3 ? "rgba(96,165,250,0.45)" : "rgba(255,255,255,0.08)",
-              }}
-            />
-          ))}
-        </div>
+      {/* 轻微暗角，不挡住主体 */}
+      <div className="absolute inset-0 bg-gradient-to-t from-black/30 via-transparent to-black/10 pointer-events-none" />
+      {/* 底部指示器 */}
+      <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-2">
+        {IMAGE_FILES.map((_, i) => (
+          <span
+            key={i}
+            className={`block rounded-full transition-all duration-300 ${
+              i === currentIndex
+                ? "w-5 h-1.5 bg-white/70"
+                : "w-1.5 h-1.5 bg-white/30"
+            }`}
+          />
+        ))}
       </div>
     </div>
   );
 }
 
-function ServiceCard({ svc }: { svc: (typeof services)[0] }) {
+function ServiceCard({
+  svc,
+  onClick,
+  isActive,
+}: {
+  svc: (typeof services)[0];
+  onClick?: () => void;
+  isActive?: boolean;
+}) {
   return (
-    <div className="group flex flex-col gap-3 p-5 rounded-[16px] border border-white/[0.08] bg-white/[0.025] hover:border-white/[0.16] transition-all duration-200 h-full">
+    <div
+      onClick={onClick}
+      className={`group flex flex-col gap-3 p-5 rounded-[16px] border transition-all duration-200 h-full cursor-pointer ${
+        isActive
+          ? "border-cyan-500/40 bg-white/[0.06]"
+          : "border-white/[0.08] bg-white/[0.025] hover:border-white/[0.16]"
+      }`}
+    >
       <div className="flex items-center gap-3">
         <div className="flex-shrink-0 w-7 h-7 rounded-lg border border-white/10 bg-white/[0.04] flex items-center justify-center text-cyan-400/60 group-hover:text-cyan-400/90 transition-colors">
           {svc.icon}
@@ -332,6 +369,8 @@ export default function ModelCommunityPage() {
   // featured：精选模型，仅来自 GET /api/models
   const [featured, setFeatured] = useState<FeaturedCard[]>([]);
   const [featuredLoading, setFeaturedLoading] = useState(true);
+  // activeServiceIndex：服务能力区当前选中的模块索引，null 表示自动轮播
+  const [activeServiceIndex, setActiveServiceIndex] = useState<number | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -525,31 +564,51 @@ export default function ModelCommunityPage() {
           </div>
 
           <div className="flex flex-col gap-3 md:hidden">
-            {services.map((svc) => (
-              <ServiceCard key={svc.title} svc={svc} />
+            {services.map((svc, i) => (
+              <ServiceCard
+                key={svc.title}
+                svc={svc}
+                isActive={activeServiceIndex === i}
+                onClick={() => setActiveServiceIndex(i)}
+              />
             ))}
           </div>
 
           <div className="hidden md:flex gap-8 items-stretch">
             <div className="flex-shrink-0" style={{ width: "42%" }}>
-              <SpaceVisual />
+              <ServiceImageCarousel activeIndex={activeServiceIndex} />
             </div>
             <div className="flex-1 flex flex-col gap-3">
               <div className="grid grid-cols-2 gap-3 flex-1">
-                {services.slice(0, 2).map((svc) => (
-                  <ServiceCard key={svc.title} svc={svc} />
+                {services.slice(0, 2).map((svc, i) => (
+                  <ServiceCard
+                    key={svc.title}
+                    svc={svc}
+                    isActive={activeServiceIndex === i}
+                    onClick={() => setActiveServiceIndex(i)}
+                  />
                 ))}
               </div>
               <div className="grid grid-cols-2 gap-3 flex-1">
-                {services.slice(2, 4).map((svc) => (
-                  <ServiceCard key={svc.title} svc={svc} />
+                {services.slice(2, 4).map((svc, i) => (
+                  <ServiceCard
+                    key={svc.title}
+                    svc={svc}
+                    isActive={activeServiceIndex === i + 2}
+                    onClick={() => setActiveServiceIndex(i + 2)}
+                  />
                 ))}
               </div>
               <div className="flex-1">
-                {services.slice(4).map((svc) => (
+                {services.slice(4).map((svc, i) => (
                   <div
                     key={svc.title}
-                    className="group flex items-center gap-6 p-5 rounded-[16px] border border-white/[0.08] bg-white/[0.025] hover:border-white/[0.16] transition-all duration-200 h-full"
+                    onClick={() => setActiveServiceIndex(i + 4)}
+                    className={`group flex items-center gap-6 p-5 rounded-[16px] border transition-all duration-200 h-full cursor-pointer ${
+                      activeServiceIndex === i + 4
+                        ? "border-cyan-500/40 bg-white/[0.06]"
+                        : "border-white/[0.08] bg-white/[0.025] hover:border-white/[0.16]"
+                    }`}
                   >
                     <div className="flex-shrink-0 w-7 h-7 rounded-lg border border-white/10 bg-white/[0.04] flex items-center justify-center text-cyan-400/60 group-hover:text-cyan-400/90 transition-colors">
                       {svc.icon}
