@@ -40,6 +40,34 @@
 - ⚠️ **LCC iframe 外层 Loading 会遮住内层 error 态**：当前外层只在子文档满足 `data-lcc-loaded=true + completeReason=onLoadedStable` 时才隐藏；如果 iframe 内部真实进入 `error`，外层仍会继续显示 Loading，用户看不到子文档错误信息。
 - ℹ️ **LCC 运行时调试属性当前仍保留在生产 DOM**：`lcc-viewer.tsx` 会持续写入 `data-lcc-debug-*` 诊断属性，便于继续排查加载链问题，但会增加少量 DOM 变更噪音；后续如确认稳定，可考虑按环境变量再做收口。
 
+### 本轮工具栏小修完成内容（2026-06-13）
+
+#### 提交记录
+- `0b5b016` fix: refine LCC viewer chrome and toolbar permissions
+- `3b62346` fix: place model fullscreen action in detail header
+
+#### 已落地改动
+
+| # | 改动 | 位置 | 备注 |
+|---|------|------|------|
+| 1 | 删除四个青色角框 | `lcc-viewer.tsx` / `viewer-placeholder.tsx` | 纯视觉删除，不影响画布 |
+| 2 | 全屏按钮放到"返回社区"行右侧 | `model-detail-page.tsx` | 顶部同层右侧 |
+| 3 | 外层顶部分享按钮已删除 | `model-detail-page.tsx` | 右侧信息栏分享保留 |
+| 4 | 游客隐藏"保存启动视图"按钮 | `model-viewer-toolbar.tsx` + `page.tsx` | `showSaveLaunchView` props |
+| 5 | 登录用户保留保存按钮 | 同上 | 可用性由 `canShowSaveLaunchView` 控制 |
+| 6 | 工具按钮只保留图标 | `model-viewer-toolbar.tsx` | 去文字、去箭头 |
+| 7 | 底部信息/缩放按钮删除 | `model-viewer-toolbar.tsx` | LCC 变体 |
+| 8 | 观察按钮提前 | `model-viewer-toolbar.tsx` | 第一个主要功能 |
+| 9 | 重置图标改为 `Home` | `model-viewer-toolbar.tsx` | tooltip"回到初始视角" |
+| 10 | 保留未开发占位图标 | `model-viewer-toolbar.tsx` | 截图/旋转/平移/测量/标注/图层/信息 |
+
+#### 禁止改动清单（本轮新增）
+- LCC/LCC2 加载逻辑、`onLoadedStable`、`data-lcc-loaded`、`data-lcc-complete-reason`
+- `LccViewer` 内部加载/相机控制/SDK 文件
+- `model-loading-overlay.tsx`、Loading 动画
+- Logo、水印
+- iframe 加载架构
+
 ### 零、当前阶段快照（2026-06-01，Next.js 本地验收通过）
 
 #### 本地三端地址
