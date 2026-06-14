@@ -6,8 +6,10 @@
  * 主要功能：Hero 首屏、公司介绍、核心能力卡片、服务场景、愿景区、CTA 转化区、Footer
  * 对应文档：页面功能注释文档/10_关于我们_AboutUs.md
  * 说明：全站 NavBar 由 layout SiteChrome 挂载；本页不含 NavBar（对齐 Next 4A 架构）。
+ *         「我们是谁」右侧使用 AboutUsImageCarousel 自动轮播图片。
  */
 import Link from "next/link";
+import { useEffect, useState, useRef, useCallback } from "react";
 import {
   ArrowRight,
   Box,
@@ -92,61 +94,76 @@ const scenarios = [
   },
 ];
 
-// SpaceVisual：公司介绍区右侧的纯 SVG 三维空间示意插画（无交互，仅视觉装饰）
-function SpaceVisual() {
+// AboutUsImageCarousel：关于我们「我们是谁」右侧自动轮播图片组件
+// 图片来自 /关于我们_我们是谁/ 目录，共 2 张，4 秒间隔淡入淡出切换
+const ABOUT_IMAGES = [
+  "/关于我们_我们是谁/关于我们第一张.png",
+  "/关于我们_我们是谁/关于我们第二张.png",
+];
+
+function AboutUsImageCarousel() {
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const [imgFailed, setImgFailed] = useState(false);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const clearTimer = useCallback(() => {
+    if (timerRef.current !== null) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+  }, []);
+
+  const startTimer = useCallback(() => {
+    clearTimer();
+    timerRef.current = setInterval(() => {
+      setCurrentIndex((prev) => (prev + 1) % ABOUT_IMAGES.length);
+    }, 4000);
+  }, [clearTimer]);
+
+  useEffect(() => {
+    startTimer();
+    return clearTimer;
+  }, [startTimer, clearTimer]);
+
+  // 切换图片时重置错误状态
+  useEffect(() => {
+    setImgFailed(false);
+  }, [currentIndex]);
+
+  // 加载失败：显示深色占位
+  if (imgFailed) {
+    return (
+      <div className="relative w-full h-full min-h-[280px] md:min-h-[400px] md:max-h-[520px] rounded-[28px] border border-white/10 overflow-hidden bg-zinc-900 flex items-center justify-center shadow-2xl shadow-black/40">
+        <span className="text-gray-600 text-[13px]">图片加载失败</span>
+      </div>
+    );
+  }
+
   return (
-    <div className="relative w-full aspect-[4/3] md:aspect-[4/5] rounded-[22px] border border-white/10 overflow-hidden bg-gradient-to-br from-zinc-900 via-slate-900 to-zinc-950">
-      <div
-        className="absolute inset-0 opacity-20"
-        style={{
-          backgroundImage:
-            "linear-gradient(rgba(255,255,255,0.3) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.3) 1px, transparent 1px)",
-          backgroundSize: "40px 40px",
-        }}
+    <div className="relative w-full h-full min-h-[280px] md:min-h-[400px] md:max-h-[520px] rounded-[28px] border border-white/10 overflow-hidden bg-zinc-900 shadow-2xl shadow-black/40">
+      <img
+        key={ABOUT_IMAGES[currentIndex]}
+        src={ABOUT_IMAGES[currentIndex]}
+        alt={`关于数境空间 ${currentIndex + 1}`}
+        className="absolute inset-0 w-full h-full object-cover object-center transition-opacity duration-500"
+        onError={() => setImgFailed(true)}
       />
-      <div
-        className="absolute inset-0"
-        style={{
-          background:
-            "radial-gradient(ellipse at 50% 35%, rgba(96,165,250,0.1) 0%, transparent 65%)",
-        }}
-      />
-      <svg className="absolute inset-0 w-full h-full" viewBox="0 0 400 500" fill="none">
-        <g stroke="rgba(255,255,255,0.18)" strokeWidth="0.6">
-          <rect x="100" y="160" width="80" height="180" />
-          <rect x="220" y="100" width="80" height="240" />
-          <line x1="100" y1="160" x2="80" y2="140" />
-          <line x1="180" y1="160" x2="160" y2="140" />
-          <line x1="180" y1="340" x2="160" y2="320" />
-          <line x1="100" y1="340" x2="80" y2="320" />
-          <rect x="80" y="140" width="80" height="180" />
-          <line x1="220" y1="100" x2="200" y2="80" />
-          <line x1="300" y1="100" x2="280" y2="80" />
-          <rect x="200" y="80" width="80" height="240" />
-        </g>
-        <g stroke="rgba(96,165,250,0.5)" strokeWidth="0.8">
-          <line x1="80" y1="140" x2="200" y2="80" />
-          <line x1="160" y1="140" x2="280" y2="80" />
-        </g>
-        <g stroke="rgba(96,165,250,0.6)" strokeWidth="1">
-          <polyline points="40,430 90,410 140,415 190,405 240,408 290,400 340,405 380,395" />
-        </g>
-      </svg>
-      <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent" />
-      <div className="absolute bottom-6 left-6 right-6 flex items-center justify-between">
-        <span className="text-[12px] text-gray-600">三维空间数字化</span>
-        <div className="flex gap-1">
-          {[...Array(4)].map((_, i) => (
-            <div
-              key={i}
-              className="h-0.5 rounded-full"
-              style={{
-                width: `${16 + i * 6}px`,
-                background: i < 3 ? "rgba(96,165,250,0.5)" : "rgba(255,255,255,0.1)",
-              }}
-            />
-          ))}
-        </div>
+      {/* 四周径向暗角：中心 45% 保持明亮，外围渐变压暗 */}
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,transparent_45%,rgba(0,0,0,0.45)_100%)] pointer-events-none" />
+      {/* 底部额外压暗，增强文字/圆点可读性 */}
+      <div className="absolute inset-0 bg-gradient-to-t from-black/30 via-transparent to-transparent pointer-events-none" />
+      {/* 底部圆点指示器 - 弱化 */}
+      <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-2">
+        {ABOUT_IMAGES.map((_, i) => (
+          <span
+            key={i}
+            className={`block rounded-full transition-all duration-300 ${
+              i === currentIndex
+                ? "w-4 h-1 bg-white/60"
+                : "w-1 h-1 bg-white/25"
+            }`}
+          />
+        ))}
       </div>
     </div>
   );
@@ -270,7 +287,7 @@ export default function AboutUsPage() {
       {/* Company Intro */}
       <section className="relative py-16 md:py-32 bg-gradient-to-b from-[#0a0a0a] to-[#0d0d0d]">
         <div className="max-w-[1200px] mx-auto px-5 md:px-6">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-10 md:gap-16 items-center">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-10 md:gap-16 items-stretch">
             <div>
               <p className="text-[12px] md:text-[13px] text-gray-500 uppercase tracking-widest mb-3 md:mb-4 font-mono">
                 关于数境空间
@@ -314,7 +331,7 @@ export default function AboutUsPage() {
                 ))}
               </div>
             </div>
-            <SpaceVisual />
+            <AboutUsImageCarousel />
           </div>
         </div>
       </section>
