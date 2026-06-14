@@ -30,6 +30,7 @@ import {
   getMyFavorites,
   getMyApplications,
   getMyStats,
+  deleteMyModel,
 } from "@/lib/api/users";
 import { coverStyleByType, formatRelativeTime } from "@/lib/format";
 import { typeTagColor } from "@/lib/community-data";
@@ -235,6 +236,8 @@ export default function PersonalCenterPage() {
 
   // showUpload：发布模型弹窗显隐；关闭时卸载组件以重置表单状态
   const [showUpload, setShowUpload] = useState(false);
+  // deletingId：正在删除的模型 id（防止重复点击）
+  const [deletingId, setDeletingId] = useState<number | null>(null);
 
   // 未登录访问 /models/me：toast 提示并跳转 /auth（等待 AuthProvider 自举完成后再判定）
   useEffect(() => {
@@ -349,6 +352,29 @@ export default function PersonalCenterPage() {
     }
     setShowUpload(true);
   };
+
+  // handleDeleteFailedModel：删除失败模型；确认后调 deleteMyModel，成功则从本地列表移除并刷新
+  const handleDeleteFailedModel = useCallback(
+    async (model: MyModel) => {
+      if (!window.confirm("确认删除这个失败模型？删除后不可恢复。")) return;
+      setDeletingId(model.id);
+      try {
+        await deleteMyModel(model.id);
+        setModels((s) => ({
+          ...s,
+          data: (s.data ?? []).filter((m) => m.id !== model.id),
+        }));
+        toast.success("删除成功");
+        loadPublished();
+        getMyStats().then(setStats).catch(() => {});
+      } catch (e) {
+        toast.error(errMsg(e));
+      } finally {
+        setDeletingId(null);
+      }
+    },
+    [loadPublished],
+  );
 
   // refreshAfterPublish：发布成功后刷新「我的模型 / 我的发布」列表与 stats 角标
   const refreshAfterPublish = useCallback(() => {
@@ -538,6 +564,7 @@ export default function PersonalCenterPage() {
 
                     const m = item.model;
                     const meta = resolveMyModelBadge(m);
+                    const isFailedModel = m.processingStatus === "failed";
                     return (
                       <div
                         key={item.key}
@@ -561,13 +588,25 @@ export default function PersonalCenterPage() {
                               {meta.label}
                             </span>
                           </div>
-                          <button
-                            type="button"
-                            onClick={() => handleModelView(m)}
-                            className="mt-3 w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-[12px] text-gray-200 transition-all hover:bg-white/8 hover:border-white/20"
-                          >
-                            {meta.action}
-                          </button>
+                          <div className="mt-3 flex gap-2">
+                            <button
+                              type="button"
+                              onClick={() => handleModelView(m)}
+                              className="flex-1 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-[12px] text-gray-200 transition-all hover:bg-white/8 hover:border-white/20"
+                            >
+                              {meta.action}
+                            </button>
+                            {isFailedModel && (
+                              <button
+                                type="button"
+                                disabled={deletingId === m.id}
+                                onClick={() => handleDeleteFailedModel(m)}
+                                className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-[12px] text-red-400 transition-all hover:bg-red-500/20 hover:border-red-500/50 disabled:opacity-50"
+                              >
+                                {deletingId === m.id ? "删除中…" : "删除"}
+                              </button>
+                            )}
+                          </div>
                         </div>
                       </div>
                     );
