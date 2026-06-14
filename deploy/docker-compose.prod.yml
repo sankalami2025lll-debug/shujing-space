@@ -36,6 +36,9 @@ services:
     build:
       context: ../web
       dockerfile: Dockerfile
+      args:
+        # 从 .env.prod 读取 NEXT_PUBLIC_API_BASE_URL，注入 build 阶段供 pnpm build 使用
+        - NEXT_PUBLIC_API_BASE_URL=${NEXT_PUBLIC_API_BASE_URL}
     restart: unless-stopped
     env_file:
       - .env.prod
