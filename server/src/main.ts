@@ -34,8 +34,12 @@ async function bootstrap() {
   app.use(helmet());
 
   // 跨域：仅允许配置的前端来源（数组）
+  // 生产环境：必须使用配置的 CORS_ORIGIN（env.validation 已强制非空，不会 fallback true）
+  // 开发环境：CORS_ORIGIN 为空时放通所有来源以方便调试（生产环境因校验拦截会阻止启动）
+  const corsOrigins = config.get<string[]>('corsOrigins') ?? [];
+  const isProduction = config.get<string>('nodeEnv') === 'production';
   app.enableCors({
-    origin: config.get<string[]>('corsOrigins') ?? true,
+    origin: isProduction ? corsOrigins : corsOrigins.length > 0 ? corsOrigins : true,
     credentials: true,
   });
 

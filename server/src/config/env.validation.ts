@@ -32,7 +32,9 @@ const envSchema = z.object({
   // PostgreSQL 连接串（Prisma 使用）
   DATABASE_URL: z.string().min(1, 'DATABASE_URL 不能为空'),
   // 允许的前端来源，逗号分隔
-  CORS_ORIGIN: z.string().default('http://localhost:5173'),
+  // 开发环境默认放行 localhost:5173（Vite）和 localhost:3000（Next.js）；
+  // 生产环境必须显式配置，缺失将阻止启动（见下方 superRefine）。
+  CORS_ORIGIN: z.string().default('http://localhost:5173,http://localhost:3000'),
   // 是否启用 Swagger 文档
   SWAGGER_ENABLED: z
     .enum(['true', 'false'])
@@ -101,6 +103,30 @@ const envSchema = z.object({
         code: z.ZodIssueCode.custom,
         path: ['JWT_ACCESS_SECRET'],
         message: `生产环境 JWT_ACCESS_SECRET 长度须 ≥ ${JWT_SECRET_MIN_LENGTH}，当前为 ${secret.length}`,
+      });
+    }
+
+    // 4) CORS_ORIGIN 生产强制校验：禁止为空或仅含空白
+    //    生产环境必须显式配置前端域名，避免意外放通或使用开发默认值
+    const corsOrigin = (env.CORS_ORIGIN ?? '').trim();
+    if (!corsOrigin) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['CORS_ORIGIN'],
+        message:
+          '生产环境 CORS_ORIGIN 不能为空，请配置为前端正式域名，例如 https://shujingspace.com',
+      });
+    }
+    // 5) CORS_ORIGIN 生产强制校验：禁止包含 localhost 或 127.0.0.1（排除误用开发默认值）
+    if (
+      corsOrigin.includes('localhost') ||
+      corsOrigin.includes('127.0.0.1')
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['CORS_ORIGIN'],
+        message:
+          '生产环境 CORS_ORIGIN 不能包含 localhost 或 127.0.0.1，请配置为前端正式域名，例如 https://shujingspace.com',
       });
     }
   });
