@@ -14,7 +14,7 @@ import { ApiError } from "@/lib/http";
 
 const DEFAULT_MULTIPART_CONCURRENCY = 1;
 const DEFAULT_PART_RETRY_LIMIT = 3;
-const DEFAULT_PART_PUT_TIMEOUT_MS = 60_000;
+const DEFAULT_PART_PUT_TIMEOUT_MS = 300_000;
 const ENABLE_MULTIPART_FETCH_PUT = true;
 
 interface MultipartRunnerOptions {
@@ -393,6 +393,13 @@ export async function resumeMultipartUploadTask(
         inflightPartBytes.delete(partNumber);
         emitProgress();
         if (error instanceof UploadAbortedError) {
+          throw error;
+        }
+        // 403/401 签名错误不可重试，直接抛出
+        if (
+          error instanceof ApiError &&
+          (error.status === 403 || error.status === 401)
+        ) {
           throw error;
         }
         lastError = error;

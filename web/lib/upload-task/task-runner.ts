@@ -46,10 +46,33 @@ function createTaskError(
   stage: UploadTaskStage,
   error: unknown,
 ): UploadTaskError {
+  const stageMessage = getStageMessage(stage);
+  const detail = error instanceof ApiError ? error.message : "发布失败，请稍后重试。";
   return {
     stage,
-    message: error instanceof ApiError ? error.message : "发布失败，请稍后重试。",
+    message: detail.startsWith(stageMessage) ? detail : `${stageMessage}：${detail}`,
   };
+}
+
+function getStageMessage(stage: UploadTaskStage): string {
+  switch (stage) {
+    case "presigning-model":
+      return "模型文件预签名";
+    case "uploading-model":
+      return "上传模型文件";
+    case "callbacking-model":
+      return "模型文件回调登记";
+    case "presigning-cover":
+      return "封面上传预签名";
+    case "uploading-cover":
+      return "上传封面";
+    case "callbacking-cover":
+      return "封面上传回调登记";
+    case "creating-model":
+      return "发布模型";
+    default:
+      return "发布";
+  }
 }
 
 function throwIfAborted(signal: AbortSignal): void {
