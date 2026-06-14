@@ -422,7 +422,7 @@ export default function PersonalCenterPage() {
   }
 
   const visibleTasks = tasks.filter(
-    (task) => !task.createdModelId || !existingModelIds.has(task.createdModelId),
+    (task) => task.createdModelId == null,
   );
   const modelItems: MyModelListItem[] = [
     ...visibleTasks.map((task) => ({
