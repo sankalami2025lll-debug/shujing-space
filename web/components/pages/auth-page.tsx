@@ -232,14 +232,12 @@ export default function AuthPage() {
   return (
     <div className="min-h-screen bg-[#0a0a0a] text-white flex flex-col overflow-x-hidden">
       <nav className="fixed top-0 left-0 right-0 z-50 backdrop-blur-xl bg-black/60 border-b border-white/10 h-14 md:h-16 px-5 md:px-10 flex items-center justify-between">
-        <Link href="/" className="flex items-center gap-2.5">
+        <Link href="/" className="flex items-center">
           <img
-            src="/brand/company-logo-transparent.png"
+            src="/loading/loading-logo-reference1.png"
             alt="数境空间"
-            className="h-7 w-auto object-contain"
-            style={{ mixBlendMode: "screen" }}
+            className="h-[50px] w-auto object-contain"
           />
-          <span className="text-[17px] md:text-[19px] font-medium tracking-wide">数境空间</span>
         </Link>
         <Link
           href="/"
