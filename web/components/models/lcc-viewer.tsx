@@ -24,6 +24,15 @@ const LCC_APP_KEY = process.env.NEXT_PUBLIC_LCC_APP_KEY?.trim();
 const LCC_STABLE_RESOURCE_WINDOW_MS = 500;
 const LCC_STABLE_FRAME_THRESHOLD = 3;
 const LCC_ONLOADED_FALLBACK_MS = 5000;
+const LCC_FIRST_FRAME_CONTENT_FRAMES = 5;
+const LCC_FIRST_FRAME_DELAY_MS = 1000;
+const LCC_FIRST_FRAME_RESOURCE_IDLE_MS = 1500;
+const LCC_MODEL_PIXEL_SAMPLE_SIZE = 64;
+const LCC_BACKGROUND_RGB_THRESHOLD = 18;
+const LCC_MODEL_PIXEL_RATIO_THRESHOLD = 0.003;
+const LCC_MODEL_PIXEL_MIN_COUNT = 3;
+/** LCC 核心资源后缀，用于网络监控 */
+const LCC_CORE_RESOURCE_PATTERNS = /\.(sog|btree|ply|lcc2|b3dm|i3dm|pnts|cmpt|geojson|bin|glb|gltf|ktx2|png|jpg|jpeg)(\?|#|$)/i;
 const LCC_WATERMARK_CROP_PX = 8;
 const LCC_WATERMARK_BOTTOM_BAR_PX = 16;
 const RELEVANT_LCC_RESOURCE_PATH_RE =
@@ -407,6 +416,10 @@ function clampProgress(percent: number) {
   return percent;
 }
 
+/**
+ * 宽松检测 canvas 是否已有任何绘制内容（包括背景、网格等）。
+ * 用于 paintedCanvasSeenRef fallback，非首帧判断。
+ */
 function doesCanvasLookPainted(canvas: HTMLCanvasElement) {
   try {
     const sampleWidth = Math.min(canvas.width, 32);
@@ -432,6 +445,49 @@ function doesCanvasLookPainted(canvas: HTMLCanvasElement) {
     return false;
   }
   return false;
+}
+
+/**
+ * 严格检测 canvas 上是否存在真正的模型像素。
+ * 排除深色背景、网格线、纯色场景等非模型内容。
+ * 采样 64x64 区域，检查非背景有效像素数量和占比。
+ */
+function requiresModelContentVisible(canvas: HTMLCanvasElement): boolean {
+  try {
+    const sampleSize = LCC_MODEL_PIXEL_SAMPLE_SIZE;
+    const sampleWidth = Math.min(canvas.width, sampleSize);
+    const sampleHeight = Math.min(canvas.height, sampleSize);
+    if (sampleWidth <= 0 || sampleHeight <= 0) return false;
+    const offscreen = document.createElement("canvas");
+    offscreen.width = sampleWidth;
+    offscreen.height = sampleHeight;
+    const context = offscreen.getContext("2d", { willReadFrequently: true });
+    if (!context) return false;
+    context.drawImage(canvas, 0, 0, sampleWidth, sampleHeight);
+    const pixels = context.getImageData(0, 0, sampleWidth, sampleHeight).data;
+    let modelPixelCount = 0;
+    const totalPixels = (sampleWidth * sampleHeight);
+    for (let index = 0; index < pixels.length; index += 4) {
+      const red = pixels[index];
+      const green = pixels[index + 1];
+      const blue = pixels[index + 2];
+      const alpha = pixels[index + 3];
+      // 透明像素排除
+      if (alpha < 64) continue;
+      // 深色背景排除（近似纯黑/深蓝色场景背景）
+      if (red < LCC_BACKGROUND_RGB_THRESHOLD && green < LCC_BACKGROUND_RGB_THRESHOLD && blue < LCC_BACKGROUND_RGB_THRESHOLD) continue;
+      // 深蓝色背景排除（常见 Three.js 场景背景）
+      if (blue > red + 30 && blue > green + 30) continue;
+      // 亮色网格线/辅助线排除（近似白色/浅灰色线条）
+      if (red > 200 && green > 200 && blue > 200 && red - blue < 30 && green - blue < 30) continue;
+      // 通过上述过滤的像素视为模型内容像素
+      modelPixelCount += 1;
+    }
+    const pixelRatio = modelPixelCount / totalPixels;
+    return modelPixelCount >= LCC_MODEL_PIXEL_MIN_COUNT && pixelRatio >= LCC_MODEL_PIXEL_RATIO_THRESHOLD;
+  } catch {
+    return false;
+  }
 }
 
 function getProgressLogKey(percent: number) {
@@ -1567,6 +1623,13 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
   const loadStartedAtRef = useRef<number | null>(null);
   const lastProgressAtRef = useRef<number | null>(null);
   const paintedCanvasSeenRef = useRef(false);
+  /** LCC 核心资源追踪 — 用于确认模型资源已开始加载并趋于稳定 */
+  const lccResourceCompletedCountRef = useRef(0);
+  const lccResourceActiveCountRef = useRef(0);
+  const lccResourceLastStartAtRef = useRef<number | null>(null);
+  const lccResourceLastEndAtRef = useRef<number | null>(null);
+  const firstFrameContentFramesRef = useRef(0);
+  const firstFrameContentReadyAtRef = useRef<number | null>(null);
   const [viewerStatus, setViewerStatus] = useState<LccViewerStatus>("idle");
   const [progress, setProgress] = useState(0);
   const [sdkLoadedState, setSdkLoadedState] = useState(false);
@@ -2335,6 +2398,9 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
       sdkLoadedAtRef.current = null;
       loadedStableFrameCountRef.current = 0;
       initialViewReadyRef.current = false;
+      firstFrameContentFramesRef.current = 0;
+      firstFrameContentReadyAtRef.current = null;
+      lccResourceCompletedCountRef.current = 0;
       progressRef.current = 0;
       setViewerStatus("idle");
       setProgress(0);
@@ -2353,6 +2419,9 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
       sdkLoadedAtRef.current = null;
       loadedStableFrameCountRef.current = 0;
       initialViewReadyRef.current = false;
+      firstFrameContentFramesRef.current = 0;
+      firstFrameContentReadyAtRef.current = null;
+      lccResourceCompletedCountRef.current = 0;
       progressRef.current = 0;
       setViewerStatus("error");
       setProgress(0);
@@ -2379,6 +2448,9 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
         typeof performance !== "undefined" ? performance.now() : Date.now();
       lastProgressAtRef.current = loadStartedAtRef.current;
       paintedCanvasSeenRef.current = false;
+      firstFrameContentFramesRef.current = 0;
+      firstFrameContentReadyAtRef.current = null;
+      lccResourceCompletedCountRef.current = 0;
       progressRef.current = 0;
       setSdkLoadedState(false);
       // 每个新模型重置 bounds 上下文，防止跨模型污染
@@ -3224,7 +3296,7 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
               }
             }
 
-            // 加载完成 (completeViewerLoading) 后，等待首帧实际渲染到 canvas
+            // 加载完成 (completeViewerLoading) 后，等待模型内容真正可见
             if (loadingCompletedRef.current && !firstFrameRenderedRef.current) {
               const canvasElement = rendererRef.current.domElement;
               const hasVisibleCanvas =
@@ -3233,15 +3305,89 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
                 canvasElement.clientHeight > 0 &&
                 canvasElement.width > 0 &&
                 canvasElement.height > 0;
-              if (hasVisibleCanvas && doesCanvasLookPainted(canvasElement)) {
-                firstFrameRenderedRef.current = true;
-                progressRef.current = 1;
-                setProgress(1);
-                setDebugAttr("data-lcc-first-frame", "true");
-                markDebugEvent("firstFrameRendered", { loadId });
-                logLccDebug("first frame rendered, loading complete");
+
+              // 条件1: canvas 存在模型像素
+              const hasModelContent = hasVisibleCanvas && requiresModelContentVisible(canvasElement);
+
+              // 条件2: LCC 核心资源已开始加载
+              const hasLccResourceActivity = lccResourceCompletedCountRef.current > 0;
+
+              // 条件3: LCC 核心资源趋于稳定（最近一段时间没有新资源开始）
+              const lccResourceIdle =
+                lccResourceLastEndAtRef.current !== null &&
+                (lccResourceLastStartAtRef.current === null ||
+                 lccResourceLastStartAtRef.current <= lccResourceLastEndAtRef.current) &&
+                now - lccResourceLastEndAtRef.current >= LCC_FIRST_FRAME_RESOURCE_IDLE_MS;
+
+              const canAdvanceContentFrame = hasModelContent && hasLccResourceActivity && lccResourceIdle;
+
+              if (canAdvanceContentFrame) {
+                firstFrameContentFramesRef.current += 1;
+                if (firstFrameContentFramesRef.current >= LCC_FIRST_FRAME_CONTENT_FRAMES) {
+                  if (firstFrameContentReadyAtRef.current === null) {
+                    firstFrameContentReadyAtRef.current = now;
+                  }
+                  // 额外延迟 LCC_FIRST_FRAME_DELAY_MS 关闭，确保纹理等资源就绪
+                  if (now - firstFrameContentReadyAtRef.current >= LCC_FIRST_FRAME_DELAY_MS) {
+                    firstFrameRenderedRef.current = true;
+                    progressRef.current = 1;
+                    setProgress(1);
+                    setDebugAttr("data-lcc-first-frame", "true");
+                    markDebugEvent("firstFrameRendered", { loadId });
+                    logLccDebug("model content visible, first frame complete", {
+                      contentFrames: firstFrameContentFramesRef.current,
+                      lccResources: lccResourceCompletedCountRef.current,
+                    });
+                  } else {
+                    setDebugAttr("data-lcc-debug-first-frame-wait", "post-delay");
+                  }
+                } else {
+                  setDebugAttr("data-lcc-debug-first-frame-wait", `content-frames:${firstFrameContentFramesRef.current}/${LCC_FIRST_FRAME_CONTENT_FRAMES}`);
+                }
               } else {
-                setDebugAttr("data-lcc-debug-first-frame-wait", "true");
+                firstFrameContentFramesRef.current = 0;
+                firstFrameContentReadyAtRef.current = null;
+                if (!hasModelContent) {
+                  setDebugAttr("data-lcc-debug-first-frame-wait", "wait-model-pixels");
+                } else if (!hasLccResourceActivity) {
+                  setDebugAttr("data-lcc-debug-first-frame-wait", "wait-lcc-resources");
+                } else {
+                  setDebugAttr("data-lcc-debug-first-frame-wait", "wait-resource-idle");
+                }
+              }
+            }
+
+            // 每帧采样 LCC 核心资源的 PerformanceObserver 条目
+            if (typeof performance !== "undefined" && performance.getEntriesByType) {
+              try {
+                const resourceEntries = performance.getEntriesByType("resource");
+                let activeCount = 0;
+                let completedCount = 0;
+                let lastStart = lccResourceLastStartAtRef.current;
+                let lastEnd = lccResourceLastEndAtRef.current;
+                for (const entry of resourceEntries) {
+                  try {
+                    const url = new URL(entry.name, window.location.href);
+                    if (!LCC_CORE_RESOURCE_PATTERNS.test(url.pathname)) continue;
+                    if (entry.duration === 0 && (entry as PerformanceResourceTiming).responseEnd === 0) {
+                      activeCount += 1;
+                      if (lastStart === null || entry.startTime > lastStart) lastStart = entry.startTime;
+                    } else {
+                      completedCount += 1;
+                      const respEnd = (entry as PerformanceResourceTiming).responseEnd;
+                      if (respEnd > 0 && (lastEnd === null || respEnd > lastEnd)) lastEnd = respEnd;
+                    }
+                  } catch {
+                    // 忽略跨域或无效 URL 条目
+                  }
+                }
+                lccResourceActiveCountRef.current = activeCount;
+                lccResourceCompletedCountRef.current = completedCount;
+                if (lastStart !== null) lccResourceLastStartAtRef.current = lastStart;
+                if (lastEnd !== null) lccResourceLastEndAtRef.current = lastEnd;
+                setDebugAttr("data-lcc-debug-lcc-resources", `active=${activeCount} completed=${completedCount}`);
+              } catch {
+                // Performance API 不可用时忽略
               }
             }
           } catch (error) {
