@@ -501,6 +501,11 @@ export function UploadTaskProvider({ children }: { children: ReactNode }) {
             record.modelId == null &&
             record.modelFileId == null
           ) {
+            // 如果本地有对应 uploadTaskId 且正在运行的任务，不转为 interrupted
+            const localOwned = localTasksRef.current.some(
+              (t) => t.uploadTaskId === record.id && t.status === "running",
+            );
+            if (localOwned) return record;
             return {
               ...record,
               status: "interrupted" as const,
@@ -1256,6 +1261,20 @@ export function UploadTaskProvider({ children }: { children: ReactNode }) {
 
     void refreshPersistedTasks();
   }, [bootstrapping, isAuthed, refreshPersistedTasks, syncPersistedTasks]);
+
+  // 上传中监听 beforeunload，提醒用户离开将丢失本地文件
+  useEffect(() => {
+    const hasRunningLocalUpload = localTasksRef.current.some(
+      (t) => t.status === "running" || t.status === "queued",
+    );
+    if (!hasRunningLocalUpload) return;
+
+    const handler = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+    };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [localTasks]);
 
   const value: UploadTaskContextValue = {
     tasks,

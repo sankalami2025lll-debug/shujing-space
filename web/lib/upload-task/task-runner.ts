@@ -382,12 +382,21 @@ export async function runUploadTask(
     stopHeartbeat();
     const taskError = createTaskError(currentStage, error);
     if (task.uploadTaskId != null) {
+      const taskAgeFromCreation =
+        task.createdAt ? Date.now() - new Date(task.createdAt).getTime() : 0;
+      console.warn(
+        `[UploadRunner] upload failed | taskId=${task.uploadTaskId} age=${Math.round(taskAgeFromCreation / 1000)}s stage=${currentStage || "-"}`,
+        error,
+      );
       try {
         const verified = await verifyRemoteTaskStatus(task.uploadTaskId);
         if (verified.shouldBackendIntervene) {
           if (verified.remoteTask) {
             hooks.onRemoteTaskUpdate?.(verified.remoteTask);
           }
+          stopHeartbeat();
+          clearInterval(stallCheckTimer);
+          hooks.onAbortController(null);
           return { task: verified.remoteTask!, model: null as unknown as NonNullable<PublishUploadTaskResult["model"]> };
         }
       } catch {
