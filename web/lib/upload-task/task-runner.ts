@@ -25,6 +25,7 @@ import type {
 import { toPersistedStage } from "./types";
 
 const HEARTBEAT_INTERVAL_MS = 15_000;
+const STALL_TIMEOUT_MS = 60_000;
 const parsedMultipartModelMinMb = Number(
   process.env.NEXT_PUBLIC_MULTIPART_MODEL_MIN_MB ?? "0",
 );
@@ -92,6 +93,23 @@ export async function runUploadTask(
   let latestRemoteTask: PersistedUploadTaskRecord | null = null;
   let modelMultipartStarted = false;
   let modelMultipartCompleted = false;
+  let stallDeadline = Date.now() + STALL_TIMEOUT_MS;
+
+  const updateStallDeadline = () => {
+    stallDeadline = Date.now() + STALL_TIMEOUT_MS;
+  };
+
+  const checkStall = () => {
+    if (Date.now() > stallDeadline) {
+      throw new ApiError(
+        `上传卡住超过 ${STALL_TIMEOUT_MS / 1000} 秒，请刷新页面后重试。`,
+        -1,
+        408,
+      );
+    }
+  };
+
+  const stallCheckTimer = setInterval(checkStall, 10_000);
 
   const syncRemoteTask = async (payload: {
     status?: "running" | "processing" | "failed" | "canceled" | "interrupted";
@@ -133,8 +151,19 @@ export async function runUploadTask(
   const setStage = (stage: UploadTaskStage) => {
     currentStage = stage;
     hooks.onStageChange(stage);
+    updateStallDeadline();
   };
   hooks.onAbortController(abortController);
+
+  const onModelProgress = (progress: UploadProgress) => {
+    updateStallDeadline();
+    hooks.onModelProgress(progress);
+  };
+
+  const onCoverProgress = (progress: UploadProgress) => {
+    updateStallDeadline();
+    hooks.onCoverProgress(progress);
+  };
 
   try {
     await syncRemoteTask({
@@ -177,7 +206,7 @@ export async function runUploadTask(
               currentModelObjectKey: session.objectKey,
             }).catch(() => undefined);
           },
-          onProgress: hooks.onModelProgress,
+          onProgress: onModelProgress,
         });
 
         modelMultipartCompleted = true;
@@ -210,7 +239,7 @@ export async function runUploadTask(
           modelPresign.requiredHeaders,
           {
             signal: abortController.signal,
-            onProgress: hooks.onModelProgress,
+            onProgress: onModelProgress,
           },
         );
 
@@ -269,7 +298,7 @@ export async function runUploadTask(
         coverPresign.requiredHeaders,
         {
           signal: abortController.signal,
-          onProgress: hooks.onCoverProgress,
+          onProgress: onCoverProgress,
         },
       );
 
@@ -355,6 +384,7 @@ export async function runUploadTask(
     }
     throw taskError;
   } finally {
+    clearInterval(stallCheckTimer);
     stopHeartbeat();
     hooks.onAbortController(null);
   }

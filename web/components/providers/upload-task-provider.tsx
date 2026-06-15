@@ -486,11 +486,30 @@ export function UploadTaskProvider({ children }: { children: ReactNode }) {
   const refreshPersistedTasks = useCallback(() => {
     return getMyUploadTasks()
       .then(async (records) => {
-        const hydrated = records.map(hydratePersistedTask);
-        syncPersistedTasks(hydrated);
+        // 对于 status=running + modelId=null 的任务（数据库中的卡死任务），
+        // 刷新页面后 File 对象已丢失，若没有 multipart session 则无法恢复，
+        // 标记为 interrupted 并提示用户重新选择文件。
+        const recordsWithInterruptedFallback = records.map((record) => {
+          if (
+            record.status === "running" &&
+            record.modelId == null &&
+            record.currentModelObjectKey
+          ) {
+            return {
+              ...record,
+              status: "interrupted" as const,
+              lastErrorMessage: record.lastErrorMessage ||
+                "浏览器无法恢复本地文件，请重新选择文件上传。",
+            };
+          }
+          return record;
+        });
+        const hydratedFallback = recordsWithInterruptedFallback.map(hydratePersistedTask);
+
+        syncPersistedTasks(hydratedFallback);
         const resumed = await Promise.all(
-          hydrated.map(async (task, index) => {
-            const record = records[index];
+          hydratedFallback.map(async (task, index) => {
+            const record = recordsWithInterruptedFallback[index];
             if (!shouldFetchResumeSession(record)) {
               return task;
             }
@@ -506,7 +525,7 @@ export function UploadTaskProvider({ children }: { children: ReactNode }) {
           }),
         );
         syncPersistedTasks(resumed);
-        return records;
+        return recordsWithInterruptedFallback;
       })
       .catch(() => {
         syncPersistedTasks([]);
