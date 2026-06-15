@@ -70,6 +70,17 @@ const envSchema = z.object({
   // 逗号分隔的允许 host 列表（只写 host，不写完整 URL，例如 sketchfab.com,lcc-viewer.xgrids.cloud）；
   // 为空时由 configuration 回退到默认安全列表（DEFAULT_VIEWER_ALLOWED_HOSTS）。
   VIEWER_URL_ALLOWED_HOSTS: z.string().default(''),
+  // —— 阿里云短信服务（上线前安全修复：验证码短信接入）——
+  // AccessKey：阿里云 RAM 子账号 AccessKey ID（生产必需）
+  ALIYUN_SMS_ACCESS_KEY_ID: z.string().default(''),
+  // AccessKey Secret：对应的 Secret（生产必需）
+  ALIYUN_SMS_ACCESS_KEY_SECRET: z.string().default(''),
+  // SignName：短信签名（需在阿里云 SMS 控制台审核通过，生产必需）
+  ALIYUN_SMS_SIGN_NAME: z.string().default(''),
+  // TemplateCode：验证码模板 Code（生产必需）
+  ALIYUN_SMS_TEMPLATE_CODE: z.string().default(''),
+  // Endpoint：阿里云 SMS API 端点（固定值，一般无需修改）
+  ALIYUN_SMS_ENDPOINT: z.string().default('dysmsapi.aliyuncs.com'),
 })
   // —— 生产环境 JWT 密钥强校验（上线前安全修复 2A）——
   // 仅在 NODE_ENV=production 下生效；开发/测试环境保持兼容，不影响本地 pnpm dev。
@@ -128,6 +139,24 @@ const envSchema = z.object({
         message:
           '生产环境 CORS_ORIGIN 不能包含 localhost 或 127.0.0.1，请配置为前端正式域名，例如 https://shujingspace.com',
       });
+    }
+
+    // 6) 阿里云短信生产强制校验：4 个核心变量必须非空
+    const smsKeys = [
+      { key: 'ALIYUN_SMS_ACCESS_KEY_ID', label: 'AccessKey ID' },
+      { key: 'ALIYUN_SMS_ACCESS_KEY_SECRET', label: 'AccessKey Secret' },
+      { key: 'ALIYUN_SMS_SIGN_NAME', label: '短信签名' },
+      { key: 'ALIYUN_SMS_TEMPLATE_CODE', label: '短信模板 Code' },
+    ] as const;
+    for (const { key, label } of smsKeys) {
+      const value = (env as Record<string, unknown>)[key] as string | undefined;
+      if (!value?.trim()) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: [key],
+          message: `生产环境 ${key}（${label}）不能为空，请配置阿里云短信参数`,
+        });
+      }
     }
   });
 

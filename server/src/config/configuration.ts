@@ -61,6 +61,14 @@ export function configuration() {
         return fromEnv.length > 0 ? fromEnv : [...DEFAULT_VIEWER_ALLOWED_HOSTS];
       })(),
     },
+    // 阿里云短信服务
+    sms: {
+      accessKeyId: env.ALIYUN_SMS_ACCESS_KEY_ID,
+      accessKeySecret: env.ALIYUN_SMS_ACCESS_KEY_SECRET,
+      signName: env.ALIYUN_SMS_SIGN_NAME,
+      templateCode: env.ALIYUN_SMS_TEMPLATE_CODE,
+      endpoint: env.ALIYUN_SMS_ENDPOINT,
+    },
   };
 }
 

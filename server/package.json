@@ -24,6 +24,8 @@
     "test": "jest"
   },
   "dependencies": {
+    "@alicloud/dysmsapi20170525": "^4.5.1",
+    "@alicloud/openapi-client": "^0.4.15",
     "@aws-sdk/client-s3": "^3.1057.0",
     "@aws-sdk/s3-request-presigner": "^3.1057.0",
     "@nestjs/common": "^10.4.15",

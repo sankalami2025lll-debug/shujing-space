@@ -16,6 +16,7 @@ import { OptionalJwtAuthGuard } from './guards/optional-jwt-auth.guard';
 import { RolesGuard } from './guards/roles.guard';
 import { TokenService } from './token.service';
 import { VerificationService } from './verification.service';
+import { SmsModule } from '../sms/sms.module';
 
 // 从 JwtModuleOptions 推导出 expiresIn 的精确可接受类型（number | StringValue）
 type ExpiresInValue = NonNullable<JwtModuleOptions['signOptions']>['expiresIn'];
@@ -43,6 +44,7 @@ type ExpiresInValue = NonNullable<JwtModuleOptions['signOptions']>['expiresIn'];
         },
       }),
     }),
+    SmsModule,
   ],
   controllers: [AuthController],
   providers: [
