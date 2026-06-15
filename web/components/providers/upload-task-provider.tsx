@@ -489,11 +489,13 @@ export function UploadTaskProvider({ children }: { children: ReactNode }) {
         // 对于 status=running + modelId=null 的任务（数据库中的卡死任务），
         // 刷新页面后 File 对象已丢失，若没有 multipart session 则无法恢复，
         // 标记为 interrupted 并提示用户重新选择文件。
+        // 即使有 currentModelObjectKey（文件已上传到 OSS），但 model_file_id 为 null
+        // 说明文件上传/callback 未完成，本地没有 File 对象就无法继续。
         const recordsWithInterruptedFallback = records.map((record) => {
           if (
-            record.status === "running" &&
+            (record.status === "running" || record.status === "processing") &&
             record.modelId == null &&
-            record.currentModelObjectKey
+            record.modelFileId == null
           ) {
             return {
               ...record,

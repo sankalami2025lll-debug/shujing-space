@@ -27,13 +27,14 @@ import { toPersistedStage } from "./types";
 const HEARTBEAT_INTERVAL_MS = 15_000;
 const STALL_TIMEOUT_MS = 60_000;
 const parsedMultipartModelMinMb = Number(
-  process.env.NEXT_PUBLIC_MULTIPART_MODEL_MIN_MB ?? "0",
+  process.env.NEXT_PUBLIC_MULTIPART_MODEL_MIN_MB ?? "5",
 );
 const MULTIPART_MODEL_MIN_MB =
   Number.isFinite(parsedMultipartModelMinMb) && parsedMultipartModelMinMb >= 0
     ? parsedMultipartModelMinMb
     : 0;
 const MULTIPART_MODEL_THRESHOLD_BYTES = MULTIPART_MODEL_MIN_MB * 1024 * 1024;
+const ENABLE_UPLOAD_DEBUG_LOG = true;
 
 interface RunUploadTaskHooks {
   onAbortController: (controller: AbortController | null) => void;
@@ -87,6 +88,16 @@ export async function runUploadTask(
   hooks: RunUploadTaskHooks,
 ): Promise<PublishUploadTaskResult> {
   const { draft } = task;
+  if (ENABLE_UPLOAD_DEBUG_LOG) {
+    console.log(
+      `[upload-runner] runUploadTask entered | uploadTaskId=${task.uploadTaskId} stage=${(task as any)['stage' as keyof UploadTask]} modelFile=${draft.modelFile?.name ?? 'N/A'} size=${draft.modelFile?.size ?? 0} coverFile=${draft.coverFile?.name ?? 'N/A'}`,
+    );
+  }
+  const debug = (msg: string) => {
+    if (ENABLE_UPLOAD_DEBUG_LOG) {
+      console.log(`[upload-runner] ${msg}`);
+    }
+  };
   const abortController = new AbortController();
   let currentStage: UploadTaskStage = "queued";
   let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
@@ -143,6 +154,7 @@ export async function runUploadTask(
   const startHeartbeat = () => {
     stopHeartbeat();
     if (task.uploadTaskId == null) return;
+    debug(`startHeartbeat | taskId=${task.uploadTaskId} interval=${HEARTBEAT_INTERVAL_MS}ms`);
     heartbeatTimer = setInterval(() => {
       void sendHeartbeat().catch(() => undefined);
     }, HEARTBEAT_INTERVAL_MS);

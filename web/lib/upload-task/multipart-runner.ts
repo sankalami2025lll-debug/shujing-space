@@ -16,6 +16,13 @@ const DEFAULT_MULTIPART_CONCURRENCY = 1;
 const DEFAULT_PART_RETRY_LIMIT = 3;
 const DEFAULT_PART_PUT_TIMEOUT_MS = 300_000;
 const ENABLE_MULTIPART_FETCH_PUT = true;
+const ENABLE_UPLOAD_DEBUG_LOG = true;
+
+const debug = (msg: string) => {
+  if (ENABLE_UPLOAD_DEBUG_LOG) {
+    console.log(`[upload-runner] ${msg}`);
+  }
+};
 
 interface MultipartRunnerOptions {
   taskId: number;
@@ -278,21 +285,33 @@ export async function runMultipartUploadTask(
     signal,
     onSessionReady,
   } = options;
+  debug(`runMultipartUploadTask entered | taskId=${taskId} kind=${kind} file=${file.name} size=${file.size}`);
 
   throwIfAborted(signal);
 
-  const session = await initMultipartUploadTask(taskId, {
-    kind,
-    fileName: file.name,
-    mime: file.type || "application/octet-stream",
-    size: file.size,
-    lastModified: file.lastModified,
-  });
-  onSessionReady?.(session);
-  return await resumeMultipartUploadTask({
-    ...options,
-    session,
-  });
+  const initAbortController = new AbortController();
+  const initTimeout = setTimeout(() => {
+    initAbortController.abort();
+  }, 60_000);
+
+  try {
+    const session = await initMultipartUploadTask(taskId, {
+      kind,
+      fileName: file.name,
+      mime: file.type || "application/octet-stream",
+      size: file.size,
+      lastModified: file.lastModified,
+    }, { signal: initAbortController.signal });
+    clearTimeout(initTimeout);
+    onSessionReady?.(session);
+    return await resumeMultipartUploadTask({
+      ...options,
+      session,
+    });
+  } catch (error) {
+    clearTimeout(initTimeout);
+    throw error;
+  }
 }
 
 export async function resumeMultipartUploadTask(
@@ -309,6 +328,7 @@ export async function resumeMultipartUploadTask(
     concurrency = DEFAULT_MULTIPART_CONCURRENCY,
     maxRetries = DEFAULT_PART_RETRY_LIMIT,
   } = options;
+  debug(`resumeMultipartUploadTask | taskId=${taskId} kind=${kind} file=${file.name} uploadedParts=${session.uploadedParts.length} totalParts=${session.totalParts}`);
 
   throwIfAborted(signal);
 
@@ -349,6 +369,7 @@ export async function resumeMultipartUploadTask(
     for (let attempt = 1; attempt <= maxRetries; attempt += 1) {
       throwIfAborted(signal);
       try {
+        debug(`part presign | partNumber=${partNumber} attempt=${attempt}`);
         const presigned = await presignMultipartParts(taskId, kind, {
           partNumbers: [partNumber],
         });
@@ -356,6 +377,7 @@ export async function resumeMultipartUploadTask(
         if (!signedPart) {
           throw new ApiError(`分片 ${partNumber} 未返回上传地址。`, -1, 500);
         }
+        debug(`part PUT start | partNumber=${partNumber} attempt=${attempt} url=${signedPart.uploadUrl.slice(0, 60)}...`);
 
         inflightPartBytes.set(partNumber, 0);
         emitProgress();
@@ -428,6 +450,7 @@ export async function resumeMultipartUploadTask(
   await Promise.all(workers);
   throwIfAborted(signal);
 
+  debug(`all parts uploaded, calling completeMultipartUpload | taskId=${taskId} kind=${kind}`);
   const result = await completeMultipartUpload(taskId, kind);
   onSessionUpdate?.({
     ...buildSessionSnapshot(session, completedPartsMap),

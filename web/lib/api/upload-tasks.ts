@@ -219,10 +219,12 @@ export function bindUploadTaskFile(
 export function initMultipartUploadTask(
   taskId: number,
   payload: InitMultipartUploadTaskPayload,
+  options?: { signal?: AbortSignal },
 ): Promise<UploadMultipartSessionRecord> {
   return http.post<UploadMultipartSessionRecord>(
     `/upload-tasks/${taskId}/multipart/init`,
     payload,
+    options,
   );
 }
 
