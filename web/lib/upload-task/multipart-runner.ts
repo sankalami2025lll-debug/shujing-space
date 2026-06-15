@@ -34,6 +34,10 @@ interface MultipartRunnerOptions {
   onProgress?: (progress: UploadProgress) => void;
   onSessionReady?: (session: UploadMultipartSessionRecord) => void;
   onSessionUpdate?: (session: UploadMultipartSessionRecord) => void;
+  /** 每片开始上传时回调，可用于外部 stall detector 更新活动标记 */
+  onPartUploadStart?: (partNumber: number) => void;
+  /** 每片上传完成（成功或最终失败）时回调 */
+  onPartUploadEnd?: (partNumber: number) => void;
 }
 
 interface MultipartResumeOptions extends Omit<MultipartRunnerOptions, "onSessionReady"> {
@@ -327,6 +331,8 @@ export async function resumeMultipartUploadTask(
     onSessionUpdate,
     concurrency = DEFAULT_MULTIPART_CONCURRENCY,
     maxRetries = DEFAULT_PART_RETRY_LIMIT,
+    onPartUploadStart,
+    onPartUploadEnd,
   } = options;
   debug(`resumeMultipartUploadTask | taskId=${taskId} kind=${kind} file=${file.name} uploadedParts=${session.uploadedParts.length} totalParts=${session.totalParts}`);
 
@@ -355,6 +361,7 @@ export async function resumeMultipartUploadTask(
 
   const pendingPartNumbers = [...new Set(session.missingParts)].sort((a, b) => a - b);
   const uploadPart = async (partNumber: number) => {
+    onPartUploadStart?.(partNumber);
     const { byteStart, byteEnd } = getPartBounds(file, partNumber, session.partSize);
     const payload = await getPartPayload(file, partNumber, session.partSize);
     const partSize = getPartSize(payload);
@@ -410,11 +417,13 @@ export async function resumeMultipartUploadTask(
         });
         emitSessionUpdate();
         emitProgress();
+        onPartUploadEnd?.(partNumber);
         return;
       } catch (error) {
         inflightPartBytes.delete(partNumber);
         emitProgress();
         if (error instanceof UploadAbortedError) {
+          onPartUploadEnd?.(partNumber);
           throw error;
         }
         // 403/401 签名错误不可重试，直接抛出
@@ -422,6 +431,7 @@ export async function resumeMultipartUploadTask(
           error instanceof ApiError &&
           (error.status === 403 || error.status === 401)
         ) {
+          onPartUploadEnd?.(partNumber);
           throw error;
         }
         lastError = error;
@@ -431,6 +441,7 @@ export async function resumeMultipartUploadTask(
       }
     }
 
+    onPartUploadEnd?.(partNumber);
     throw new ApiError(
       `第 ${partNumber} 个分片上传失败，已重试 ${maxRetries} 次，请检查网络后重试。`,
       -1,

@@ -26,6 +26,7 @@ import { toPersistedStage } from "./types";
 
 const HEARTBEAT_INTERVAL_MS = 15_000;
 const STALL_TIMEOUT_MS = 60_000;
+const STALL_TIMEOUT_PART_PUT_MS = 360_000;
 const parsedMultipartModelMinMb = Number(
   process.env.NEXT_PUBLIC_MULTIPART_MODEL_MIN_MB ?? "50",
 );
@@ -105,22 +106,49 @@ export async function runUploadTask(
   let modelMultipartStarted = false;
   let modelMultipartCompleted = false;
   let stallDeadline = Date.now() + STALL_TIMEOUT_MS;
+  let activePartUploadCount = 0;
+
+  const currentStallTimeout = () =>
+    activePartUploadCount > 0 ? STALL_TIMEOUT_PART_PUT_MS : STALL_TIMEOUT_MS;
 
   const updateStallDeadline = () => {
-    stallDeadline = Date.now() + STALL_TIMEOUT_MS;
+    stallDeadline = Date.now() + currentStallTimeout();
   };
 
-  const checkStall = () => {
-    if (Date.now() > stallDeadline) {
-      throw new ApiError(
-        `上传卡住超过 ${STALL_TIMEOUT_MS / 1000} 秒，请刷新页面后重试。`,
-        -1,
-        408,
-      );
+  const setActivePartUpload = (count: number) => {
+    activePartUploadCount = count;
+    updateStallDeadline();
+  };
+
+  const checkStall = async () => {
+    const deadline = stallDeadline;
+    if (Date.now() <= deadline) return;
+
+    // stall 触发前先查询后端一次确认没有进展
+    if (task.uploadTaskId != null) {
+      try {
+        const verified = await verifyRemoteTaskStatus(task.uploadTaskId);
+        if (verified.shouldBackendIntervene) {
+          if (verified.remoteTask) {
+            hooks.onRemoteTaskUpdate?.(verified.remoteTask);
+          }
+          return;
+        }
+      } catch {
+        // 网络异常不阻塞抛错
+      }
     }
+
+    throw new ApiError(
+      `上传卡住超过 ${currentStallTimeout() / 1000} 秒，请刷新页面后重试。`,
+      -1,
+      408,
+    );
   };
 
-  const stallCheckTimer = setInterval(checkStall, 10_000);
+  const stallCheckTimer = setInterval(() => {
+    void checkStall();
+  }, 10_000);
 
   const syncRemoteTask = async (payload: {
     status?: "running" | "processing" | "failed" | "canceled" | "interrupted";
@@ -218,6 +246,8 @@ export async function runUploadTask(
               currentModelObjectKey: session.objectKey,
             }).catch(() => undefined);
           },
+          onPartUploadStart: () => setActivePartUpload(1),
+          onPartUploadEnd: () => setActivePartUpload(0),
           onProgress: onModelProgress,
         });
 
