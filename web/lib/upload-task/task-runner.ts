@@ -383,6 +383,17 @@ export async function runUploadTask(
     const taskError = createTaskError(currentStage, error);
     if (task.uploadTaskId != null) {
       try {
+        const verified = await verifyRemoteTaskStatus(task.uploadTaskId);
+        if (verified.shouldBackendIntervene) {
+          if (verified.remoteTask) {
+            hooks.onRemoteTaskUpdate?.(verified.remoteTask);
+          }
+          return { task: verified.remoteTask!, model: null as unknown as NonNullable<PublishUploadTaskResult["model"]> };
+        }
+      } catch {
+        // 二次验证异常（网络不通等）不回退，仍然直接写入失败。
+      }
+      try {
         latestRemoteTask = await updateUploadTaskStatus(task.uploadTaskId, {
           status: "failed",
           stage: "failed",
@@ -399,5 +410,29 @@ export async function runUploadTask(
     clearInterval(stallCheckTimer);
     stopHeartbeat();
     hooks.onAbortController(null);
+  }
+}
+
+async function verifyRemoteTaskStatus(
+  uploadTaskId: number,
+): Promise<{ shouldBackendIntervene: boolean; remoteTask: PersistedUploadTaskRecord | null }> {
+  try {
+    const { getMyUploadTasks } = await import("@/lib/api/upload-tasks");
+    const all = await getMyUploadTasks();
+    const remote = all.find((r) => r.id === uploadTaskId);
+    if (!remote) {
+      return { shouldBackendIntervene: false, remoteTask: null };
+    }
+    if (
+      remote.status === "processing" ||
+      remote.status === "published" ||
+      remote.modelId != null ||
+      remote.modelFileId != null
+    ) {
+      return { shouldBackendIntervene: true, remoteTask: remote };
+    }
+    return { shouldBackendIntervene: false, remoteTask: remote };
+  } catch {
+    return { shouldBackendIntervene: false, remoteTask: null };
   }
 }
