@@ -9,3 +9,4 @@ allowBuilds:
   "@nestjs/core": true
   "@scarf/scarf": true
   esbuild: true
+  "@alicloud/openapi-core": true
