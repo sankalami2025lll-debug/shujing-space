@@ -1,12 +1,5 @@
 "use client";
 
-/**
- * 页面名称：模型详情页 ModelDetail
- * 页面用途：展示单个模型的三维 Viewer 与元信息
- * 主要功能：GET /api/models/:id、iframe 内嵌 / 占位 / 新窗口打开、全屏/重置/分享
- * 对应文档：页面功能注释文档/06_模型详情_ModelDetail.md
- * 说明：步骤 7C 已接收藏写接口与 TrainingModal。全站 NavBar 由 SiteChrome 挂载。
- */
 import { useState, useEffect, useCallback, useRef, useMemo, type MouseEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -44,7 +37,6 @@ function toTagArray(value: unknown): string[] {
   return Array.isArray(value) ? (value as string[]) : [];
 }
 
-// mergeSceneLabels：合并 tags 与 scenes 用于场景标签展示（后端两字段均可能返回）
 function mergeSceneLabels(tags: unknown, scenes: unknown): string[] {
   const merged = [...toTagArray(tags), ...toTagArray(scenes)];
   return [...new Set(merged)];
@@ -68,6 +60,40 @@ interface ModelDetailPageProps {
   modelId: string;
 }
 
+function RightPanelSkeleton() {
+  return (
+    <div className="p-5 space-y-4 animate-pulse">
+      <div className="h-5 w-24 rounded-full bg-white/8" />
+      <div className="mt-3 h-6 w-4/5 rounded bg-white/8" />
+      <div className="space-y-2 pt-2">
+        <div className="h-4 w-2/5 rounded bg-white/6" />
+        <div className="h-4 w-3/5 rounded bg-white/6" />
+        <div className="h-4 w-1/3 rounded bg-white/6" />
+      </div>
+      <div className="h-16 rounded-xl bg-white/5" />
+      <div className="space-y-2">
+        <div className="h-4 w-1/4 rounded bg-white/6" />
+        <div className="flex gap-1.5">
+          <div className="h-6 w-14 rounded-full bg-white/6" />
+          <div className="h-6 w-16 rounded-full bg-white/6" />
+          <div className="h-6 w-12 rounded-full bg-white/6" />
+        </div>
+      </div>
+      <div className="space-y-2">
+        <div className="h-4 w-1/4 rounded bg-white/6" />
+        <div className="space-y-1.5">
+          <div className="h-3.5 w-full rounded bg-white/5" />
+          <div className="h-3.5 w-4/5 rounded bg-white/5" />
+        </div>
+      </div>
+      <div className="space-y-2 pt-2">
+        <div className="h-11 w-full rounded-xl bg-white/6" />
+        <div className="h-11 w-full rounded-xl bg-white/6" />
+      </div>
+    </div>
+  );
+}
+
 export default function ModelDetailPage({ modelId }: ModelDetailPageProps) {
   const router = useRouter();
   const { user, isAuthed } = useAuth();
@@ -80,27 +106,19 @@ export default function ModelDetailPage({ modelId }: ModelDetailPageProps) {
   const [detailError, setDetailError] = useState<string | null>(null);
 
   const [shareToast, setShareToast] = useState(false);
-  // saved / favs：收藏态与计数，用后端 isFavorited / favoritesCount 初始化并同步
   const [saved, setSaved] = useState(false);
   const [favs, setFavs] = useState(0);
   const [savePending, setSavePending] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [deletePending, setDeletePending] = useState(false);
-  // showTraining：训练数据服务申请弹窗显隐
   const [showTraining, setShowTraining] = useState(false);
-  // viewedRef：记录已打点的模型 id，避免 React 严格模式 / 重渲染导致重复打点（本次会话内最小去重）
   const viewedRef = useRef<number | null>(null);
 
-  // viewerReady / viewerMountSeed / viewerHostRef：延迟挂载 ModelViewerShell
-  // 客户端路由进入详情页时，viewer 容器需要等布局稳定后才能正确初始化
-  // 否则首次 renderer.setSize 读到 clientWidth/clientHeight 为 0，导致模型不可见
   const modelViewerAreaRef = useRef<HTMLDivElement | null>(null);
   const viewerHostRef = useRef<HTMLDivElement | null>(null);
   const [viewerReady, setViewerReady] = useState(false);
   const [viewerMountSeed, setViewerMountSeed] = useState(0);
-  // lccIframeModelLoaded：仅表示 iframe 内 LCC 模型真正 loaded，不表示 iframe 文档已加载
   const [lccIframeModelLoaded, setLccIframeModelLoaded] = useState(false);
-  // lccIframeViewerErrored：仅用于外层透出 iframe 内真实 error 态，避免品牌 Loading 永久遮住错误信息
   const [lccIframeViewerErrored, setLccIframeViewerErrored] = useState(false);
   const lccIframeRef = useRef<HTMLIFrameElement | null>(null);
   const lccIframeVisibilityPollRef = useRef<number | null>(null);
@@ -110,7 +128,6 @@ export default function ModelDetailPage({ modelId }: ModelDetailPageProps) {
     router.push("/auth");
   }, [router]);
 
-  // 拉取模型详情；无效 id 或 404 时展示友好空状态
   useEffect(() => {
     if (!idValid) {
       setDetailLoading(false);
@@ -147,13 +164,10 @@ export default function ModelDetailPage({ modelId }: ModelDetailPageProps) {
     };
   }, [idValid, numericId]);
 
-  // 浏览量打点（2E）：详情页打开后对当前模型调用一次 POST /api/models/:id/view，
-  //   成功后仅在本地状态同步最新 viewsCount（不新增 UI）；失败静默，不影响详情展示。
-  //   GET /api/models/:id 保持只读语义，浏览量由本打点单独累加。
   useEffect(() => {
     if (!idValid) return;
     if (detail && detail.processingStatus !== "ready") return;
-    if (viewedRef.current === numericId) return; // 同一模型仅打点一次
+    if (viewedRef.current === numericId) return;
     viewedRef.current = numericId;
     recordModelView(numericId)
       .then((res) => {
@@ -163,18 +177,10 @@ export default function ModelDetailPage({ modelId }: ModelDetailPageProps) {
             : prev,
         );
       })
-      .catch(() => {
-        // 打点失败静默：浏览量为辅助统计，不阻断详情浏览
-      });
+      .catch(() => {});
   }, [detail, idValid, numericId]);
 
-  /**
-   * viewerReady 延迟挂载：等待 viewer 外层容器布局稳定后再渲染 ModelViewerShell。
-   * 客户端路由进入时，DOM 尚未完成布局，直接挂载 WebGL renderer 会读到错误的容器尺寸。
-   * detail.id / viewerUrl / modelUrl / fileFormat 任一变化时重新走延迟挂载流程。
-   */
   useEffect(() => {
-    // 模型数据变化时先重置 viewerReady，确保旧实例完全卸载后再挂载新实例
     setViewerReady(false);
 
     let disposed = false;
@@ -190,7 +196,6 @@ export default function ModelDetailPage({ modelId }: ModelDetailPageProps) {
 
       const el = viewerHostRef.current;
       if (!el) {
-        // 容器还未挂载，继续等待
         if (attempts++ < maxAttempts) {
           requestAnimationFrame(check);
         } else {
@@ -204,7 +209,6 @@ export default function ModelDetailPage({ modelId }: ModelDetailPageProps) {
       const height = rect?.height ?? 0;
 
       if (width > 100 && height > 100) {
-        // 尺寸有效：延迟一帧确保浏览器完成合成，然后挂载
         requestAnimationFrame(() => {
           if (disposed) return;
           forceMountViewer();
@@ -216,11 +220,9 @@ export default function ModelDetailPage({ modelId }: ModelDetailPageProps) {
         requestAnimationFrame(check);
         return;
       }
-      // 超过最大尝试次数后强制进入挂载分支，避免非 LCC 模型永远停在外层 Loading。
       forceMountViewer();
     };
 
-    // 跳过 2 帧等布局初始化
     requestAnimationFrame(() => {
       requestAnimationFrame(check);
     });
@@ -238,7 +240,6 @@ export default function ModelDetailPage({ modelId }: ModelDetailPageProps) {
     setFavs(detail.favoritesCount);
   }, [detail]);
 
-  // isLccModel：统一识别 LCC/LCC2；命中后当前详情页一律进入 iframe 路由 /viewer/lcc/[id]
   const isLcc = isLccModel({
     viewerType: detail?.viewerType ?? "none",
     fileFormat: detail?.fileFormat ?? "",
@@ -250,6 +251,7 @@ export default function ModelDetailPage({ modelId }: ModelDetailPageProps) {
     () => `${detail?.id ?? "pending"}-${detail?.viewerUrl || ""}`,
     [detail?.id, detail?.viewerUrl],
   );
+
   const handleViewerFullscreen = useCallback(async () => {
     const viewerArea = modelViewerAreaRef.current;
     if (!viewerArea) return;
@@ -266,7 +268,6 @@ export default function ModelDetailPage({ modelId }: ModelDetailPageProps) {
     }
   }, []);
 
-  // LCC iframe 外层 loading：只根据模型切换重置，不参与 iframe key，避免重复 reload。
   useEffect(() => {
     if (!detail || !isLcc) return;
 
@@ -290,7 +291,6 @@ export default function ModelDetailPage({ modelId }: ModelDetailPageProps) {
       window.clearInterval(lccIframeVisibilityPollRef.current);
       lccIframeVisibilityPollRef.current = null;
     }
-    // 每次 iframe 文档 load 都先重置为未完成，只允许后续 data-lcc-first-frame 轮询将其置为 true。
     setLccIframeModelLoaded(false);
     setLccIframeViewerErrored(false);
 
@@ -314,7 +314,6 @@ export default function ModelDetailPage({ modelId }: ModelDetailPageProps) {
         return;
       }
       if (!childRoot || !childFirstFrame) {
-        // 超时保护：超过30秒后无论子状态如何，强制显示空白 viewer（用户可以刷新重试）
         if (Date.now() - pollStartedAt > 30000) {
           setLccIframeModelLoaded(true);
           if (lccIframeVisibilityPollRef.current !== null) {
@@ -332,13 +331,11 @@ export default function ModelDetailPage({ modelId }: ModelDetailPageProps) {
       }
     };
 
-    // iframe onLoad 只负责开始轮询子文档状态；是否关闭外层 Loading 只看 data-lcc-first-frame。
     lccIframeVisibilityPollRef.current = window.setInterval(() => {
       pollIframeModelLoaded();
     }, 250);
   }, [lccExpectedPath]);
 
-  // 删除确认弹窗：支持 Esc 关闭；删除请求进行中不允许关闭，避免状态混乱。
   useEffect(() => {
     if (!confirmOpen) return;
     const onKeyDown = (event: KeyboardEvent) => {
@@ -350,7 +347,6 @@ export default function ModelDetailPage({ modelId }: ModelDetailPageProps) {
     return () => document.removeEventListener("keydown", onKeyDown);
   }, [confirmOpen, deletePending]);
 
-  // handleSave：收藏/取消收藏。未登录引导登录；乐观更新 + 接口校正 + 失败回滚
   const handleSave = useCallback(async () => {
     if (!detail) return;
     if (!isAuthed) {
@@ -409,46 +405,27 @@ export default function ModelDetailPage({ modelId }: ModelDetailPageProps) {
     setDetail((prev) => (prev ? { ...prev, launchView } : prev));
   }, []);
 
-  if (detailLoading) {
-    return (
-      <div className="relative min-h-[calc(100vh-4rem)] md:min-h-[calc(100vh-72px)] bg-[#0a0a0a]">
-        <ModelLoadingOverlay visible showText={false} />
-      </div>
-    );
-  }
+  // --- 稳定布局 — 始终渲染左右两侧 ---
+  const detailExists = !!detail;
 
-  if (!detail) {
-    return (
-      <div className="min-h-[calc(100vh-4rem)] md:min-h-[calc(100vh-72px)] flex flex-col items-center justify-center gap-3 py-32 text-gray-500 bg-[#0a0a0a]">
-        <div className="w-10 h-10 rounded-2xl border border-white/10 bg-white/5" />
-        <p className="text-[15px]">{detailError ?? "模型不存在或暂未公开"}</p>
-        <Link
-          href="/models"
-          className="mt-2 px-6 py-2.5 rounded-full bg-white/8 border border-white/10 text-[14px] text-gray-200 hover:bg-white/12 hover:border-white/20 transition-all"
-        >
-          返回模型列表
-        </Link>
-      </div>
-    );
-  }
-
-  const isRobot = detail.type === "具身智能机器人训练场景";
-  const sceneLabels = mergeSceneLabels(detail.tags, detail.scenes);
-  const processingBlocked = detail.processingStatus !== "ready";
-  const processingHint = processingStatusText(detail.processingStatus);
+  const isRobot = detail?.type === "具身智能机器人训练场景";
+  const sceneLabels = detail ? mergeSceneLabels(detail.tags, detail.scenes) : [];
+  const processingBlocked = detail ? detail.processingStatus !== "ready" : false;
+  const processingHint = detail ? processingStatusText(detail.processingStatus) : "";
   const description =
-    detail.description && detail.description.trim()
+    detail?.description && detail.description.trim()
       ? detail.description
-      : `这是一个高质量的${detail.type}模型，适用于${sceneLabels.join("、") || "多种"}等场景。模型数据精度高，可在线流畅浏览。`;
-  const isAuthor = !!user && user.id === detail.userId;
+      : detail
+        ? `这是一个高质量的${detail.type}模型，适用于${sceneLabels.join("、") || "多种"}等场景。模型数据精度高，可在线流畅浏览。`
+        : "";
+  const isAuthor = !!user && !!detail && user.id === detail.userId;
+
   const handleShare = async () => {
     const url = window.location.href;
     if (navigator.share) {
       try {
-        await navigator.share({ title: detail.title, url });
-      } catch {
-        /* 用户取消分享 */
-      }
+        await navigator.share({ title: detail?.title, url });
+      } catch { }
     } else {
       await navigator.clipboard.writeText(url);
       setShareToast(true);
@@ -463,197 +440,223 @@ export default function ModelDetailPage({ modelId }: ModelDetailPageProps) {
   return (
     <div className="min-h-[calc(100dvh-4rem)] md:min-h-[calc(100dvh-72px)] bg-[#0a0a0a] text-white lg:h-[calc(100dvh-72px)] lg:overflow-hidden">
       <div className="flex flex-col lg:h-full lg:min-h-0 lg:flex-row">
+        {/* 左侧 Viewer */}
         <div
           ref={modelViewerAreaRef}
           id="model-viewer-area"
           className="relative flex flex-1 flex-col bg-[#0d0d0d] border-b border-white/10 lg:h-full lg:min-h-0 lg:border-b-0 lg:border-r"
         >
-          <div className="flex items-center justify-between px-4 h-12 flex-shrink-0 border-b border-white/[0.06] bg-[#0d0d0d] z-10">
-            <Link
-              href="/models"
-              className="flex items-center gap-2 text-[13px] text-gray-400 hover:text-white transition-colors"
-            >
-              <ArrowLeft className="w-4 h-4" />
-              返回社区
-            </Link>
-            <div className="flex items-center gap-2">
-              {shareToast && (
-                <span className="text-[12px] text-cyan-400 mr-1">链接已复制</span>
-              )}
-              <button
-                type="button"
-                onClick={handleViewerFullscreen}
-                title="全屏"
-                className="w-8 h-8 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center hover:bg-white/10 hover:border-white/20 transition-all"
-              >
-                <Expand className="w-4 h-4 text-gray-400" />
-              </button>
-            </div>
-          </div>
-
-          <div
-            ref={viewerHostRef}
-            className="relative min-h-[60vh] flex-1 overflow-hidden lg:h-full lg:min-h-0"
-          >
-            {isLcc ? (
-              <div
-                className="relative h-full w-full"
-                data-lcc-detail-model-loaded={lccIframeModelLoaded ? "true" : "false"}
-                data-lcc-detail-show-overlay={showLccOuterOverlay ? "true" : "false"}
-              >
-                {/* LCC/LCC2 模型：iframe 始终挂载；外层只保留唯一一层品牌 Loading。 */}
-                <iframe
-                  ref={lccIframeRef}
-                  key={lccIframeKey}
-                  src={`/viewer/lcc/${detail.id}`}
-                  className="h-full w-full border-0"
-                  allow="fullscreen"
-                  title={detail.title}
-                  onLoad={handleLccIframeLoad}
-                />
-                <div
-                  data-lcc-outer-overlay="true"
-                  className={
-                    showLccOuterOverlay
-                      ? "absolute inset-0 z-20 opacity-100 pointer-events-auto transition-opacity duration-300"
-                      : "absolute inset-0 z-20 opacity-0 pointer-events-none transition-opacity duration-300"
-                  }
+          {detailExists ? (
+            <>
+              <div className="flex items-center justify-between px-4 h-12 flex-shrink-0 border-b border-white/[0.06] bg-[#0d0d0d] z-10">
+                <Link
+                  href="/models"
+                  className="flex items-center gap-2 text-[13px] text-gray-400 hover:text-white transition-colors"
                 >
-                  <ModelLoadingOverlay visible showText={false} />
+                  <ArrowLeft className="w-4 h-4" />
+                  返回社区
+                </Link>
+                <div className="flex items-center gap-2">
+                  {shareToast && (
+                    <span className="text-[12px] text-cyan-400 mr-1">链接已复制</span>
+                  )}
+                  <button
+                    type="button"
+                    onClick={handleViewerFullscreen}
+                    title="全屏"
+                    className="w-8 h-8 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center hover:bg-white/10 hover:border-white/20 transition-all"
+                  >
+                    <Expand className="w-4 h-4 text-gray-400" />
+                  </button>
                 </div>
               </div>
-            ) : (
-              viewerReady ? (
-                // 非 LCC 模型（glb/ply/bim/osgb/iframe 等）：保留原有 ModelViewerShell 逻辑
-                <ModelViewerShell
-                  key={`${detail.id}-${detail.viewerUrl || ""}-${detail.fileFormat || "none"}-${viewerMountSeed}`}
-                  model={detail}
-                  onLaunchViewSaved={handleLaunchViewSaved}
-                />
-              ) : (
-                <ModelLoadingOverlay visible showText={false} />
-              )
-            )}
-          </div>
-        </div>
-
-        <div className="w-full lg:h-full lg:min-h-0 lg:w-80 lg:flex-shrink-0 lg:overflow-y-auto">
-          <div className="p-5 space-y-4">
-            <div>
-              <span
-                className={`px-2 py-1 rounded-full text-[11px] border ${typeTagColor[detail.type] || "bg-white/10 text-white/60 border-white/10"}`}
+              <div
+                ref={viewerHostRef}
+                className="relative min-h-[60vh] flex-1 overflow-hidden lg:h-full lg:min-h-0"
               >
-                {detail.type}
-              </span>
-              <h2 className="mt-3 text-[20px] font-semibold leading-tight">
-                {detail.title}
-              </h2>
-            </div>
-
-            <div className="space-y-2 text-[13px]">
-              <div className="flex items-center gap-2 text-gray-400">
-                <User className="w-3.5 h-3.5" />
-                <span>{detail.author}</span>
-              </div>
-              <div className="flex items-center gap-4 text-gray-400">
-                <span className="flex items-center gap-1">
-                  <Eye className="w-3.5 h-3.5" />
-                  浏览 {formatViews(detail.viewsCount)}
-                </span>
-                <span className="flex items-center gap-1">
-                  <Heart className="w-3.5 h-3.5" />
-                  收藏 {favs}
-                </span>
-              </div>
-              <div className="text-gray-500">
-                {formatRelativeTime(detail.createdAt)}发布
-              </div>
-            </div>
-
-            {processingBlocked && (
-              <div className="rounded-xl border border-cyan-500/20 bg-cyan-500/8 px-4 py-3 text-[13px] text-cyan-100">
-                <p className="font-medium">
-                  {detail.processingStatus === "failed" ? "解析失败" : "后台解析中"}
-                </p>
-                <p className="mt-1 text-cyan-100/80">{processingHint}</p>
-                {detail.processingError && (
-                  <p className="mt-2 text-rose-200/90">失败原因：{detail.processingError}</p>
+                {isLcc ? (
+                  <div
+                    className="relative h-full w-full"
+                    data-lcc-detail-model-loaded={lccIframeModelLoaded ? "true" : "false"}
+                    data-lcc-detail-show-overlay={showLccOuterOverlay ? "true" : "false"}
+                  >
+                    <iframe
+                      ref={lccIframeRef}
+                      key={lccIframeKey}
+                      src={`/viewer/lcc/${detail.id}`}
+                      className="h-full w-full border-0"
+                      allow="fullscreen"
+                      title={detail.title}
+                      onLoad={handleLccIframeLoad}
+                    />
+                    <div
+                      data-lcc-outer-overlay="true"
+                      className={
+                        showLccOuterOverlay
+                          ? "absolute inset-0 z-20 opacity-100 pointer-events-auto transition-opacity duration-300"
+                          : "absolute inset-0 z-20 opacity-0 pointer-events-none transition-opacity duration-300"
+                      }
+                    >
+                      <ModelLoadingOverlay visible showText={false} />
+                    </div>
+                  </div>
+                ) : viewerReady ? (
+                  <ModelViewerShell
+                    key={`${detail.id}-${viewerMountSeed}`}
+                    model={detail}
+                    onLaunchViewSaved={handleLaunchViewSaved}
+                  />
+                ) : (
+                  <ModelLoadingOverlay visible showText={false} />
                 )}
               </div>
-            )}
+            </>
+          ) : (
+            <div className="relative flex h-full min-h-[60vh] lg:min-h-0 flex-1 items-center justify-center">
+              {detailLoading ? (
+                <ModelLoadingOverlay visible showText={false} />
+              ) : (
+                <div className="flex flex-col items-center gap-3 py-32 text-gray-500">
+                  <div className="w-10 h-10 rounded-2xl border border-white/10 bg-white/5" />
+                  <p className="text-[15px]">{detailError ?? "模型不存在或暂未公开"}</p>
+                  <Link
+                    href="/models"
+                    className="mt-2 px-6 py-2.5 rounded-full bg-white/8 border border-white/10 text-[14px] text-gray-200 hover:bg-white/12 hover:border-white/20 transition-all"
+                  >
+                    返回模型列表
+                  </Link>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
 
-            {sceneLabels.length > 0 && (
+        {/* 右侧信息栏 — 始终渲染，不随 viewer 状态变化 */}
+        <div
+          id="model-info-panel"
+          className="w-full lg:h-full lg:min-h-0 lg:w-80 lg:flex-shrink-0 lg:overflow-y-auto"
+        >
+          {detailLoading || !detail ? (
+            <RightPanelSkeleton />
+          ) : (
+            <div className="p-5 space-y-4">
               <div>
-                <p className="text-[12px] text-gray-500 mb-2">场景标签</p>
-                <div className="flex flex-wrap gap-1.5">
-                  {sceneLabels.map((tag) => (
-                    <span
-                      key={tag}
-                      className="px-2.5 py-1 rounded-full bg-white/5 border border-white/[0.08] text-[12px] text-gray-300"
-                    >
-                      {tag}
-                    </span>
-                  ))}
+                <span
+                  className={`px-2 py-1 rounded-full text-[11px] border ${typeTagColor[detail.type] || "bg-white/10 text-white/60 border-white/10"}`}
+                >
+                  {detail.type}
+                </span>
+                <h2 className="mt-3 text-[20px] font-semibold leading-tight">
+                  {detail.title}
+                </h2>
+              </div>
+
+              <div className="space-y-2 text-[13px]">
+                <div className="flex items-center gap-2 text-gray-400">
+                  <User className="w-3.5 h-3.5" />
+                  <span>{detail.author}</span>
+                </div>
+                <div className="flex items-center gap-4 text-gray-400">
+                  <span className="flex items-center gap-1">
+                    <Eye className="w-3.5 h-3.5" />
+                    浏览 {formatViews(detail.viewsCount)}
+                  </span>
+                  <span className="flex items-center gap-1">
+                    <Heart className="w-3.5 h-3.5" />
+                    收藏 {favs}
+                  </span>
+                </div>
+                <div className="text-gray-500">
+                  {formatRelativeTime(detail.createdAt)}发布
                 </div>
               </div>
-            )}
 
-            <div>
-              <p className="text-[12px] text-gray-500 mb-2">模型简介</p>
-              <p className="text-[13px] text-gray-400 leading-relaxed">{description}</p>
-            </div>
-
-            <div className="space-y-2 pt-2">
-              <button
-                type="button"
-                onClick={handleSave}
-                disabled={savePending}
-                className={`w-full py-2.5 rounded-xl border text-[14px] transition-all flex items-center justify-center gap-2 disabled:opacity-60 ${saved ? "bg-yellow-500/10 border-yellow-500/20 text-yellow-400" : "bg-white/5 border-white/10 hover:bg-white/8 text-gray-300"}`}
-              >
-                <Bookmark className={`w-4 h-4 ${saved ? "fill-yellow-400" : ""}`} />
-                {saved ? "已收藏" : "收藏"}
-              </button>
-              <button
-                type="button"
-                onClick={handleShareSidebar}
-                className="w-full py-2.5 rounded-xl bg-white/5 border border-white/10 text-[14px] text-gray-300 hover:bg-white/8 transition-all flex items-center justify-center gap-2"
-              >
-                <Share2 className="w-4 h-4" />
-                分享
-              </button>
-              {isRobot && (
-                <button
-                  type="button"
-                  onClick={() => setShowTraining(true)}
-                  className="w-full py-2.5 rounded-xl bg-violet-500/15 border border-violet-500/30 text-violet-400 text-[14px] hover:bg-violet-500/25 transition-all"
-                >
-                  申请训练数据服务
-                </button>
-              )}
-              {isAuthor && (
-                <button
-                  type="button"
-                  onClick={(event) => void handleDelete(event)}
-                  disabled={deletePending}
-                  className="w-full py-2.5 rounded-xl bg-red-500/10 border border-red-500/20 text-red-300 text-[14px] hover:bg-red-500/15 hover:border-red-500/30 transition-all flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
-                >
-                  {deletePending ? (
-                    <>
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                      删除中
-                    </>
-                  ) : (
-                    <>
-                      <Trash2 className="w-4 h-4" />
-                      删除模型
-                    </>
+              {processingBlocked && (
+                <div className="rounded-xl border border-cyan-500/20 bg-cyan-500/8 px-4 py-3 text-[13px] text-cyan-100">
+                  <p className="font-medium">
+                    {detail.processingStatus === "failed" ? "解析失败" : "后台解析中"}
+                  </p>
+                  <p className="mt-1 text-cyan-100/80">{processingHint}</p>
+                  {detail.processingError && (
+                    <p className="mt-2 text-rose-200/90">失败原因：{detail.processingError}</p>
                   )}
-                </button>
+                </div>
               )}
+
+              {sceneLabels.length > 0 && (
+                <div>
+                  <p className="text-[12px] text-gray-500 mb-2">场景标签</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {sceneLabels.map((tag) => (
+                      <span
+                        key={tag}
+                        className="px-2.5 py-1 rounded-full bg-white/5 border border-white/[0.08] text-[12px] text-gray-300"
+                      >
+                        {tag}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div>
+                <p className="text-[12px] text-gray-500 mb-2">模型简介</p>
+                <p className="text-[13px] text-gray-400 leading-relaxed">{description}</p>
+              </div>
+
+              <div className="space-y-2 pt-2">
+                <button
+                  type="button"
+                  onClick={handleSave}
+                  disabled={savePending}
+                  className={`w-full py-2.5 rounded-xl border text-[14px] transition-all flex items-center justify-center gap-2 disabled:opacity-60 ${saved ? "bg-yellow-500/10 border-yellow-500/20 text-yellow-400" : "bg-white/5 border-white/10 hover:bg-white/8 text-gray-300"}`}
+                >
+                  <Bookmark className={`w-4 h-4 ${saved ? "fill-yellow-400" : ""}`} />
+                  {saved ? "已收藏" : "收藏"}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleShareSidebar}
+                  className="w-full py-2.5 rounded-xl bg-white/5 border border-white/10 text-[14px] text-gray-300 hover:bg-white/8 transition-all flex items-center justify-center gap-2"
+                >
+                  <Share2 className="w-4 h-4" />
+                  分享
+                </button>
+                {isRobot && (
+                  <button
+                    type="button"
+                    onClick={() => setShowTraining(true)}
+                    className="w-full py-2.5 rounded-xl bg-violet-500/15 border border-violet-500/30 text-violet-400 text-[14px] hover:bg-violet-500/25 transition-all"
+                  >
+                    申请训练数据服务
+                  </button>
+                )}
+                {isAuthor && (
+                  <button
+                    type="button"
+                    onClick={(event) => void handleDelete(event)}
+                    disabled={deletePending}
+                    className="w-full py-2.5 rounded-xl bg-red-500/10 border border-red-500/20 text-red-300 text-[14px] hover:bg-red-500/15 hover:border-red-500/30 transition-all flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
+                  >
+                    {deletePending ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        删除中
+                      </>
+                    ) : (
+                      <>
+                        <Trash2 className="w-4 h-4" />
+                        删除模型
+                      </>
+                    )}
+                  </button>
+                )}
+              </div>
             </div>
-          </div>
+          )}
         </div>
       </div>
+
       {confirmOpen && (
         <div
           className="fixed inset-0 z-[70] flex items-center justify-center p-4"
@@ -704,6 +707,7 @@ export default function ModelDetailPage({ modelId }: ModelDetailPageProps) {
           </div>
         </div>
       )}
+
       {showTraining && <TrainingModal onClose={() => setShowTraining(false)} />}
     </div>
   );
