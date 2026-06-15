@@ -26,7 +26,7 @@ import { toPersistedStage } from "./types";
 
 const HEARTBEAT_INTERVAL_MS = 15_000;
 const STALL_TIMEOUT_MS = 60_000;
-const STALL_TIMEOUT_PART_PUT_MS = 360_000;
+const STALL_TIMEOUT_PART_PUT_MS = 660_000;
 const parsedMultipartModelMinMb = Number(
   process.env.NEXT_PUBLIC_MULTIPART_MODEL_MIN_MB ?? "50",
 );

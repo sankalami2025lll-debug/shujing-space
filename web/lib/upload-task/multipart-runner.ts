@@ -12,17 +12,76 @@ import {
 import { UploadAbortedError, type UploadProgress } from "@/lib/api/uploads";
 import { ApiError } from "@/lib/http";
 
-const DEFAULT_MULTIPART_CONCURRENCY = 1;
-const DEFAULT_PART_RETRY_LIMIT = 3;
-const DEFAULT_PART_PUT_TIMEOUT_MS = 300_000;
-const ENABLE_MULTIPART_FETCH_PUT = true;
+const parsedConcurrency = Number(process.env.NEXT_PUBLIC_UPLOAD_CONCURRENCY ?? "3");
+const DEFAULT_MULTIPART_CONCURRENCY =
+  Number.isFinite(parsedConcurrency) && parsedConcurrency >= 1 ? parsedConcurrency : 3;
+
+const parsedRetryLimit = Number(process.env.NEXT_PUBLIC_UPLOAD_MAX_RETRIES ?? "3");
+const DEFAULT_PART_RETRY_LIMIT =
+  Number.isFinite(parsedRetryLimit) && parsedRetryLimit >= 0 ? parsedRetryLimit : 3;
+
+const parsedPartTimeoutMs = Number(process.env.NEXT_PUBLIC_UPLOAD_PART_TIMEOUT_MS ?? "600000");
+const DEFAULT_PART_PUT_TIMEOUT_MS =
+  Number.isFinite(parsedPartTimeoutMs) && parsedPartTimeoutMs > 0 ? parsedPartTimeoutMs : 600_000;
+
 const ENABLE_UPLOAD_DEBUG_LOG = true;
+
+let uploadSpeedTracker: {
+  bytesAtTimestamps: Array<{ bytes: number; timestamp: number }>;
+} | null = null;
 
 const debug = (msg: string) => {
   if (ENABLE_UPLOAD_DEBUG_LOG) {
     console.log(`[upload-runner] ${msg}`);
   }
 };
+
+function getOrInitSpeedTracker(): { bytesAtTimestamps: Array<{ bytes: number; timestamp: number }> } {
+  if (!uploadSpeedTracker) {
+    uploadSpeedTracker = { bytesAtTimestamps: [] };
+  }
+  return uploadSpeedTracker;
+}
+
+function recordSpeedSample(bytes: number): number {
+  const now = Date.now();
+  const tracker = getOrInitSpeedTracker();
+  tracker.bytesAtTimestamps.push({ bytes, timestamp: now });
+
+  // 保留最近 10 秒的采样点
+  const cutoff = now - 10_000;
+  while (tracker.bytesAtTimestamps.length > 0 && tracker.bytesAtTimestamps[0].timestamp < cutoff) {
+    tracker.bytesAtTimestamps.shift();
+  }
+
+  return now;
+}
+
+function calculateSpeed(_bytes: number): number {
+  const now = Date.now();
+  const tracker = getOrInitSpeedTracker();
+  const cutoff = now - 10_000;
+  const recentSamples = tracker.bytesAtTimestamps.filter((s) => s.timestamp >= cutoff);
+
+  if (recentSamples.length < 2) return 0;
+
+  const firstBytes = recentSamples[0].bytes;
+  const firstTime = recentSamples[0].timestamp;
+  const lastBytes = recentSamples[recentSamples.length - 1].bytes;
+  const lastTime = recentSamples[recentSamples.length - 1].timestamp;
+
+  const elapsedSeconds = (lastTime - firstTime) / 1000;
+  if (elapsedSeconds < 0.5) return 0;
+
+  return (lastBytes - firstBytes) / elapsedSeconds;
+}
+
+function estimateRemainingSeconds(totalBytes: number, uploadedBytes: number, speed: number): number {
+  if (speed <= 0) return Infinity;
+  const remainingBytes = totalBytes - uploadedBytes;
+  if (remainingBytes <= 0) return 0;
+  return remainingBytes / speed;
+}
 
 interface MultipartRunnerOptions {
   taskId: number;
@@ -117,76 +176,6 @@ function buildSessionSnapshot(
   };
 }
 
-async function putMultipartPartToPresignedUrlWithFetch(
-  uploadUrl: string,
-  payload: ArrayBuffer,
-  signal: AbortSignal,
-  _partContext: MultipartPartDebugContext,
-  onProgress?: (loaded: number) => void,
-): Promise<string> {
-  const requestController = new AbortController();
-  let abortedByParent = false;
-  let abortedByTimeout = false;
-  const onAbort = () => {
-    abortedByParent = true;
-    requestController.abort();
-  };
-  const timeoutTimer = window.setTimeout(() => {
-    abortedByTimeout = true;
-    requestController.abort();
-  }, DEFAULT_PART_PUT_TIMEOUT_MS);
-  const cleanup = () => {
-    signal.removeEventListener("abort", onAbort);
-    window.clearTimeout(timeoutTimer);
-  };
-
-  if (signal.aborted) {
-    throw new UploadAbortedError();
-  }
-
-  signal.addEventListener("abort", onAbort, { once: true });
-
-  try {
-    const response = await fetch(uploadUrl, {
-      method: "PUT",
-      body: payload,
-      signal: requestController.signal,
-    });
-    cleanup();
-
-    const etag = response.headers.get("ETag") ?? response.headers.get("etag");
-
-    if (!response.ok) {
-      throw new ApiError(`分片上传失败（HTTP ${response.status}）`, -1, response.status);
-    }
-
-    onProgress?.(payload.byteLength);
-    if (!etag?.trim()) {
-      throw new ApiError("分片上传成功，但未返回 ETag。", -1, response.status);
-    }
-    return etag.trim();
-  } catch (error) {
-    cleanup();
-
-    if (abortedByParent || signal.aborted) {
-      throw new UploadAbortedError();
-    }
-
-    if (abortedByTimeout) {
-      throw new ApiError(
-        `分片上传超时（${DEFAULT_PART_PUT_TIMEOUT_MS / 1000} 秒），请检查对象存储连通性后重试。`,
-        -1,
-        408,
-      );
-    }
-
-    if (error instanceof ApiError) {
-      throw error;
-    }
-    throw new ApiError("分片上传失败，请检查网络后重试。", -1, 0);
-  }
-}
-
 async function putMultipartPartToPresignedUrlWithXhr(
   uploadUrl: string,
   payload: ArrayBuffer,
@@ -196,8 +185,11 @@ async function putMultipartPartToPresignedUrlWithXhr(
 ): Promise<string> {
   return await new Promise<string>((resolve, reject) => {
     const xhr = new XMLHttpRequest();
+
     const onAbort = () => xhr.abort();
-    const cleanup = () => signal.removeEventListener("abort", onAbort);
+    const cleanup = () => {
+      signal.removeEventListener("abort", onAbort);
+    };
 
     if (signal.aborted) {
       reject(new UploadAbortedError());
@@ -237,7 +229,7 @@ async function putMultipartPartToPresignedUrlWithXhr(
       cleanup();
       reject(
         new ApiError(
-          `分片上传超时（${DEFAULT_PART_PUT_TIMEOUT_MS / 1000} 秒），请检查对象存储连通性后重试。`,
+          `第 ${_partContext.partNumber} 个分片上传超时（${DEFAULT_PART_PUT_TIMEOUT_MS / 1000} 秒），请检查对象存储连通性后重试。`,
           -1,
           408,
         ),
@@ -261,15 +253,6 @@ async function putMultipartPartToPresignedUrl(
   partContext: MultipartPartDebugContext,
   onProgress?: (loaded: number) => void,
 ): Promise<string> {
-  if (ENABLE_MULTIPART_FETCH_PUT) {
-    return await putMultipartPartToPresignedUrlWithFetch(
-      uploadUrl,
-      payload,
-      signal,
-      partContext,
-      onProgress,
-    );
-  }
   return await putMultipartPartToPresignedUrlWithXhr(
     uploadUrl,
     payload,
@@ -289,7 +272,7 @@ export async function runMultipartUploadTask(
     signal,
     onSessionReady,
   } = options;
-  debug(`runMultipartUploadTask entered | taskId=${taskId} kind=${kind} file=${file.name} size=${file.size}`);
+  debug(`runMultipartUploadTask entered | taskId=${taskId} kind=${kind} file=${file.name} size=${file.size} concurrency=${options.concurrency ?? DEFAULT_MULTIPART_CONCURRENCY}`);
 
   throwIfAborted(signal);
 
@@ -334,7 +317,7 @@ export async function resumeMultipartUploadTask(
     onPartUploadStart,
     onPartUploadEnd,
   } = options;
-  debug(`resumeMultipartUploadTask | taskId=${taskId} kind=${kind} file=${file.name} uploadedParts=${session.uploadedParts.length} totalParts=${session.totalParts}`);
+  debug(`resumeMultipartUploadTask | taskId=${taskId} kind=${kind} file=${file.name} uploadedParts=${session.uploadedParts.length} totalParts=${session.totalParts} partSize=${session.partSize}`);
 
   throwIfAborted(signal);
 
@@ -342,17 +325,54 @@ export async function resumeMultipartUploadTask(
     session.uploadedParts.map((part) => [part.partNumber, part]),
   );
   const inflightPartBytes = new Map<number, number>();
+
   const emitSessionUpdate = () => {
     onSessionUpdate?.(buildSessionSnapshot(session, completedPartsMap));
   };
-  const emitProgress = () => {
+
+  let lastProgressTime = 0;
+  const PROGRESS_THROTTLE_MS = 300;
+
+  const emitProgress = (speedBytesPerSecond = 0, etaSeconds = Infinity) => {
+    const now = Date.now();
+    if (now - lastProgressTime < PROGRESS_THROTTLE_MS) return;
+    lastProgressTime = now;
+
     const uploadedBytes = [...completedPartsMap.values()].reduce((sum, part) => sum + part.partSize, 0);
     const inflightBytes = [...inflightPartBytes.values()].reduce((sum, size) => sum + size, 0);
-    onProgress?.(createProgress(uploadedBytes + inflightBytes, file.size));
+    const totalLoaded = uploadedBytes + inflightBytes;
+    const progress = createProgress(totalLoaded, file.size);
+
+    recordSpeedSample(totalLoaded);
+
+    onProgress?.({
+      ...progress,
+      speedBytesPerSecond,
+      etaSeconds,
+    });
+  };
+
+  // 节流不受限的完整进度更新（用于速度/ETA计算）
+  const emitProgressUnthrottled = (speedBytesPerSecond = 0, etaSeconds = Infinity) => {
+    const uploadedBytes = [...completedPartsMap.values()].reduce((sum, part) => sum + part.partSize, 0);
+    const inflightBytes = [...inflightPartBytes.values()].reduce((sum, size) => sum + size, 0);
+    const totalLoaded = uploadedBytes + inflightBytes;
+
+    recordSpeedSample(totalLoaded);
+
+    const speed = speedBytesPerSecond > 0 ? speedBytesPerSecond : calculateSpeed(totalLoaded);
+    const eta = etaSeconds < Infinity ? etaSeconds : estimateRemainingSeconds(file.size, totalLoaded, speed);
+    const progress = createProgress(totalLoaded, file.size);
+
+    onProgress?.({
+      ...progress,
+      speedBytesPerSecond: speed,
+      etaSeconds: eta,
+    });
   };
 
   emitSessionUpdate();
-  emitProgress();
+  emitProgress(0, Infinity);
 
   if (session.status === "completed" && session.modelFileId != null) {
     onProgress?.(createProgress(file.size, file.size));
@@ -360,6 +380,9 @@ export async function resumeMultipartUploadTask(
   }
 
   const pendingPartNumbers = [...new Set(session.missingParts)].sort((a, b) => a - b);
+
+  // 重试状态追踪
+
   const uploadPart = async (partNumber: number) => {
     onPartUploadStart?.(partNumber);
     const { byteStart, byteEnd } = getPartBounds(file, partNumber, session.partSize);
@@ -387,7 +410,7 @@ export async function resumeMultipartUploadTask(
         debug(`part PUT start | partNumber=${partNumber} attempt=${attempt} url=${signedPart.uploadUrl.slice(0, 60)}...`);
 
         inflightPartBytes.set(partNumber, 0);
-        emitProgress();
+        emitProgressUnthrottled();
         const etag = await putMultipartPartToPresignedUrl(
           signedPart.uploadUrl,
           payload,
@@ -395,7 +418,7 @@ export async function resumeMultipartUploadTask(
           partContext,
           (loaded) => {
             inflightPartBytes.set(partNumber, loaded);
-            emitProgress();
+            emitProgressUnthrottled();
           },
         );
         throwIfAborted(signal);
@@ -416,12 +439,12 @@ export async function resumeMultipartUploadTask(
           attemptCount: 1,
         });
         emitSessionUpdate();
-        emitProgress();
+        emitProgressUnthrottled();
         onPartUploadEnd?.(partNumber);
         return;
       } catch (error) {
         inflightPartBytes.delete(partNumber);
-        emitProgress();
+        emitProgressUnthrottled();
         if (error instanceof UploadAbortedError) {
           onPartUploadEnd?.(partNumber);
           throw error;

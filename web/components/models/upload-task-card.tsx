@@ -137,6 +137,24 @@ export function UploadTaskCard({ task }: { task: UploadTask }) {
   const isResumeReady = category === "resume-ready";
   const isResumeUploading = category === "resume-uploading";
 
+  const uploadSpeed = task.modelProgress?.speedBytesPerSecond ?? null;
+  const uploadEta = task.modelProgress?.etaSeconds ?? null;
+
+  const formatSpeed = (bytesPerSecond: number): string => {
+    if (bytesPerSecond <= 0) return "";
+    if (bytesPerSecond >= 1024 * 1024) return `${(bytesPerSecond / (1024 * 1024)).toFixed(1)} MB/s`;
+    if (bytesPerSecond >= 1024) return `${(bytesPerSecond / 1024).toFixed(0)} KB/s`;
+    return `${bytesPerSecond.toFixed(0)} B/s`;
+  };
+  const speedText = uploadSpeed ? formatSpeed(uploadSpeed) : null;
+  const etaText = uploadEta != null && Number.isFinite(uploadEta) && uploadEta > 0
+    ? uploadEta >= 3600
+      ? `${Math.round(uploadEta / 3600)} 小时`
+      : uploadEta >= 60
+        ? `${Math.round(uploadEta / 60)} 分钟`
+        : `${Math.max(1, Math.round(uploadEta))} 秒`
+    : null;
+
   useEffect(() => {
     setImgFailed(false);
 
@@ -170,10 +188,16 @@ export function UploadTaskCard({ task }: { task: UploadTask }) {
         return <p className="text-[14px] font-medium tracking-[0.02em] text-white/92">处理中</p>;
       default:
         return (
-          <div className="w-full max-w-[72px]">
+          <div className="w-full max-w-[80px]">
             <p className="text-[20px] font-medium leading-none tracking-[-0.03em] text-white/95 tabular-nums">
               {progressText}
             </p>
+            {speedText && (
+              <p className="mt-1 text-[10px] text-white/60 tabular-nums truncate">
+                {speedText}
+                {etaText ? ` · ${etaText}` : ""}
+              </p>
+            )}
             <div className="mx-auto mt-2.5 h-[3px] w-full overflow-hidden rounded-full bg-white/12">
               <div
                 className="h-full rounded-full bg-sky-300/85 transition-all"

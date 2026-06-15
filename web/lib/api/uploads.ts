@@ -48,6 +48,8 @@ export interface UploadProgress {
   loaded: number;
   total: number;
   percent: number;
+  speedBytesPerSecond?: number;
+  etaSeconds?: number;
 }
 
 export interface UploadPutOptions {
