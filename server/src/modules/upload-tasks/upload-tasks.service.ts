@@ -137,7 +137,7 @@ export class UploadTasksService {
       where: {
         userId,
         ...(query.status === 'incomplete'
-          ? { status: { in: TASK_CARD_VISIBLE_STATUSES } }
+          ? { status: { in: TASK_CARD_VISIBLE_STATUSES }, canceledAt: null }
           : {}),
       },
       include: {

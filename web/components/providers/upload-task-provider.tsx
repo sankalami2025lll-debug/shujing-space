@@ -483,6 +483,10 @@ export function UploadTaskProvider({ children }: { children: ReactNode }) {
     return localTasksRef.current.find((task) => task.id === taskId);
   }, []);
 
+  const getPersistedTask = useCallback((taskId: string) => {
+    return persistedTasksRef.current.find((task) => task.id === taskId);
+  }, []);
+
   const refreshPersistedTasks = useCallback(() => {
     return getMyUploadTasks()
       .then(async (records) => {
@@ -589,21 +593,26 @@ export function UploadTaskProvider({ children }: { children: ReactNode }) {
 
   const dismissTask = useCallback(
     (taskId: string) => {
-      const task = getLocalTask(taskId);
+      const task = getLocalTask(taskId) ?? getPersistedTask(taskId);
       if (
         !task ||
         (task.status !== "failed" &&
           task.status !== "canceled" &&
           task.status !== "success" &&
-          task.status !== "interrupted")
+          task.status !== "interrupted" &&
+          task.status !== "processing")
       ) {
         return;
       }
 
       callbacksRef.current.delete(taskId);
       syncLocalTasks((current) => current.filter((item) => item.id !== taskId));
+
+      if (isPersistedUploadTask(task) && task.uploadTaskId != null) {
+        void cancelUploadTaskRequest(task.uploadTaskId).catch(() => undefined);
+      }
     },
-    [getLocalTask, syncLocalTasks],
+    [getLocalTask, getPersistedTask, syncLocalTasks],
   );
 
   const startTask = useCallback(
