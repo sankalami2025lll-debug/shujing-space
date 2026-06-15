@@ -45,7 +45,7 @@ import {
 } from './upload-task-multipart.vm';
 
 const MULTIPART_THRESHOLD_MB = 64;
-const MULTIPART_MIN_PART_BYTES = 16 * 1024 * 1024;
+const MULTIPART_MIN_PART_BYTES = 8 * 1024 * 1024;
 const MULTIPART_DEFAULT_PART_BYTES = 32 * 1024 * 1024;
 const MULTIPART_MAX_PARTS = 9500;
 

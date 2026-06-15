@@ -431,7 +431,11 @@ export async function resumeMultipartUploadTask(
       }
     }
 
-    throw lastError ?? new ApiError(`分片 ${partNumber} 上传失败。`, -1, 500);
+    throw new ApiError(
+      `第 ${partNumber} 个分片上传失败，已重试 ${maxRetries} 次，请检查网络后重试。`,
+      -1,
+      lastError instanceof ApiError ? lastError.status : 500,
+    );
   };
 
   let nextIndex = 0;
