@@ -1556,6 +1556,7 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
   const lastActiveBoundsRef = useRef<THREE.Box3 | null>(null);
   const launchViewPropRef = useRef(launchView);
   const loadingCompletedRef = useRef(false);
+  const firstFrameRenderedRef = useRef(false);
   const progressRef = useRef(0);
   const completeReasonRef = useRef<string | null>(null);
   const sdkLoadedRef = useRef(false);
@@ -1709,15 +1710,15 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
     loadingCompletedRef.current = true;
     completeCallCountRef.current += 1;
     completeReasonRef.current = reason;
-    progressRef.current = 1;
-    setProgress(1);
+    progressRef.current = 0.98;
+    setProgress(0.98);
     setViewerStatus("loaded");
     // #region debug-point lcc-stuck-92
     setDebugAttr("data-lcc-debug-complete-call-count", String(completeCallCountRef.current));
     setDebugAttr("data-lcc-debug-stable-reason", "passed");
     markDebugEvent("completeViewerLoading", { reason });
     // #endregion
-    logLccDebug("loading completed", { reason });
+    logLccDebug("loading completed, awaiting first frame", { reason });
   }, [markDebugEvent, setDebugAttr]);
 
   const resolveRelevantResourceStability = useCallback(
@@ -3222,6 +3223,27 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
                 // #endregion
               }
             }
+
+            // 加载完成 (completeViewerLoading) 后，等待首帧实际渲染到 canvas
+            if (loadingCompletedRef.current && !firstFrameRenderedRef.current) {
+              const canvasElement = rendererRef.current.domElement;
+              const hasVisibleCanvas =
+                canvasElement.isConnected &&
+                canvasElement.clientWidth > 0 &&
+                canvasElement.clientHeight > 0 &&
+                canvasElement.width > 0 &&
+                canvasElement.height > 0;
+              if (hasVisibleCanvas && doesCanvasLookPainted(canvasElement)) {
+                firstFrameRenderedRef.current = true;
+                progressRef.current = 1;
+                setProgress(1);
+                setDebugAttr("data-lcc-first-frame", "true");
+                markDebugEvent("firstFrameRendered", { loadId });
+                logLccDebug("first frame rendered, loading complete");
+              } else {
+                setDebugAttr("data-lcc-debug-first-frame-wait", "true");
+              }
+            }
           } catch (error) {
             isFailed = true;
             stopLoop();
@@ -3287,9 +3309,11 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
 
   const showOverlay = processingBlocked || viewerStatus !== "loaded";
   const displayProgress =
-    viewerStatus === "loaded"
+    viewerStatus === "loaded" && firstFrameRenderedRef.current
       ? 1
-      : Math.min(Number.isFinite(progress) ? progress : 0, sdkLoadedState ? 0.98 : 0.95);
+      : viewerStatus === "loaded"
+        ? 0.98
+        : Math.min(Number.isFinite(progress) ? progress : 0, sdkLoadedState ? 0.98 : 0.95);
   const overlayStatus = processingBlocked
     ? "info"
     : viewerStatus === "error"
@@ -3300,6 +3324,7 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
     <div
       ref={viewerRootRef}
       data-lcc-loaded={viewerStatus === "loaded" ? "true" : "false"}
+      data-lcc-first-frame={firstFrameRenderedRef.current ? "true" : "false"}
       data-lcc-viewer-status={viewerStatus}
       data-lcc-complete-reason={completeReasonRef.current ?? ""}
       data-lcc-sdk-loaded={sdkLoadedRef.current ? "true" : "false"}

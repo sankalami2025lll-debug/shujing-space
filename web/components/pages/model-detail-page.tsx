@@ -290,9 +290,11 @@ export default function ModelDetailPage({ modelId }: ModelDetailPageProps) {
       window.clearInterval(lccIframeVisibilityPollRef.current);
       lccIframeVisibilityPollRef.current = null;
     }
-    // 每次 iframe 文档 load 都先重置为未完成，只允许后续 data-lcc-loaded 轮询将其置为 true。
+    // 每次 iframe 文档 load 都先重置为未完成，只允许后续 data-lcc-first-frame 轮询将其置为 true。
     setLccIframeModelLoaded(false);
     setLccIframeViewerErrored(false);
+
+    const pollStartedAt = Date.now();
 
     const pollIframeModelLoaded = () => {
       const frame = lccIframeRef.current;
@@ -302,9 +304,7 @@ export default function ModelDetailPage({ modelId }: ModelDetailPageProps) {
 
       const childRoot = iframeDoc.querySelector("[data-lcc-viewer-status]");
       const childViewerStatus = childRoot?.getAttribute("data-lcc-viewer-status");
-      const childLoaded = childRoot?.getAttribute("data-lcc-loaded") === "true";
-      const childReasonStable =
-        childRoot?.getAttribute("data-lcc-complete-reason") === "onLoadedStable";
+      const childFirstFrame = childRoot?.getAttribute("data-lcc-first-frame") === "true";
       if (childViewerStatus === "error") {
         setLccIframeViewerErrored(true);
         if (lccIframeVisibilityPollRef.current !== null) {
@@ -313,7 +313,17 @@ export default function ModelDetailPage({ modelId }: ModelDetailPageProps) {
         }
         return;
       }
-      if (!childRoot || !childLoaded || !childReasonStable) return;
+      if (!childRoot || !childFirstFrame) {
+        // 超时保护：超过30秒后无论子状态如何，强制显示空白 viewer（用户可以刷新重试）
+        if (Date.now() - pollStartedAt > 30000) {
+          setLccIframeModelLoaded(true);
+          if (lccIframeVisibilityPollRef.current !== null) {
+            window.clearInterval(lccIframeVisibilityPollRef.current);
+            lccIframeVisibilityPollRef.current = null;
+          }
+        }
+        return;
+      }
 
       setLccIframeModelLoaded(true);
       if (lccIframeVisibilityPollRef.current !== null) {
@@ -322,7 +332,7 @@ export default function ModelDetailPage({ modelId }: ModelDetailPageProps) {
       }
     };
 
-    // iframe onLoad 只负责开始轮询子文档状态；是否关闭外层 Loading 只看 data-lcc-loaded。
+    // iframe onLoad 只负责开始轮询子文档状态；是否关闭外层 Loading 只看 data-lcc-first-frame。
     lccIframeVisibilityPollRef.current = window.setInterval(() => {
       pollIframeModelLoaded();
     }, 250);
