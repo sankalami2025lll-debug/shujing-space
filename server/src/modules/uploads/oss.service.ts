@@ -110,7 +110,8 @@ export class OssService implements ObjectStorageService {
       accessKeySecret: oss.accessKeySecret,
       bucket: oss.bucket,
       secure: true,
-    });
+      timeout: 5 * 60 * 1000,
+    } as any);
     return this.client;
   }
 
@@ -292,10 +293,11 @@ export class OssService implements ObjectStorageService {
     this.ensureConfigured();
     try {
       await this.getClient().put(key, body, {
+        timeout: 10 * 60 * 1000,
         headers: {
           'Content-Type': contentType,
         },
-      });
+      } as never);
       return { key, url: this.publicUrl(key) };
     } catch (err: unknown) {
       const meta = err as { code?: string; status?: number; requestId?: string; message?: string };

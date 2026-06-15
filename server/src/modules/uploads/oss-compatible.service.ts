@@ -104,6 +104,9 @@ export class OssCompatibleService implements ObjectStorageService {
         accessKeyId: oss.accessKeyId,
         secretAccessKey: oss.accessKeySecret,
       },
+      requestHandler: {
+        requestTimeout: 300_000,
+      },
     });
     return this.client;
   }
