@@ -11,6 +11,7 @@ import {
   BadRequestException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -48,6 +49,8 @@ export interface ModelListResult {
 
 @Injectable()
 export class ModelsService {
+  private readonly logger = new Logger(ModelsService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
@@ -397,6 +400,10 @@ export class ModelsService {
         error instanceof Error && error.message.trim()
           ? error.message.trim()
           : 'LCC/LCC2 ZIP 成果包处理失败';
+      this.logger.warn(
+        `[LCCZip] processLccZip failed | modelId=${modelId} objectKey=${objectKey} reason=${reason}`,
+        error,
+      );
       await this.markFailed(modelId, reason);
     }
   }

@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Injectable,
   InternalServerErrorException,
+  Logger,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
@@ -55,6 +56,8 @@ export interface LccZipProcessResult {
 
 @Injectable()
 export class LccZipService {
+  private readonly logger = new Logger(LccZipService.name);
+
   constructor(
     private readonly config: ConfigService,
     private readonly ossCompatible: OssCompatibleService,
@@ -88,8 +91,13 @@ export class LccZipService {
       const fileFormat = path.extname(entryFile.relativePath).toLowerCase() === '.lcc2' ? 'lcc2' : 'lcc';
 
       const uploadedEntries = new Map<string, string>();
+      let uploadIndex = 0;
       for (const file of extractedFiles) {
+        uploadIndex += 1;
         const targetKey = this.buildProcessedObjectKey(modelId, file.relativePath);
+        this.logger.log(
+          `[LCCZip] uploading file ${uploadIndex}/${extractedFiles.length} | modelId=${modelId} source=${file.relativePath} targetKey=${targetKey} size=${file.size}`,
+        );
         const content = await readFile(file.absolutePath);
         const uploaded = await this.storage.putObject(
           targetKey,

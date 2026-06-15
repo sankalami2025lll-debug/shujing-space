@@ -310,8 +310,17 @@ export class OssCompatibleService implements ObjectStorageService {
       );
       return { key, url: this.publicUrl(key) };
     } catch (err: unknown) {
-      this.logger.warn(`PutObject failed for key=${key}`, err);
-      throw new BadRequestException('无法上传处理后的文件到对象存储，请稍后重试');
+      const meta = err as { name?: string; $metadata?: { httpStatusCode?: number; requestId?: string }; message?: string };
+      this.logger.warn(
+        `S3 PutObject failed | key=${key} name=${meta.name ?? 'unknown'} status=${meta.$metadata?.httpStatusCode ?? 0} requestId=${meta.$metadata?.requestId ?? 'N/A'} message=${meta.message ?? ''}`,
+      );
+      const detail =
+        meta.message
+          ? meta.message.replace(/^.*?(name|message)[=:]\s*/i, '').slice(0, 200)
+          : '请稍后重试';
+      throw new BadRequestException(
+        `processed 文件上传 OSS 失败：${detail}`,
+      );
     }
   }
 

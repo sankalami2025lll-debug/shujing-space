@@ -298,8 +298,17 @@ export class OssService implements ObjectStorageService {
       });
       return { key, url: this.publicUrl(key) };
     } catch (err: unknown) {
-      this.logger.warn(`OSS PutObject failed for key=${key}`, err);
-      throw new BadRequestException('无法上传处理后的文件到对象存储，请稍后重试');
+      const meta = err as { code?: string; status?: number; requestId?: string; message?: string };
+      this.logger.warn(
+        `OSS PutObject failed | key=${key} code=${meta.code ?? 'unknown'} status=${meta.status ?? 0} requestId=${meta.requestId ?? 'N/A'} message=${meta.message ?? ''}`,
+      );
+      const detail =
+        meta.message
+          ? meta.message.replace(/^.*?(code|message)[=:]\s*/i, '').slice(0, 200)
+          : '请稍后重试';
+      throw new BadRequestException(
+        `processed 文件上传 OSS 失败：${detail}`,
+      );
     }
   }
 
