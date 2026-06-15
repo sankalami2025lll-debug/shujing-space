@@ -39,4 +39,15 @@ export interface ObjectStorageService {
   headObject(key: string): Promise<ObjectHeadResult>;
   downloadObject(key: string): Promise<Buffer>;
   putObject(key: string, body: Buffer, contentType: string): Promise<PutObjectResult>;
+  /**
+   * 服务端 putObjectMultipart: 对 >32MB 的大文件使用分片上传，小文件回退 putObject
+   * @param concurrency 内部并发数（分片级别，仅大文件有效）
+   */
+  putObjectMultipart(
+    key: string,
+    body: Buffer,
+    contentType: string,
+    concurrency?: number,
+    partSize?: number,
+  ): Promise<PutObjectResult>;
 }

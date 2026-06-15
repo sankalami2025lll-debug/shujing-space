@@ -18,11 +18,16 @@ import OSS from 'ali-oss';
 import { FileKind } from '@prisma/client';
 import { extractExtension } from './upload.constants';
 import {
+  ObjectStorageService,
+  ObjectHeadResult,
+  PutObjectResult,
   MultipartInitResult,
   MultipartPartDescriptor,
-  ObjectStorageService,
-  PutObjectResult,
 } from './object-storage.interface';
+
+const LARGE_FILE_THRESHOLD_BYTES = 32 * 1024 * 1024;
+const DEFAULT_PART_SIZE_BYTES = 16 * 1024 * 1024;
+const DEFAULT_MULTIPART_CONCURRENCY = 2;
 
 interface OssConfig {
   accessKeyId: string;
@@ -366,5 +371,50 @@ export class OssService implements ObjectStorageService {
       return value;
     }
     return undefined;
+  }
+
+  async putObjectMultipart(
+    key: string,
+    body: Buffer,
+    contentType: string,
+    concurrency = DEFAULT_MULTIPART_CONCURRENCY,
+    partSize = DEFAULT_PART_SIZE_BYTES,
+  ): Promise<PutObjectResult> {
+    this.ensureConfigured();
+    const fileSize = body.byteLength;
+
+    if (fileSize < LARGE_FILE_THRESHOLD_BYTES) {
+      return await this.putObject(key, body, contentType);
+    }
+
+    const startAt = Date.now();
+    try {
+      const result = await (this.getClient() as unknown as {
+        multipartUpload(key: string, body: Buffer, options: Record<string, unknown>): Promise<{ uploadId?: string }>;
+      }).multipartUpload(key, body, {
+        partSize,
+        parallel: concurrency,
+        timeout: 10 * 60 * 1000,
+        headers: { 'Content-Type': contentType },
+      } as never);
+      const durationMs = Date.now() - startAt;
+      this.logger.log(
+        `[OSS] multipartUpload | key=${key} size=${fileSize} durationMs=${durationMs} partSize=${partSize} parallel=${concurrency} uploadId=${typeof result === 'object' && result && 'uploadId' in result ? (result as { uploadId: string }).uploadId : 'N/A'}`,
+      );
+      return { key, url: this.publicUrl(key) };
+    } catch (err: unknown) {
+      const durationMs = Date.now() - startAt;
+      const meta = err as { code?: string; status?: number; requestId?: string; message?: string };
+      this.logger.warn(
+        `[OSS] multipartUpload failed | key=${key} size=${fileSize} durationMs=${durationMs} code=${meta.code ?? 'unknown'} status=${meta.status ?? 0} requestId=${meta.requestId ?? 'N/A'} message=${meta.message ?? ''}`,
+      );
+      const detail =
+        meta.message
+          ? meta.message.replace(/^.*?(code|message)[=:]\s*/i, '').slice(0, 200)
+          : '请稍后重试';
+      throw new BadRequestException(
+        `processed 文件上传 OSS 失败：${detail}`,
+      );
+    }
   }
 }

@@ -17,6 +17,7 @@ import { ConfigService } from '@nestjs/config';
 import {
   AbortMultipartUploadCommand,
   CompleteMultipartUploadCommand,
+  CompleteMultipartUploadCommandInput,
   CreateMultipartUploadCommand,
   GetObjectCommand,
   HeadObjectCommand,
@@ -33,8 +34,13 @@ import {
   MultipartInitResult,
   MultipartPartDescriptor,
   ObjectStorageService,
+  ObjectHeadResult,
   PutObjectResult,
 } from './object-storage.interface';
+
+const LARGE_FILE_THRESHOLD_BYTES = 32 * 1024 * 1024;
+const DEFAULT_PART_SIZE_BYTES = 16 * 1024 * 1024;
+const DEFAULT_MULTIPART_CONCURRENCY = 2;
 
 // 结构化的 OSS 兼容对象存储配置（来自 configuration() 的 oss 段）
 interface OssCompatibleConfig {
@@ -361,5 +367,109 @@ export class OssCompatibleService implements ObjectStorageService {
       return Buffer.concat(chunks.map((chunk) => Buffer.from(chunk)));
     }
     throw new BadRequestException('对象存储返回了无法读取的文件流');
+  }
+
+  async putObjectMultipart(
+    key: string,
+    body: Buffer,
+    contentType: string,
+    concurrency = DEFAULT_MULTIPART_CONCURRENCY,
+    partSize = DEFAULT_PART_SIZE_BYTES,
+  ): Promise<PutObjectResult> {
+    this.ensureConfigured();
+    const fileSize = body.byteLength;
+
+    if (fileSize < LARGE_FILE_THRESHOLD_BYTES) {
+      return await this.putObject(key, body, contentType);
+    }
+
+    const client = this.getClient();
+    const bucket = this.oss.bucket;
+    const startAt = Date.now();
+
+    try {
+      const createResult = await client.send(
+        new CreateMultipartUploadCommand({
+          Bucket: bucket,
+          Key: key,
+          ContentType: contentType,
+        }),
+      );
+      const uploadId = createResult.UploadId;
+      if (!uploadId) {
+        throw new BadRequestException('分片上传初始化时未返回 UploadId');
+      }
+
+      const totalParts = Math.ceil(fileSize / partSize);
+      const partTasks: Array<Promise<{ PartNumber: number; ETag: string }>> = [];
+
+      for (let partNumber = 1; partNumber <= totalParts; partNumber += 1) {
+        const start = (partNumber - 1) * partSize;
+        const end = Math.min(start + partSize, fileSize);
+        const partBody = body.subarray(start, end);
+
+        partTasks.push(
+          (async () => {
+            const uploadResult = await client.send(
+              new UploadPartCommand({
+                Bucket: bucket,
+                Key: key,
+                PartNumber: partNumber,
+                UploadId: uploadId,
+                Body: partBody,
+              }),
+            );
+            const etag = uploadResult.ETag;
+            if (!etag) {
+              throw new BadRequestException(`分片 ${partNumber} 未返回 ETag`);
+            }
+            return { PartNumber: partNumber, ETag: etag };
+          })(),
+        );
+      }
+
+      // 并发限制
+      const completedParts: Array<{ PartNumber: number; ETag: string }> = [];
+      for (let i = 0; i < partTasks.length; i += concurrency) {
+        const batch = partTasks.slice(i, i + concurrency);
+        const results = await Promise.all(batch);
+        completedParts.push(...results);
+      }
+
+      completedParts.sort((a, b) => a.PartNumber - b.PartNumber);
+
+      await client.send(
+        new CompleteMultipartUploadCommand({
+          Bucket: bucket,
+          Key: key,
+          UploadId: uploadId,
+          MultipartUpload: {
+            Parts: completedParts.map((part) => ({
+              PartNumber: part.PartNumber,
+              ETag: part.ETag,
+            })),
+          },
+        }),
+      );
+
+      const durationMs = Date.now() - startAt;
+      this.logger.log(
+        `[S3] multipartUpload | key=${key} size=${fileSize} durationMs=${durationMs} partSize=${partSize} concurrency=${concurrency} totalParts=${totalParts} uploadId=${uploadId}`,
+      );
+      return { key, url: this.publicUrl(key) };
+    } catch (err: unknown) {
+      const durationMs = Date.now() - startAt;
+      const meta = err as { name?: string; $metadata?: { httpStatusCode?: number; requestId?: string }; message?: string };
+      this.logger.warn(
+        `[S3] multipartUpload failed | key=${key} size=${fileSize} durationMs=${durationMs} name=${meta.name ?? 'unknown'} status=${meta.$metadata?.httpStatusCode ?? 0} requestId=${meta.$metadata?.requestId ?? 'N/A'} message=${meta.message ?? ''}`,
+      );
+      const detail =
+        meta.message
+          ? meta.message.replace(/^.*?(name|message)[=:]\s*/i, '').slice(0, 200)
+          : '请稍后重试';
+      throw new BadRequestException(
+        `processed 文件上传 OSS 失败：${detail}`,
+      );
+    }
   }
 }

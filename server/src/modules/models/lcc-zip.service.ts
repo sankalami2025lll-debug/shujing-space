@@ -40,6 +40,7 @@ const MAX_ZIP_FILE_COUNT = 2000;
 const MAX_ZIP_SINGLE_FILE_BYTES = 1024 * 1024 * 1024;
 const MAX_ZIP_TOTAL_UNCOMPRESSED_BYTES = 1024 * 1024 * 1024;
 const MAX_ZIP_DIRECTORY_DEPTH = 8;
+const UPLOAD_CONCURRENCY = 3;
 
 interface ExtractedZipFile {
   absolutePath: string;
@@ -91,20 +92,68 @@ export class LccZipService {
       const fileFormat = path.extname(entryFile.relativePath).toLowerCase() === '.lcc2' ? 'lcc2' : 'lcc';
 
       const uploadedEntries = new Map<string, string>();
-      let uploadIndex = 0;
-      for (const file of extractedFiles) {
-        uploadIndex += 1;
+      const uploadedErrors: string[] = [];
+
+      const uploadFile = async (
+        file: ExtractedZipFile,
+        index: number,
+        total: number,
+      ): Promise<{ relativePath: string; url: string } | null> => {
         const targetKey = this.buildProcessedObjectKey(modelId, file.relativePath);
-        this.logger.log(
-          `[LCCZip] uploading file ${uploadIndex}/${extractedFiles.length} | modelId=${modelId} source=${file.relativePath} targetKey=${targetKey} size=${file.size}`,
+        const contentType = this.inferContentType(file.relativePath);
+        const fileStartAt = Date.now();
+
+        try {
+          const content = await readFile(file.absolutePath);
+          const useMultipart = file.size >= 32 * 1024 * 1024;
+          const uploadMethod = useMultipart ? 'multipartUpload' : 'putObject';
+          this.logger.log(
+            `[LCCZip] uploading ${index}/${total} | modelId=${modelId} method=${uploadMethod} source=${file.relativePath} targetKey=${targetKey} size=${file.size}`,
+          );
+
+          let uploaded: { key: string; url: string };
+          if (useMultipart) {
+            uploaded = await this.storage.putObjectMultipart(
+              targetKey, content, contentType, 2, 16 * 1024 * 1024,
+            );
+          } else {
+            uploaded = await this.storage.putObject(targetKey, content, contentType);
+          }
+          const durationMs = Date.now() - fileStartAt;
+          this.logger.log(
+            `[LCCZip] uploaded ${index}/${total} | modelId=${modelId} method=${uploadMethod} source=${file.relativePath} targetKey=${targetKey} size=${file.size} durationMs=${durationMs} success`,
+          );
+          return { relativePath: file.relativePath, url: uploaded.url };
+        } catch (error) {
+          const durationMs = Date.now() - fileStartAt;
+          const errorMsg = error instanceof Error ? error.message : String(error);
+          this.logger.warn(
+            `[LCCZip] upload failed ${index}/${total} | modelId=${modelId} source=${file.relativePath} targetKey=${targetKey} size=${file.size} durationMs=${durationMs} error=${errorMsg}`,
+          );
+          uploadedErrors.push(`文件 ${index}/${total} "${file.relativePath}" 上传失败：${errorMsg.slice(0, 150)}`);
+          return null;
+        }
+      };
+
+      const uploadQueue = extractedFiles.map((file, index) =>
+        uploadFile(file, index + 1, extractedFiles.length),
+      );
+
+      // 并发限制
+      for (let i = 0; i < uploadQueue.length; i += UPLOAD_CONCURRENCY) {
+        const batch = uploadQueue.slice(i, i + UPLOAD_CONCURRENCY);
+        const results = await Promise.all(batch);
+        for (const result of results) {
+          if (result) {
+            uploadedEntries.set(result.relativePath, result.url);
+          }
+        }
+      }
+
+      if (uploadedErrors.length > 0) {
+        throw new BadRequestException(
+          `processed 文件上传对象存储失败：${uploadedErrors.join('；')}`,
         );
-        const content = await readFile(file.absolutePath);
-        const uploaded = await this.storage.putObject(
-          targetKey,
-          content,
-          this.inferContentType(file.relativePath),
-        );
-        uploadedEntries.set(file.relativePath, uploaded.url);
       }
 
       const entryUrl = uploadedEntries.get(entryFile.relativePath);
