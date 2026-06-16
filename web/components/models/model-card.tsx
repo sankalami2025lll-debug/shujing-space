@@ -205,6 +205,17 @@ export function ModelCard({ model, isAuthed, onRequireAuth }: ModelCardProps) {
           </button>
           <button
             type="button"
+            onClick={async () => {
+              const url = `${window.location.origin}/models/${model.id}/view`;
+              if (navigator.share) {
+                try {
+                  await navigator.share({ title: model.title, url });
+                } catch { }
+              } else {
+                await navigator.clipboard.writeText(url);
+                toast.success("链接已复制");
+              }
+            }}
             className="flex items-center gap-1 text-[12px] text-gray-500 hover:text-gray-300 transition-colors"
           >
             <Share2 className="w-3.5 h-3.5" />

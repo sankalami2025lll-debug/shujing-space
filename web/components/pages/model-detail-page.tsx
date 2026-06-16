@@ -258,11 +258,23 @@ export default function ModelDetailPage({ modelId }: ModelDetailPageProps) {
 
     try {
       if (document.fullscreenElement === viewerArea) {
+        try {
+          const orientation = screen.orientation as ScreenOrientation & { unlock?: () => Promise<void> };
+          await orientation.unlock?.();
+        } catch { /* 忽略 */ }
         await document.exitFullscreen();
         return;
       }
 
       await viewerArea.requestFullscreen();
+
+      // 进入全屏后尝试锁定横屏
+      try {
+        const orientation = screen.orientation as ScreenOrientation & { lock?: (orientation: string) => Promise<void> };
+        await orientation.lock?.("landscape");
+      } catch {
+        toast.info("当前浏览器不支持自动横屏，请手动旋转手机横屏浏览");
+      }
     } catch {
       toast.error("当前浏览器暂不支持全屏");
     }
@@ -421,7 +433,8 @@ export default function ModelDetailPage({ modelId }: ModelDetailPageProps) {
   const isAuthor = !!user && !!detail && user.id === detail.userId;
 
   const handleShare = async () => {
-    const url = window.location.href;
+    const origin = window.location.origin;
+    const url = `${origin}/models/${detail?.id}/view`;
     if (navigator.share) {
       try {
         await navigator.share({ title: detail?.title, url });
@@ -438,7 +451,7 @@ export default function ModelDetailPage({ modelId }: ModelDetailPageProps) {
   };
 
   return (
-    <div className="min-h-[calc(100dvh-4rem)] md:min-h-[calc(100dvh-72px)] bg-[#0a0a0a] text-white lg:h-[calc(100dvh-72px)] lg:overflow-hidden">
+    <div className="min-h-[100dvh] bg-[#0a0a0a] text-white lg:h-[calc(100dvh-72px)] lg:overflow-hidden">
       <div className="flex flex-col lg:h-full lg:min-h-0 lg:flex-row">
         {/* 左侧 Viewer */}
         <div
@@ -472,7 +485,7 @@ export default function ModelDetailPage({ modelId }: ModelDetailPageProps) {
               </div>
               <div
                 ref={viewerHostRef}
-                className="relative min-h-[60vh] flex-1 overflow-hidden lg:h-full lg:min-h-0"
+                className="relative h-[58dvh] min-h-[400px] max-h-[70dvh] flex-1 overflow-hidden lg:h-full lg:min-h-0 lg:max-h-none"
               >
                 {isLcc ? (
                   <div
@@ -512,7 +525,7 @@ export default function ModelDetailPage({ modelId }: ModelDetailPageProps) {
               </div>
             </>
           ) : (
-            <div className="relative flex h-full min-h-[60vh] lg:min-h-0 flex-1 items-center justify-center">
+            <div className="relative flex h-full min-h-[400px] lg:min-h-0 flex-1 items-center justify-center">
               {detailLoading ? (
                 <ModelLoadingOverlay visible showText={false} />
               ) : (
@@ -534,7 +547,7 @@ export default function ModelDetailPage({ modelId }: ModelDetailPageProps) {
         {/* 右侧信息栏 — 始终渲染，不随 viewer 状态变化 */}
         <div
           id="model-info-panel"
-          className="w-full lg:h-full lg:min-h-0 lg:w-80 lg:flex-shrink-0 lg:overflow-y-auto"
+          className="w-full flex-shrink-0 lg:h-full lg:min-h-0 lg:w-80 lg:flex-shrink-0 lg:overflow-y-auto"
         >
           {detailLoading || !detail ? (
             <RightPanelSkeleton />
