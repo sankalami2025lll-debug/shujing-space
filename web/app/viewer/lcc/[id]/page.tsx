@@ -90,7 +90,7 @@ export default function LccViewerIframePage() {
   // viewerHandleRef：LccViewer 暴露的操作接口
   const viewerHandleRef = useRef<ModelViewerHandle | null>(null);
   // controlMode：观察（orbit）或漫游（walk）模式
-  const [controlMode, setControlMode] = useState<ModelViewerControlMode>("orbit");
+  const [controlMode, setControlMode] = useState<ModelViewerControlMode>("walk");
   // movementInput：漫游模式下的移动方向状态
   const [movementInput, setMovementInput] = useState<ModelViewerMovementInput>(EMPTY_MOVEMENT_INPUT);
   // moveSpeedMultiplier：Shift 加速倍率
@@ -377,7 +377,7 @@ export default function LccViewerIframePage() {
   useEffect(() => {
     clearMovementState();
     setIsHelpOpen(false);
-    setControlMode("orbit");
+    setControlMode("walk");
   }, [clearMovementState, detail?.id]);
 
   /* ---- 渲染：Loading ---- */

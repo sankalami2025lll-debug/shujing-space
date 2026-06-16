@@ -80,7 +80,7 @@ export function ModelViewerShell({ model, onLaunchViewSaved }: ModelViewerShellP
   const [movementInput, setMovementInput] = useState<ModelViewerMovementInput>(EMPTY_MOVEMENT_INPUT);
   const [moveSpeedMultiplier, setMoveSpeedMultiplier] = useState(1);
   const [saveLaunchViewPending, setSaveLaunchViewPending] = useState(false);
-  const [controlMode, setControlMode] = useState<ModelViewerControlMode>("orbit");
+  const [controlMode, setControlMode] = useState<ModelViewerControlMode>("walk");
   const viewerKind = getModelViewerKind(model);
   const processingBlocked = model.processingStatus !== "ready";
   const processingHint = processingStatusText(model.processingStatus);
@@ -407,7 +407,7 @@ export function ModelViewerShell({ model, onLaunchViewSaved }: ModelViewerShellP
 
   return (
     <div className="flex h-full flex-col bg-[#0d0d0d]">
-      <div ref={viewerViewportRef} className="relative min-h-[520px] flex-1 overflow-hidden">
+      <div ref={viewerViewportRef} className="relative min-h-[360px] flex-1 overflow-hidden lg:min-h-[520px]">
         {renderViewer()}
         <ModelViewerHelp open={isLccViewer && isHelpOpen} />
         <div className="pointer-events-none absolute bottom-4 left-4 z-20">
