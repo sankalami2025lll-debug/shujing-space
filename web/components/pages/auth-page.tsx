@@ -39,6 +39,7 @@ export default function AuthPage() {
   const [regAccount, setRegAccount] = useState("");
   const [regCode, setRegCode] = useState("");
   const [regPassword, setRegPassword] = useState("");
+  const [regConfirmPassword, setRegConfirmPassword] = useState("");
   const [regCompany, setRegCompany] = useState("");
   const [regPurpose, setRegPurpose] = useState("");
 
@@ -143,6 +144,10 @@ export default function AuthPage() {
     }
     if (regPassword.length < 6) {
       toast.error("密码至少 6 位");
+      return;
+    }
+    if (regPassword !== regConfirmPassword) {
+      toast.error("两次密码输入不一致");
       return;
     }
     setRegistering(true);
@@ -487,6 +492,19 @@ export default function AuthPage() {
                     >
                       {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                     </button>
+                  </div>
+                </div>
+
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-[13px] text-gray-400">确认密码</label>
+                  <div className="relative">
+                    <input
+                      className={inputClass}
+                      placeholder="请再次输入密码"
+                      type={showPassword ? "text" : "password"}
+                      value={regConfirmPassword}
+                      onChange={(e) => setRegConfirmPassword(e.target.value)}
+                    />
                   </div>
                 </div>
 

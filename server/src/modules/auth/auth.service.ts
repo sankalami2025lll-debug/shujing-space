@@ -85,30 +85,29 @@ export class AuthService {
    */
   async login(dto: LoginDto): Promise<{ accessToken: string; user: UserVm }> {
     const user = await this.findByAccount(dto.account);
-    // 统一用「账号或密码错误」类话术，避免账号是否存在被探测（密码登录场景）
-    if (!user) {
-      if (dto.loginType === 'code') {
-        throw new UnauthorizedException('账号不存在，请先注册');
-      }
-      throw new UnauthorizedException('账号或密码错误');
-    }
-    if (user.status === UserStatus.disabled) {
-      throw new UnauthorizedException('账号已被禁用，请联系管理员');
-    }
 
     if (dto.loginType === 'code') {
-      // 验证码登录
+      // 验证码登录：用户不存在时统一提示，不暴露账号是否注册
+      if (!user) {
+        throw new UnauthorizedException('验证码错误或账号不存在');
+      }
+      if (user.status === UserStatus.disabled) {
+        throw new UnauthorizedException('账号已被禁用，请联系管理员');
+      }
       if (!dto.code) {
         throw new BadRequestException('请输入验证码');
       }
       await this.verification.verifyCode(dto.account, VerificationScene.login, dto.code);
     } else {
-      // 密码登录
+      // 密码登录：用户不存在 / 未设置密码 / 密码不匹配 都返回同一文案，避免账号枚举
+      if (!user || !user.passwordHash) {
+        throw new UnauthorizedException('账号或密码错误');
+      }
+      if (user.status === UserStatus.disabled) {
+        throw new UnauthorizedException('账号已被禁用，请联系管理员');
+      }
       if (!dto.password) {
         throw new BadRequestException('请输入密码');
-      }
-      if (!user.passwordHash) {
-        throw new UnauthorizedException('该账号未设置密码，请用验证码登录');
       }
       const matched = await bcrypt.compare(dto.password, user.passwordHash);
       if (!matched) {
@@ -126,7 +125,7 @@ export class AuthService {
   async resetPassword(dto: ResetPasswordDto): Promise<{ reset: true }> {
     const user = await this.findByAccount(dto.account);
     if (!user) {
-      throw new NotFoundException('账号不存在');
+      throw new NotFoundException('账号未注册或重置链接失效');
     }
     await this.verification.verifyCode(dto.account, VerificationScene.reset, dto.code);
     const passwordHash = await bcrypt.hash(dto.newPassword, 10);

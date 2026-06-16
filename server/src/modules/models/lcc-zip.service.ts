@@ -41,6 +41,10 @@ const MAX_ZIP_SINGLE_FILE_BYTES = 1024 * 1024 * 1024;
 const MAX_ZIP_TOTAL_UNCOMPRESSED_BYTES = 1024 * 1024 * 1024;
 const MAX_ZIP_DIRECTORY_DEPTH = 8;
 const UPLOAD_CONCURRENCY = 3;
+// processUploadedZip 中 downloadObject 会将整个 ZIP 加载到内存，
+// MAX_ZIP_SIZE_BYTES 限制 ZIP 文件本身的大小，防止 OOM。
+// 未来可改为流式下载 + 流式解压，彻底消除内存峰值。
+const MAX_ZIP_SIZE_BYTES = 512 * 1024 * 1024;
 
 interface ExtractedZipFile {
   absolutePath: string;
@@ -71,6 +75,13 @@ export class LccZipService {
     const extractDir = path.join(tempRoot, 'extracted');
 
     try {
+      // 下载前先通过 headObject 检查 ZIP 文件大小，防止超大文件 OOM
+      const head = await this.storage.headObject(objectKey);
+      if (head.size > MAX_ZIP_SIZE_BYTES) {
+        throw new BadRequestException(
+          `压缩包文件过大（最大 ${Math.round(MAX_ZIP_SIZE_BYTES / 1024 / 1024)}MB）`,
+        );
+      }
       const archiveBuffer = await this.storage.downloadObject(objectKey);
       await writeFile(zipPath, archiveBuffer);
       await mkdir(extractDir, { recursive: true });
@@ -135,14 +146,13 @@ export class LccZipService {
         }
       };
 
-      const uploadQueue = extractedFiles.map((file, index) =>
-        uploadFile(file, index + 1, extractedFiles.length),
-      );
-
-      // 并发限制
-      for (let i = 0; i < uploadQueue.length; i += UPLOAD_CONCURRENCY) {
-        const batch = uploadQueue.slice(i, i + UPLOAD_CONCURRENCY);
-        const results = await Promise.all(batch);
+      // 并发限制：逐个批次启动，每批 UPLOAD_CONCURRENCY 个上传并行
+      // 注意：使用工厂函数数组而非 Promise 数组，避免全部上传同时启动
+      for (let i = 0; i < extractedFiles.length; i += UPLOAD_CONCURRENCY) {
+        const batch = extractedFiles.slice(i, i + UPLOAD_CONCURRENCY);
+        const results = await Promise.all(
+          batch.map((file, offset) => uploadFile(file, i + offset + 1, extractedFiles.length)),
+        );
         for (const result of results) {
           if (result) {
             uploadedEntries.set(result.relativePath, result.url);

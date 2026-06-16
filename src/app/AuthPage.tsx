@@ -50,6 +50,8 @@ export default function AuthPage({ onNavigateHome, onNavigateModels }: AuthPageP
   const [regCode, setRegCode] = useState("");
   // regPassword：注册设置的登录密码
   const [regPassword, setRegPassword] = useState("");
+  // regConfirmPassword：确认密码，注册时与 regPassword 一致性校验
+  const [regConfirmPassword, setRegConfirmPassword] = useState("");
   // regCompany：公司名称（可选）
   const [regCompany, setRegCompany] = useState("");
   // regPurpose：使用目的（对应后端 roleType，可选）
@@ -177,6 +179,10 @@ export default function AuthPage({ onNavigateHome, onNavigateModels }: AuthPageP
     }
     if (regPassword.length < 6) {
       toast.error("密码至少 6 位");
+      return;
+    }
+    if (regPassword !== regConfirmPassword) {
+      toast.error("两次密码输入不一致");
       return;
     }
     setRegistering(true);
@@ -511,6 +517,19 @@ export default function AuthPage({ onNavigateHome, onNavigateModels }: AuthPageP
                     >
                       {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                     </button>
+                  </div>
+                </div>
+
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-[13px] text-gray-400">确认密码</label>
+                  <div className="relative">
+                    <input
+                      className={inputClass}
+                      placeholder="请再次输入密码"
+                      type={showPassword ? "text" : "password"}
+                      value={regConfirmPassword}
+                      onChange={(e) => setRegConfirmPassword(e.target.value)}
+                    />
                   </div>
                 </div>
 
