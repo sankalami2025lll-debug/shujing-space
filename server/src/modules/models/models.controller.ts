@@ -16,6 +16,7 @@ import {
   HttpStatus,
   Param,
   ParseIntPipe,
+  Patch,
   Post,
   Put,
   Query,
@@ -29,6 +30,7 @@ import { AuthUser } from '../auth/jwt-payload.interface';
 import { CreateModelDto } from './dto/create-model.dto';
 import { QueryModelsDto } from './dto/query-models.dto';
 import { UpdateLaunchViewDto } from './dto/update-launch-view.dto';
+import { UpdateModelDto } from './dto/update-model.dto';
 import { ModelsService } from './models.service';
 
 @ApiTags('models')
@@ -97,6 +99,21 @@ export class ModelsController {
     @Param('id', ParseIntPipe) id: number,
   ) {
     return this.modelsService.clearLaunchView(user.id, BigInt(id));
+  }
+
+  // PATCH /api/models/:id：更新模型基础信息（需登录且仅作者本人可调用）。
+  // 允许更新：title、description、coverUrl。
+  @Patch(':id')
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: '更新模型基础信息（需登录且仅模型归属用户可调用）' })
+  async update(
+    @CurrentUser() user: AuthUser,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: UpdateModelDto,
+  ) {
+    return this.modelsService.update(user.id, BigInt(id), dto);
   }
 
   // POST /api/models/:id/view：记录浏览量（2E）。游客 / 登录均可，无需鉴权（不挂 JwtAuthGuard）。

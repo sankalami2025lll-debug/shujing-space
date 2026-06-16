@@ -13,12 +13,14 @@ import {
   User,
   Loader2,
   Trash2,
+  Edit,
   X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { ModelLoadingOverlay } from "@/components/models/model-loading-overlay";
 import { ModelViewerShell } from "@/components/models/model-viewer-shell";
 import { TrainingModal } from "@/components/models/training-modal";
+import EditModelModal from "@/components/models/edit-model-modal";
 import { useAuth } from "@/components/providers/auth-provider";
 import {
   getModelDetail,
@@ -112,6 +114,7 @@ export default function ModelDetailPage({ modelId }: ModelDetailPageProps) {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [deletePending, setDeletePending] = useState(false);
   const [showTraining, setShowTraining] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
   const viewedRef = useRef<number | null>(null);
 
   const modelViewerAreaRef = useRef<HTMLDivElement | null>(null);
@@ -645,24 +648,34 @@ export default function ModelDetailPage({ modelId }: ModelDetailPageProps) {
                   </button>
                 )}
                 {isAuthor && (
-                  <button
-                    type="button"
-                    onClick={(event) => void handleDelete(event)}
-                    disabled={deletePending}
-                    className="w-full py-2.5 rounded-xl bg-red-500/10 border border-red-500/20 text-red-300 text-[14px] hover:bg-red-500/15 hover:border-red-500/30 transition-all flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
-                  >
-                    {deletePending ? (
-                      <>
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                        删除中
-                      </>
-                    ) : (
-                      <>
-                        <Trash2 className="w-4 h-4" />
-                        删除模型
-                      </>
-                    )}
-                  </button>
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => setShowEditModal(true)}
+                      className="w-full py-2.5 rounded-xl bg-white/5 border border-white/10 text-[14px] text-gray-300 hover:bg-white/8 transition-all flex items-center justify-center gap-2"
+                    >
+                      <Edit className="w-4 h-4" />
+                      编辑模型
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(event) => void handleDelete(event)}
+                      disabled={deletePending}
+                      className="w-full py-2.5 rounded-xl bg-red-500/10 border border-red-500/20 text-red-300 text-[14px] hover:bg-red-500/15 hover:border-red-500/30 transition-all flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
+                    >
+                      {deletePending ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          删除中
+                        </>
+                      ) : (
+                        <>
+                          <Trash2 className="w-4 h-4" />
+                          删除模型
+                        </>
+                      )}
+                    </button>
+                  </>
                 )}
               </div>
             </div>
@@ -722,6 +735,17 @@ export default function ModelDetailPage({ modelId }: ModelDetailPageProps) {
       )}
 
       {showTraining && <TrainingModal onClose={() => setShowTraining(false)} />}
+      {detail && showEditModal && (
+        <EditModelModal
+          open={showEditModal}
+          model={detail}
+          onClose={() => setShowEditModal(false)}
+          onSaved={(updated) => {
+            setDetail(updated);
+            setShowEditModal(false);
+          }}
+        />
+      )}
     </div>
   );
 }

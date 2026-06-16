@@ -13,6 +13,12 @@ import type {
   PaginatedResponse,
 } from "../types";
 
+export type ModelEditPayload = {
+  title?: string;
+  description?: string;
+  coverUrl?: string;
+};
+
 // ModelSort：后端排序枚举（latest / views / favorites / recommended）
 export type ModelSort = "latest" | "views" | "favorites" | "recommended";
 
@@ -92,4 +98,12 @@ export function favoriteModel(id: number): Promise<FavoriteResult> {
 // unfavoriteModel：取消收藏，返回 { favorited:false, favoritesCount }
 export function unfavoriteModel(id: number): Promise<FavoriteResult> {
   return http.delete<FavoriteResult>(`/models/${id}/favorite`);
+}
+
+// updateModel：编辑模型基础信息（PATCH /api/models/:id，需登录且仅作者可调用）。
+export function updateModel(
+  id: number,
+  payload: ModelEditPayload,
+): Promise<ModelDetail> {
+  return http.patch<ModelDetail>(`/models/${id}`, payload);
 }

@@ -27,6 +27,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { extractExtension } from '../uploads/upload.constants';
 import { CreateModelDto } from './dto/create-model.dto';
 import { UpdateLaunchViewDto } from './dto/update-launch-view.dto';
+import { UpdateModelDto } from './dto/update-model.dto';
 import { isViewerUrlAllowed } from './viewer-url.util';
 import { ModelSortValue, QueryModelsDto } from './dto/query-models.dto';
 import { ModelLaunchView, parseModelLaunchView } from './launch-view.contract';
@@ -350,6 +351,59 @@ export class ModelsService {
     });
 
     return toModelDetailVm(created, undefined, true);
+  }
+
+  async update(
+    userId: bigint,
+    id: bigint,
+    dto: UpdateModelDto,
+  ): Promise<ModelDetailVm> {
+    const model = await this.prisma.model.findFirst({
+      where: { id, deletedAt: null },
+    });
+    if (!model) {
+      throw new NotFoundException('模型不存在或暂未公开');
+    }
+    if (model.userId !== userId) {
+      throw new ForbiddenException('仅模型归属用户可以编辑');
+    }
+
+    const data: Prisma.ModelUpdateInput = {};
+
+    if (dto.title !== undefined) {
+      const trimmed = dto.title.trim();
+      if (trimmed.length === 0) {
+        throw new BadRequestException('title 不能为空');
+      }
+      data.title = trimmed;
+    }
+
+    if (dto.description !== undefined) {
+      data.description = dto.description.trim();
+    }
+
+    if (dto.coverUrl !== undefined) {
+      const trimmed = dto.coverUrl.trim();
+      if (trimmed.length > 0 && !/^https?:\/\//i.test(trimmed)) {
+        throw new BadRequestException('coverUrl 仅支持 http:// 或 https:// 协议');
+      }
+      data.coverUrl = trimmed;
+    }
+
+    if (Object.keys(data).length === 0) {
+      throw new BadRequestException('至少要更新一个字段');
+    }
+
+    const updated = await this.prisma.model.update({
+      where: { id },
+      data,
+      include: {
+        user: { select: { nickname: true } },
+        category: { select: { id: true, name: true, slug: true } },
+      },
+    });
+
+    return toModelDetailVm(updated, undefined, true);
   }
 
   /**
