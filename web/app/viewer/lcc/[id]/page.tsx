@@ -85,8 +85,6 @@ export default function LccViewerIframePage() {
   const [detailError, setDetailError] = useState<string | null>(null);
 
   /* ---- Viewer 状态 ---- */
-  // viewerViewportRef：全屏容器 ref，用于 requestFullscreen
-  const viewerViewportRef = useRef<HTMLDivElement | null>(null);
   // viewerHandleRef：LccViewer 暴露的操作接口
   const viewerHandleRef = useRef<ModelViewerHandle | null>(null);
   // controlMode：观察（orbit）或漫游（walk）模式
@@ -99,6 +97,22 @@ export default function LccViewerIframePage() {
   const [isHelpOpen, setIsHelpOpen] = useState(false);
   // saveLaunchViewPending：保存启动视图 loading 态
   const [saveLaunchViewPending, setSaveLaunchViewPending] = useState(false);
+
+  /* ---- 自动聚焦 viewer 容器（确保 iframe / 独立页面获得键盘焦点，WASD 可用） ---- */
+  const viewerContainerRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (detailLoading || !detail) return;
+    const container = viewerContainerRef.current;
+    if (!container) return;
+    const focusViewer = () => {
+      container.focus({ preventScroll: true });
+    };
+    // 第一次聚焦
+    focusViewer();
+    // 延迟再聚焦一次（等 LccViewer 完成初始化后）
+    const timer = setTimeout(focusViewer, 500);
+    return () => clearTimeout(timer);
+  }, [detailLoading, detail]);
 
   /* ---- 派生状态 ---- */
   const processingBlocked = detail ? detail.processingStatus !== "ready" : true;
@@ -119,7 +133,7 @@ export default function LccViewerIframePage() {
 
   /* ---- 全屏 ---- */
   const handleFullscreen = useCallback(() => {
-    const element = viewerViewportRef.current;
+    const element = viewerContainerRef.current;
     if (!element) return;
     if (document.fullscreenElement === element) {
       document.exitFullscreen().catch(() => {});
@@ -401,7 +415,11 @@ export default function LccViewerIframePage() {
 
   /* ---- 渲染：LCC Viewer ---- */
   return (
-    <div ref={viewerViewportRef} className="h-screen w-screen relative bg-[#0d0d0d] overflow-hidden">
+    <div
+      ref={viewerContainerRef}
+      tabIndex={0}
+      className="h-screen w-screen relative bg-[#0d0d0d] overflow-hidden outline-none"
+    >
       {/* LCC Viewer 全屏渲染 */}
       <LccViewer
         key={`${detail.id}-${detail.viewerUrl || ""}-${detail.fileFormat || "none"}`}
