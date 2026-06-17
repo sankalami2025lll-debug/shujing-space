@@ -155,7 +155,6 @@ interface LccViewerProps {
   processingBlocked?: boolean;
   /** 控制模式：orbit=轨道观察（默认），walk=漫游（FPS） */
   controlMode?: ModelViewerControlMode;
-  onViewerReady?: () => void;
 }
 
 let lccSdkPromise: Promise<LccRenderApi> | null = null;
@@ -1573,7 +1572,6 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
   defaultCameraJson,
   processingBlocked = false,
   controlMode = "orbit",
-  onViewerReady,
 }, ref) {
   const mountRef = useRef<HTMLDivElement | null>(null);
   const viewerRootRef = useRef<HTMLDivElement | null>(null);
@@ -1630,13 +1628,11 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
   const lccResourceActiveCountRef = useRef(0);
   const lccResourceLastStartAtRef = useRef<number | null>(null);
   const lccResourceLastEndAtRef = useRef<number | null>(null);
-  const viewerReadyRef = useRef(false);
-  const readyFinalizeTimerRef = useRef<number | null>(null);
-  const [viewerReadyState, setViewerReadyState] = useState(false);
   const firstFrameContentFramesRef = useRef(0);
   const firstFrameContentReadyAtRef = useRef<number | null>(null);
   const [viewerStatus, setViewerStatus] = useState<LccViewerStatus>("idle");
   const [progress, setProgress] = useState(0);
+  const [firstFrameState, setFirstFrameState] = useState(false);
   const [sdkLoadedState, setSdkLoadedState] = useState(false);
   const normalizedModelUrl = useMemo(() => modelUrl?.trim() ?? "", [modelUrl]);
   const normalizedViewerUrl = useMemo(() => viewerUrl?.trim() ?? "", [viewerUrl]);
@@ -1788,30 +1784,6 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
     // #endregion
     logLccDebug("loading completed, awaiting first frame", { reason });
   }, [markDebugEvent, setDebugAttr]);
-
-  /* ---- 最终 ready 判定：firstFrame + 延迟 800ms + RAF x2 + canMove + canvas 连通 ---- */
-  const scheduleViewerReadyFinalize = useCallback(() => {
-    if (viewerReadyRef.current || readyFinalizeTimerRef.current !== null) return;
-
-    readyFinalizeTimerRef.current = window.setTimeout(() => {
-      readyFinalizeTimerRef.current = null;
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          if (
-            loadingCompletedRef.current &&
-            firstFrameRenderedRef.current &&
-            canMoveRef.current &&
-            rendererRef.current?.domElement?.isConnected
-          ) {
-            viewerReadyRef.current = true;
-            setViewerReadyState(true);
-            setDebugAttr("data-lcc-viewer-ready", "true");
-            onViewerReady?.();
-          }
-        });
-      });
-    }, 800);
-  }, [onViewerReady, setDebugAttr]);
 
   const resolveRelevantResourceStability = useCallback(
     (now: number) => {
@@ -2411,11 +2383,6 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
       lastFrameTimeRef.current = null;
       lastLoadedObjectRef.current = null;
       defaultViewRef.current = null;
-      viewerReadyRef.current = false;
-      if (readyFinalizeTimerRef.current !== null) {
-        window.clearTimeout(readyFinalizeTimerRef.current);
-        readyFinalizeTimerRef.current = null;
-      }
       // 重置 bounds 上下文，防止跨模型污染（二次打开时旧 bounds 影响新模型视角）
       lastActiveBoundsRef.current = null;
       lastBoundsMaxDimRef.current = 10;
@@ -2438,7 +2405,7 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
       progressRef.current = 0;
       setViewerStatus("idle");
       setProgress(0);
-      setViewerReadyState(false);
+      setFirstFrameState(false);
       setSdkLoadedState(false);
       return () => {
         effectDisposed = true;
@@ -2460,7 +2427,7 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
       progressRef.current = 0;
       setViewerStatus("error");
       setProgress(0);
-      setViewerReadyState(false);
+      setFirstFrameState(false);
       setSdkLoadedState(false);
       logLccError("未配置 LCC 模型地址");
       return () => {
@@ -2496,12 +2463,7 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
       lastFrameTimeRef.current = null;
       setViewerStatus("loading");
       setProgress(0);
-      setViewerReadyState(false);
-      viewerReadyRef.current = false;
-      if (readyFinalizeTimerRef.current !== null) {
-        window.clearTimeout(readyFinalizeTimerRef.current);
-        readyFinalizeTimerRef.current = null;
-      }
+      setFirstFrameState(false);
       // #region debug-point lcc-stuck-92
       completeCallCountRef.current = 0;
       setDebugAttr("data-lcc-debug-progress", "0.000");
@@ -3377,13 +3339,13 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
                     firstFrameRenderedRef.current = true;
                     progressRef.current = 1;
                     setProgress(1);
+                    setFirstFrameState(true);
                     setDebugAttr("data-lcc-first-frame", "true");
                     markDebugEvent("firstFrameRendered", { loadId });
                     logLccDebug("model content visible, first frame complete", {
                       contentFrames: firstFrameContentFramesRef.current,
                       lccResources: lccResourceCompletedCountRef.current,
                     });
-                    scheduleViewerReadyFinalize();
                   } else {
                     setDebugAttr("data-lcc-debug-first-frame-wait", "post-delay");
                   }
@@ -3499,11 +3461,11 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
     setDebugAttr,
   ]);
 
-  const showOverlay = processingBlocked || viewerStatus === "error" || !viewerReadyState;
+  const showOverlay = processingBlocked || viewerStatus !== "loaded" || !firstFrameState;
   const displayProgress =
-    viewerReadyState
+    viewerStatus === "loaded" && firstFrameRenderedRef.current
       ? 1
-      : viewerStatus === "loaded" && firstFrameRenderedRef.current
+      : viewerStatus === "loaded"
         ? 0.98
         : Math.min(Number.isFinite(progress) ? progress : 0, sdkLoadedState ? 0.98 : 0.95);
   const overlayStatus = processingBlocked
@@ -3517,7 +3479,6 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
       ref={viewerRootRef}
       data-lcc-loaded={viewerStatus === "loaded" ? "true" : "false"}
       data-lcc-first-frame={firstFrameRenderedRef.current ? "true" : "false"}
-      data-lcc-viewer-ready={viewerReadyState ? "true" : "false"}
       data-lcc-viewer-status={viewerStatus}
       data-lcc-complete-reason={completeReasonRef.current ?? ""}
       data-lcc-sdk-loaded={sdkLoadedRef.current ? "true" : "false"}
