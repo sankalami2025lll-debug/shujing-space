@@ -40,6 +40,23 @@ export default function ModelShareViewerPage({ modelId }: { modelId: string }) {
   const [lccIframeViewerErrored, setLccIframeViewerErrored] = useState(false);
   const lccIframeRef = useRef<HTMLIFrameElement | null>(null);
   const lccIframeVisibilityPollRef = useRef<number | null>(null);
+
+  /* ---- 监听 LCC iframe 内部 postMessage 的 viewerReady 信号 ---- */
+  const handleLccViewerReadyMessage = useCallback((event: MessageEvent) => {
+    if (event.origin !== window.location.origin) return;
+    if (event.data?.type !== "SHUJING_LCC_VIEWER_READY") return;
+
+    setLccIframeModelLoaded(true);
+    if (lccIframeVisibilityPollRef.current !== null) {
+      window.clearInterval(lccIframeVisibilityPollRef.current);
+      lccIframeVisibilityPollRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => {
+    window.addEventListener("message", handleLccViewerReadyMessage);
+    return () => window.removeEventListener("message", handleLccViewerReadyMessage);
+  }, [handleLccViewerReadyMessage]);
   const lccExpectedPath = detail?.id ? `/viewer/lcc/${detail.id}` : null;
   const lccIframeKey = `${detail?.id ?? "pending"}-${detail?.viewerUrl || ""}`;
   const showLccOuterOverlay = isLcc && !lccIframeModelLoaded && !lccIframeViewerErrored;
@@ -165,7 +182,7 @@ export default function ModelShareViewerPage({ modelId }: { modelId: string }) {
 
       const childRoot = iframeDoc.querySelector("[data-lcc-viewer-status]");
       const childViewerStatus = childRoot?.getAttribute("data-lcc-viewer-status");
-      const childFirstFrame = childRoot?.getAttribute("data-lcc-first-frame") === "true";
+      const childViewerReady = childRoot?.getAttribute("data-lcc-viewer-ready") === "true";
       if (childViewerStatus === "error") {
         setLccIframeViewerErrored(true);
         if (lccIframeVisibilityPollRef.current !== null) {
@@ -174,12 +191,16 @@ export default function ModelShareViewerPage({ modelId }: { modelId: string }) {
         }
         return;
       }
-      if (!childRoot || !childFirstFrame) {
+      if (!childRoot || !childViewerReady) {
         if (Date.now() - pollStartedAt > 30000) {
-          setLccIframeModelLoaded(true);
-          if (lccIframeVisibilityPollRef.current !== null) {
-            window.clearInterval(lccIframeVisibilityPollRef.current);
-            lccIframeVisibilityPollRef.current = null;
+          const childFirstFrame = childRoot?.getAttribute("data-lcc-first-frame") === "true";
+          const childLoaded = childRoot?.getAttribute("data-lcc-loaded") === "true";
+          if (childFirstFrame && childLoaded) {
+            setLccIframeModelLoaded(true);
+            if (lccIframeVisibilityPollRef.current !== null) {
+              window.clearInterval(lccIframeVisibilityPollRef.current);
+              lccIframeVisibilityPollRef.current = null;
+            }
           }
         }
         return;

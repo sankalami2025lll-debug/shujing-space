@@ -432,6 +432,12 @@ export default function LccViewerIframePage() {
         defaultCameraJson={detail.defaultCameraJson}
         processingBlocked={processingBlocked}
         controlMode={controlMode}
+        onViewerReady={() => {
+          window.parent?.postMessage(
+            { type: "SHUJING_LCC_VIEWER_READY", modelId: detail.id },
+            window.location.origin,
+          );
+        }}
       />
 
       {/* 帮助面板（LCC 操作说明） */}
