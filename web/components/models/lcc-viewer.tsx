@@ -2624,7 +2624,10 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
         controls.update();
         controlsRef.current = controls;
         interactionCanvasRef.current = currentRenderer.domElement;
-        applyControlModeRef.current(controlModeRef.current);
+        // 强制首次应用当前默认控制模式，避免 applyControlMode 检查 previousMode === mode 时跳过
+        const initialControlMode = controlModeRef.current;
+        controlModeRef.current = initialControlMode === "walk" ? "orbit" : "walk";
+        applyControlModeRef.current(initialControlMode);
 
         const syncSize = () => {
           if (!mountRef.current || !rendererRef.current) return;
