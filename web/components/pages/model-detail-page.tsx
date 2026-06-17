@@ -302,6 +302,10 @@ export default function ModelDetailPage({ modelId }: ModelDetailPageProps) {
   }, [detail, isLcc]);
 
   const handleLccIframeLoad = useCallback(() => {
+    // iframe 加载完成后自动聚焦，使其接收键盘事件（WASD 漫游）
+    lccIframeRef.current?.focus({ preventScroll: true });
+    setTimeout(() => lccIframeRef.current?.focus({ preventScroll: true }), 600);
+
     if (lccIframeVisibilityPollRef.current !== null) {
       window.clearInterval(lccIframeVisibilityPollRef.current);
       lccIframeVisibilityPollRef.current = null;
@@ -503,6 +507,7 @@ export default function ModelDetailPage({ modelId }: ModelDetailPageProps) {
                       className="h-full w-full border-0"
                       allow="fullscreen"
                       title={detail.title}
+                      tabIndex={0}
                       onLoad={handleLccIframeLoad}
                     />
                     <div
