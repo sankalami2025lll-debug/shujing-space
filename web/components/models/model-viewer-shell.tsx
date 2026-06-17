@@ -213,7 +213,7 @@ export function ModelViewerShell({ model, onLaunchViewSaved }: ModelViewerShellP
   useEffect(() => {
     clearMovementState();
     setIsHelpOpen(false);
-    setControlMode("orbit");
+    setControlMode("walk");
   }, [clearMovementState, model.id]);
 
   useEffect(() => {
