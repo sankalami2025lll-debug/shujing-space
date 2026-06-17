@@ -1632,6 +1632,7 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
   const firstFrameContentReadyAtRef = useRef<number | null>(null);
   const [viewerStatus, setViewerStatus] = useState<LccViewerStatus>("idle");
   const [progress, setProgress] = useState(0);
+  const [firstFrameState, setFirstFrameState] = useState(false);
   const [sdkLoadedState, setSdkLoadedState] = useState(false);
   const normalizedModelUrl = useMemo(() => modelUrl?.trim() ?? "", [modelUrl]);
   const normalizedViewerUrl = useMemo(() => viewerUrl?.trim() ?? "", [viewerUrl]);
@@ -2404,6 +2405,7 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
       progressRef.current = 0;
       setViewerStatus("idle");
       setProgress(0);
+      setFirstFrameState(false);
       setSdkLoadedState(false);
       return () => {
         effectDisposed = true;
@@ -2425,6 +2427,7 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
       progressRef.current = 0;
       setViewerStatus("error");
       setProgress(0);
+      setFirstFrameState(false);
       setSdkLoadedState(false);
       logLccError("未配置 LCC 模型地址");
       return () => {
@@ -2460,6 +2463,7 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
       lastFrameTimeRef.current = null;
       setViewerStatus("loading");
       setProgress(0);
+      setFirstFrameState(false);
       // #region debug-point lcc-stuck-92
       completeCallCountRef.current = 0;
       setDebugAttr("data-lcc-debug-progress", "0.000");
@@ -3335,6 +3339,7 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
                     firstFrameRenderedRef.current = true;
                     progressRef.current = 1;
                     setProgress(1);
+                    setFirstFrameState(true);
                     setDebugAttr("data-lcc-first-frame", "true");
                     markDebugEvent("firstFrameRendered", { loadId });
                     logLccDebug("model content visible, first frame complete", {
@@ -3456,7 +3461,7 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
     setDebugAttr,
   ]);
 
-  const showOverlay = processingBlocked || viewerStatus !== "loaded";
+  const showOverlay = processingBlocked || viewerStatus !== "loaded" || !firstFrameState;
   const displayProgress =
     viewerStatus === "loaded" && firstFrameRenderedRef.current
       ? 1
