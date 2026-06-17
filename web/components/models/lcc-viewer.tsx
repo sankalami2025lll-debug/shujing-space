@@ -17,8 +17,8 @@ import type {
 } from "@/components/models/viewers/types";
 import type { LaunchViewSaveResult, ModelLaunchView } from "@/lib/types";
 
-const LCC_WEB_VERSION = "0.6.0";
-const LCC_WEB_UMD_URL = `/vendor/lcc-web/${LCC_WEB_VERSION}/lcc-${LCC_WEB_VERSION}.umd.js`;
+const LCC_WEB_VERSION = "0.6.1";
+const LCC_WEB_UMD_URL = `/vendor/lcc-web/${LCC_WEB_VERSION}/lcc-web-sdk.umd.js`;
 const IS_DEV = process.env.NODE_ENV !== "production";
 const LCC_APP_KEY = process.env.NEXT_PUBLIC_LCC_APP_KEY?.trim();
 const LCC_STABLE_RESOURCE_WINDOW_MS = 500;
