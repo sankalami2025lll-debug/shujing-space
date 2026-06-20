@@ -34,10 +34,28 @@ interface ModelViewerToolbarProps {
   isHelpOpen?: boolean;
   canShowSaveLaunchView?: boolean;
   saveLaunchViewPending?: boolean;
-  /** 观察 / 漫游模式切换（LCC viewer） */
+  /** 枢轴 / 第一人称模式切换（LCC viewer） */
   controlMode?: ModelViewerControlMode;
   onToggleControlMode?: () => void;
   canToggleControlMode?: boolean;
+}
+
+/** walk / orbit 对用户显示的中文名称（内部枚举值不变） */
+const CONTROL_MODE_UI_LABEL: Record<ModelViewerControlMode, string> = {
+  walk: "第一人称",
+  orbit: "枢轴模式",
+};
+
+function getControlModeToggleAriaLabel(mode: ModelViewerControlMode) {
+  return mode === "walk"
+    ? "当前：第一人称，点击切换枢轴模式"
+    : "当前：枢轴模式，点击切换第一人称";
+}
+
+function getControlModeToggleTitle(mode: ModelViewerControlMode) {
+  return mode === "walk"
+    ? "第一人称（WASD + 左键转头）"
+    : "枢轴模式（轨道旋转）";
 }
 
 const TOOL_ITEMS = [
@@ -48,7 +66,7 @@ const TOOL_ITEMS = [
   { key: "orbit", label: "旋转 / 环绕", icon: Move3D, enabledBy: "orbit" },
   { key: "pan", label: "平移", icon: Maximize, enabledBy: "pan" },
   { key: "zoom", label: "缩放", icon: ScanSearch, enabledBy: "zoom" },
-  { key: "walk", label: "漫游模式", icon: Map, enabledBy: "walk" },
+  { key: "walk", label: "第一人称", icon: Map, enabledBy: "walk" },
   { key: "measure", label: "测量", icon: Ruler, enabledBy: "measure" },
   { key: "annotation", label: "标注", icon: PenSquare, enabledBy: "annotation" },
   { key: "layer", label: "图层", icon: Layers3, enabledBy: "layer" },
@@ -136,8 +154,8 @@ export function ModelViewerToolbar({
         {isLccToolbar ? (
           <button
             type="button"
-            aria-label={controlMode === "walk" ? "当前：漫游模式，点击切换观察" : "当前：观察模式，点击切换漫游"}
-            title={controlMode === "walk" ? "漫游模式（WASD + 左键转头）" : "观察模式（轨道旋转）"}
+            aria-label={getControlModeToggleAriaLabel(controlMode)}
+            title={getControlModeToggleTitle(controlMode)}
             onClick={onToggleControlMode}
             className={`inline-flex h-11 items-center gap-1.5 rounded-2xl border px-3 backdrop-blur-md transition-all ${
               controlMode === "walk"
@@ -150,7 +168,7 @@ export function ModelViewerToolbar({
             ) : (
               <Move3D className="h-4 w-4" />
             )}
-            <span className="text-[11px]">{controlMode === "walk" ? "漫游" : "观察"}</span>
+            <span className="text-[11px]">{CONTROL_MODE_UI_LABEL[controlMode]}</span>
           </button>
         ) : null}
         {orderedTools.map((tool) => {
@@ -194,11 +212,29 @@ export function ModelViewerToolbar({
             </button>
           );
         })}
+        {isLccToolbar ? (
+          <button
+            type="button"
+            aria-label={isHelpOpen ? "关闭帮助" : "打开帮助"}
+            title={isHelpOpen ? "关闭帮助" : "打开帮助"}
+            onClick={onToggleHelp}
+            className={`inline-flex h-11 w-11 items-center justify-center rounded-2xl border backdrop-blur-md transition-all ${
+              typeof onToggleHelp === "function"
+                ? isHelpOpen
+                  ? "border-cyan-300/40 bg-cyan-950/50 text-cyan-100 shadow-[0_10px_30px_rgba(0,0,0,0.28)]"
+                  : "border-white/10 bg-[#0b1118]/85 text-gray-100 shadow-[0_10px_30px_rgba(0,0,0,0.28)] hover:border-cyan-300/30 hover:bg-[#0f1722]/90"
+                : "cursor-not-allowed border-white/[0.08] bg-[#0b1118]/60 text-gray-500 opacity-70"
+            }`}
+            disabled={typeof onToggleHelp !== "function"}
+          >
+            <Info className={`h-4 w-4 ${isHelpOpen ? "text-cyan-200" : ""}`} />
+          </button>
+        ) : null}
         {!isLccToolbar && canToggleControlMode && typeof onToggleControlMode === "function" ? (
           <button
             type="button"
-            aria-label={controlMode === "walk" ? "当前：漫游模式，点击切换观察" : "当前：观察模式，点击切换漫游"}
-            title={controlMode === "walk" ? "漫游模式（WASD + 左键转头）" : "观察模式（轨道旋转）"}
+            aria-label={getControlModeToggleAriaLabel(controlMode)}
+            title={getControlModeToggleTitle(controlMode)}
             onClick={onToggleControlMode}
             className={`inline-flex h-11 items-center gap-1.5 rounded-2xl border px-3 backdrop-blur-md transition-all ${
               controlMode === "walk"
@@ -211,7 +247,7 @@ export function ModelViewerToolbar({
             ) : (
               <Move3D className="h-4 w-4" />
             )}
-            <span className="text-[11px]">{controlMode === "walk" ? "漫游" : "观察"}</span>
+            <span className="text-[11px]">{CONTROL_MODE_UI_LABEL[controlMode]}</span>
           </button>
         ) : null}
         {!isLccToolbar ? (

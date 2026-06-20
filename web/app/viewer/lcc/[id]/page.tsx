@@ -20,7 +20,6 @@ import { LccViewer } from "@/components/models/lcc-viewer";
 import { ModelLoadingOverlay } from "@/components/models/model-loading-overlay";
 import { ModelViewerToolbar } from "@/components/models/model-viewer-toolbar";
 import { ModelViewerHelp } from "@/components/models/model-viewer-help";
-import { useAuth } from "@/components/providers/auth-provider";
 import { getModelDetail } from "@/lib/api/models";
 import { getModelViewerKind } from "@/lib/model-viewer-kind";
 import { http, ApiError } from "@/lib/http";
@@ -71,7 +70,6 @@ function isTypingElement(target: EventTarget | null): boolean {
 /* ---------- 页面组件 ---------- */
 
 export default function LccViewerIframePage() {
-  const { user } = useAuth();
   /* ---- URL 参数 ---- */
   const params = useParams();
   const rawId = params?.id;
@@ -120,7 +118,7 @@ export default function LccViewerIframePage() {
   const viewerCapabilities = useMemo(() => LCC_VIEWER_CAPABILITIES, []);
   // 保存启动视图按钮是否可用（模型已就绪 + 后端允许 + viewer 支持）
   const canShowSaveLaunchView =
-    !processingBlocked && detail?.canSaveLaunchView !== false && viewerCapabilities.saveView;
+    !processingBlocked && Boolean(detail?.canSaveLaunchView) && viewerCapabilities.saveView;
 
   /* ---- 清除移动状态（窗口失焦/关闭帮助/退出漫游时调用） ---- */
   const clearMovementState = useCallback(() => {
@@ -164,24 +162,21 @@ export default function LccViewerIframePage() {
   const handleSaveLaunchView = useCallback(async () => {
     if (saveLaunchViewPending || !detail) return;
 
-    // 从 LccViewer 获取当前视角快照
-    const saveResult = viewerHandleRef.current?.getLaunchViewForSave?.();
-    if (!saveResult?.ok) {
-      toast.error(saveResult?.message ?? "当前视角暂不支持保存");
+    const currentView = viewerHandleRef.current?.getCurrentView?.();
+    if (!currentView) {
+      toast.error("当前视角暂不支持保存");
       return;
     }
 
-    const currentView = saveResult.view;
     setSaveLaunchViewPending(true);
     try {
-      // PUT /api/models/:id/launch-view 保存启动视图（iframe 内部自闭环）
       const result = await http.put<SaveLaunchViewResult>(
         `/models/${detail.id}/launch-view`,
         currentView,
       );
       const nextView = result.launchView ?? currentView;
-      // 保存成功后仅更新内存默认视角，不重新应用（避免画面跳变）
       viewerHandleRef.current?.commitSavedLaunchView?.(nextView);
+      viewerHandleRef.current?.applyView?.(nextView);
       toast.success("启动视图已保存");
     } catch (error) {
       toast.error(error instanceof ApiError ? error.message : "保存启动视图失败，请稍后重试。");
@@ -320,10 +315,13 @@ export default function LccViewerIframePage() {
         return;
       }
 
-      // Escape 清除移动状态并关闭帮助
+      // Escape：关闭帮助 / 退出全屏
       if (event.key === "Escape") {
         clearMovementState();
         setIsHelpOpen(false);
+        if (document.fullscreenElement) {
+          document.exitFullscreen().catch(() => {});
+        }
         return;
       }
 
@@ -432,10 +430,18 @@ export default function LccViewerIframePage() {
         defaultCameraJson={detail.defaultCameraJson}
         processingBlocked={processingBlocked}
         controlMode={controlMode}
+        isHelpOpen={isHelpOpen}
       />
 
       {/* 帮助面板（LCC 操作说明） */}
-      <ModelViewerHelp open={isHelpOpen} />
+      <ModelViewerHelp
+        open={isHelpOpen}
+        onClose={() => {
+          clearMovementState();
+          setIsHelpOpen(false);
+        }}
+        controlMode={controlMode}
+      />
 
       {/* 底部左侧工具栏 */}
       <div className="pointer-events-none absolute bottom-4 left-4 z-20">
@@ -446,7 +452,7 @@ export default function LccViewerIframePage() {
             onFitView={handleFitView}
             onToggleFullscreen={handleFullscreen}
             onSaveLaunchView={handleSaveLaunchView}
-            showSaveLaunchView={Boolean(user)}
+            showSaveLaunchView={canShowSaveLaunchView}
             onToggleHelp={handleToggleHelp}
             isHelpOpen={isHelpOpen}
             canShowSaveLaunchView={canShowSaveLaunchView}

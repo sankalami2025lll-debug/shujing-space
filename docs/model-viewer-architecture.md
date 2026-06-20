@@ -1,6 +1,6 @@
 # 统一模型浏览器架构（第一、二阶段 + UI 收口）
 
-> 更新时间：2026-06-12  
+> 更新时间：2026-06-20  
 > 第一阶段目标：先完成“统一壳子 + 引擎接口 + 分发结构”，不一次性接入全部模型引擎。  
 > 第二阶段目标：先稳定“统一工具栏能力接口 + Shell 操作入口”，暂不接新的 GLB 引擎。  
 > 当前详情页 UI：用户前端不显示开发说明模块与顶部标签栏，模型操作统一收口到视图内部左下角折叠工具栏。  
@@ -506,6 +506,41 @@ type ModelViewerCapabilities = {
   - 其他格式 Viewer 继续复用同一套 `Shell -> handle -> capabilities` 结构
   - 由各自 Viewer 独立实现相机移动，不把 LCC 逻辑外溢到 Shell
 
+## 七点二、帮助面板 + 第一人称鼠标交互（2026-06-20）
+
+### 帮助面板 `ModelViewerHelp`
+
+- 文件：`web/components/models/model-viewer-help.tsx`
+- 入口：LCC 工具栏展开 → 帮助图标；快捷键 `H`
+- UI：viewer 上方居中半透明暗罩浮层；Esc / 遮罩 / 右上角关闭
+- 内容：仅 **第一人称** / **枢轴** 两个 tab；切换 tab **只展示对应操作说明**，不修改 viewer `controlMode`
+- **不展示**：数字人、第三人称、新手指引、未接入能力说明
+
+### 第一人称（`walk`）鼠标交互
+
+实现位置：`web/components/models/lcc-viewer.tsx`（项目层；SDK 不提供）
+
+| 输入 | 行为 |
+|------|------|
+| 左键拖动 | yaw/pitch 转头 |
+| 滚轮 | 沿视线方向前后移动（不改 FOV） |
+| 右键拖动 | 平移 `camera.position`（不改朝向） |
+| WASD / Q / E / Shift | 键盘移动（Shell / iframe 页转发） |
+
+- walk 下 **禁用** OrbitControls；orbit 仍用 OrbitControls（左旋转 / 滚轮缩放 / 右平移）
+- 帮助打开时：`isHelpOpen` prop 屏蔽 walk 的 wheel 与 pointer
+
+### UI 命名（内部枚举不变）
+
+| 内部值 | 用户可见 |
+|--------|----------|
+| `walk` | **第一人称** |
+| `orbit` | **枢轴**（工具栏模式按钮短文案可为「枢轴模式」） |
+
+### 默认启动视图（已封板，与本节并行有效）
+
+`launchView` → `sdkInitialCamera` → `explicitPackageDefaultView` / `defaultCameraJson` → `boundsCenterHomeView` → `bounds` / `sdkBounds`；`spawnPoint` 仅诊断。
+
 ## 八、当前详情页前端 UI 约束
 
 - 用户前端不再显示“统一模型浏览器 / 外壳、标签、工具栏统一，具体引擎按格式独立接入”开发说明模块
@@ -532,6 +567,7 @@ web/components/models/
 ├── model-info-panel.tsx
 ├── model-loading-overlay.tsx
 ├── model-viewer-shell.tsx
+├── model-viewer-help.tsx
 ├── model-viewer-tabs.tsx
 ├── model-viewer-toolbar.tsx
 └── viewers/
@@ -556,10 +592,46 @@ web/components/models/
 - 新引擎通过 `viewerKind + capabilities + handle` 接入
 - 保持 `ModelDetailPage` 只传 `model` 给 Shell，不再写大段格式判断
 
-## 十二、下一阶段建议
+## 十二、模型分享沉浸式观看页（2026-06-20）
+
+- 新增独立路由：`web/app/models/[id]/view/page.tsx`
+- 新增页面组件：`web/components/pages/model-share-viewer-page.tsx`
+- 本次不修改已有 `/models/[id]` 详情页布局
+- 分享链接改为 `/models/${id}/view`（修改 `model-detail-page.tsx` `handleShare` + `model-card.tsx` 分享按钮）
+
+### 分享页 Viewer 规则
+
+- 完全复用现有 LCC iframe 独立页 `/viewer/lcc/[id]`（由 /viewer/lcc/[id]/page.tsx 初始化 `LccViewer`）
+- 不重复调用 `getModelDetail` 之外的 api
+- 不直接初始化 `LCCRender`，不引入 LCC SDK
+- 外层 Loading 复用 `ModelLoadingOverlay`，协议与详情页一致
+
+### 全屏与横屏策略
+
+- 页面 mount 500ms 后（等待 DOM 就绪）自动尝试 `requestFullscreen()` → `screen.orientation.lock("landscape")`
+- 自动失败不报错、不白屏，设置 `showFullscreenButton = true`
+- 降级态底部显示「进入横屏全屏观看」按钮 +「建议横屏观看」文字提示
+- 用户点击按钮后再次执行全屏 + 锁横屏，仍失败则 toast 提示手动旋转
+- 全屏目标 DOM：`#model-share-viewer-fullscreen-root`（仅 viewer 容器，不含信息栏）
+- 退出全屏时执行 `screen.orientation.unlock?.()`
+- 横屏 CSS：`landscape:max-h-dvh landscape:max-w-dvw`，不强制旋转页面
+
+### 浏览器限制
+
+- iOS Safari、微信内置浏览器、部分安卓浏览器自动全屏和锁横屏可能失败
+- 方案通过 try/catch 静默兜底，不影响模型展示
+
+## 十三、默认操作模式（2026-06-20）
+
+- 所有模型页面默认操作模式从 `"orbit"`（观察模式）改为 `"walk"`（漫游模式）
+- `ModelViewerShell` 的 `useState<ModelViewerControlMode>("orbit")` → `useState<ModelViewerControlMode>("walk")`
+- `/viewer/lcc/[id]` 页面的初始化 + 模型切换重置也已同步改为 `"walk"`
+- 工具栏按钮状态默认显示「漫游模式」，用户仍可切换回「观察模式」
+
+## 十四、下一阶段建议
 
 1. 为真实 `GlbViewer` 接入同一套 `handle + capabilities`
 2. 评估截图接口是否由 Shell 统一截图容器，还是由具体 Viewer 输出原生截图
 3. 为 BIM / PLY / OSGB 明确后续候选引擎和接入边界
-4. 在“文件结构”Tab 中逐步接入不同格式的结构树
-5. 在“操作记录”Tab 中沉淀统一事件模型
+4. 在"文件结构"Tab 中逐步接入不同格式的结构树
+5. 在"操作记录"Tab 中沉淀统一事件模型

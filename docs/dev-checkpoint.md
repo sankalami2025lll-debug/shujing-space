@@ -1,6 +1,6 @@
 # 数境空间官网 阶段开发检查点
 
-> 更新日期：2026-06-14（已补齐上传稳定性修复、重复卡片修复、失败模型删除）
+> 更新日期：2026-06-20（已补齐 LCC Web SDK 0.6.1 运行时口径、帮助面板、第一人称鼠标交互）
 > 范围：仅记录已实际落地的改动与事实，供后续 Agent 续接。
 > 索引：LCC Web SDK 接入记录详见 `docs/lcc-web-sdk-integration.md`
 > 索引：模型浏览器统一架构详见 `docs/model-viewer-architecture.md`
@@ -11,7 +11,7 @@
 > 补记：统一模型 Loading 动画完成收口，自检通过，详见 `docs/model-viewer-architecture.md`
 > 补记：模型浏览器 UI 收口与无用代码清理完成，详见 `docs/model-viewer-architecture.md`
 > 补记：LCC/LCC2 Web SDK 原生 Viewer 已完成封板：用户继续上传 ZIP 成果包，后端解压并保存 `.lcc/.lcc2` 入口文件 URL，前端 `LccViewer` 以入口文件 URL 作为 `dataPath`；不采用目录 `dataPath`，不依赖 `meta.lcc / meta.lcc2 / meta.splat`，LCC/LCC2 共用同一个 `LccViewer`；目录模式残留与误导命名已清理，同步 `unload`、格式切换 `dispose`、全局 load owner 等生命周期保护已保留；`web pnpm build` 已通过。详情见 `docs/lcc-web-sdk-integration.md`
-> 补记：LCC/LCC2 默认视角已最终收口为 `boundsCenterHomeView`，轨迹默认视角与 `spawnPoint.rotation` 试算残留已清理，`spawnPoint` 仅保留诊断；`resetView` 回到 `defaultCameraJson / boundsCenterHomeView / bounds fallback`；本轮无用代码清理与文档记录已完成。详情见 `docs/lcc-web-sdk-integration.md`
+> 补记：LCC/LCC2 默认视角第一版曾收口为 `boundsCenterHomeView`（轨迹/`spawnPoint.rotation` 已清理）；**2026-06-20 已升级为** `launchView > sdkInitialCamera > explicitPackageDefaultView > boundsCenterHomeView > bounds fallback`，详见下方「LCC 默认启动视图与操作模式（2026-06-20）」及 `docs/lcc-web-sdk-integration.md`。
 > 补记：2026-06-12 已完成官网品牌 Logo 收口：顶部导航和普通页面 Footer 统一改为整图资源 `/loading/loading-logo-reference1.png`，顶部固定 `60px`、底部固定 `57px`；模型加载动画继续使用 `/brand/model-loading-logo.png`，不得混用。
 > 补记：2026-06-12 已完成 LCC 详情页 iframe 独立查看器收口：`/models/[id]` 下的 LCC/LCC2 模型统一走 `/viewer/lcc/[id]` iframe；外层只保留唯一品牌 Loading，是否收起由子文档 `data-lcc-loaded=true + data-lcc-complete-reason=onLoadedStable` 决定。详情见 `docs/model-viewer-architecture.md`
 > 补记：2026-06-12 已完成“所有 LCC 模型卡在 92%”运行时排查与最小修复：真实根因是某些运行时下 SDK `onLoaded` 未触发，导致原完成链无法进入 `onLoadedStable`；现已增加保持协议不变的安全兜底，最终仍写入 `data-lcc-loaded=true` 与 `data-lcc-complete-reason=onLoadedStable`。本轮验证 `/models/77`、`/viewer/lcc/77` 及额外模型通过；当前环境未注入 `NEXT_PUBLIC_LCC_APP_KEY`，已确认本次故障与 appKey 缺失无关。详情见 `docs/lcc-web-sdk-integration.md`
@@ -19,7 +19,7 @@
 > 补记：OSS 命名收口后的上传链路已完成真实环境冒烟：`server/.env` 已切到 `OSS_*`，直连 `127.0.0.1:4000` 验证 `POST /api/uploads/presign` 成功返回 `uploadUrl + objectKey`，`r2Key` 仅保留为 deprecated 兼容别名；随后完成 1x1 PNG 直传阿里云 OSS、`/api/uploads/callback` 回调、测试模型发布、数据库落库核验（`fileUrl / viewerUrl / objectKey` 正常），且 `cd server && pnpm build` 通过。
 > 补记：根据 `docs/review-report-2026-06-06.md` 第一阶段整改，生产部署口径已收口为“`web` 生产默认走 `/api`，由 Nginx/OpenResty 反代到 `server:4000`”；`deploy/.env.prod.example` 已改为与后端真实读取一致的变量名（`PORT / JWT_ACCESS_SECRET / JWT_ACCESS_EXPIRES / MAX_MODEL_SIZE_MB` 等），不再使用旧口径 `SERVER_PORT / JWT_SECRET / JWT_EXPIRES_IN / MAX_FILE_SIZE_MB`。
 > 补记：模型启动视图保存第一阶段已落地后端契约：`models` 新增 `launch_view_json / launch_view_updated_at / launch_view_updated_by`；`GET /api/models/:id` 已返回 `launchView + canSaveLaunchView`；新增 `PUT/DELETE /api/models/:id/launch-view`，仅模型归属用户可写。当前未修改前端 Viewer、`LCCRender.load`、`dataPath`、`boundsCenterHomeView`、OSS/上传链路；`cd server && pnpm build` 通过，定向 Jest（`models.service.spec.ts`、`models.controller.spec.ts`）通过。本地 `prisma migrate dev` 因 `localhost:5432` 不可达未能实际 apply，但迁移 SQL 已补入 `server/prisma/migrations/20260606101500_add_model_launch_view/migration.sql`。
-> 补记：模型启动视图保存第二阶段前端接线已完成：`ModelDetail` 已补 `launchView / canSaveLaunchView`，`ModelViewerHandle` 已补 `getCurrentView / applyView`，`LccViewer` 已接入 `launchView -> defaultCameraJson -> boundsCenterHomeView -> bounds fallback` 打开优先级，且 `resetView` 会回到当前最终默认视图；左下角“工具”展开项已新增“保存启动视图”，仅模型归属用户可见，保存成功后即时更新当前默认视图，无需刷新页面。当前仍未修改 `server`、`LCCRender.load`、`dataPath`、默认视角算法本体、OSS/上传链路。
+> 补记：模型启动视图保存第二阶段前端接线已完成：`ModelDetail` 已补 `launchView / canSaveLaunchView`，`ModelViewerHandle` 已补 `getCurrentView / applyView`，`LccViewer` 已接入启动视图打开与 `resetView`；左下角“工具”展开项已新增“保存启动视图”，仅模型归属用户可见。**2026-06-20 默认视角优先级与 iframe 内保存链路已再次收口**（见下方专节）。当前仍未修改 `server`、`LCCRender.load`、`dataPath`、OSS/上传链路。
 > 补记：3A-1「上传任务持久化后端表和 API」已完成第一版后端落地：新增 `upload_tasks` 表、`UploadTaskStatus / UploadTaskStage` 枚举、`/api/upload-tasks/*` 八个接口；支持同用户 `clientToken` 幂等建任务、查询前把超时 `queued/running` 任务自动收敛为 `interrupted`、严格校验任务与 `model_files` 归属、基于任务快照复用 `ModelsService.create` 创建正式模型，并在 `ModelsService.markReady/markFailed` 同步回写任务状态。当前**未修改 web、未修改 UploadTaskProvider/UploadModal/个人中心、未改 OSS presign/callback 主链、未改 LCC/LCC2 Viewer / 启动视图 / dataPath**。本地 `pnpm prisma migrate dev --name add_upload_tasks` 已成功；Windows 下 `pnpm prisma generate` 因 Prisma engine 文件被占用改为 `pnpm prisma generate --no-engine` 成功；`cd server && pnpm build` 通过。
 > 补记：3A-2「前端任务恢复」已完成第一版接线：新增 `web/lib/api/upload-tasks.ts`，`UploadTaskProvider` 会在登录态就绪后调用 `GET /api/upload-tasks/me` 恢复 persisted tasks，并在前端把本地运行态任务、后端恢复任务拆分后再合并为统一卡片视图；个人中心已支持 `local-task / persisted-task / server-model` 三类数据合并展示，并按 `uploadTaskId / clientToken / modelId` 去重，避免与正式模型重复显示。`UploadTaskCard` 已适配 `interrupted / processing / failed / canceled` 刷新后展示，其中 `interrupted` 会显示“已中断 / 上传中断 / 需要重新选择文件”，但**本阶段仍不支持刷新后自动继续 PUT，不做 OSS multipart，不改 UploadModal 提交主链，也未改 server / Prisma / OSS presign/callback / LCC/LCC2 Viewer / 启动视图 / dataPath**。`cd web && pnpm build` 通过。
 > 补记：3A-3「中断 / 重试 / 取消接入」已完成前端第一版：`UploadModal` 提交会先 `POST /api/upload-tasks` 创建后端任务，再把 `uploadTaskId / clientToken` 注入本地任务；`task-runner` 在 `presigning_model / uploading_model / callbacking_model / presigning_cover / uploading_cover / callbacking_cover / creating_model` 各阶段同步后端 `status/stage`，并在上传中定时 `heartbeat`、`callback` 成功后调用 `/upload-tasks/:id/files` 绑定 `fileId`、最终通过 `/upload-tasks/:id/publish` 发布模型。`UploadTaskProvider` 已接入取消时本地 `AbortController` + `/upload-tasks/:id/cancel`、页面关闭时对 running task 尝试 `keepalive` 调用 `/upload-tasks/:id/interrupted`，刷新后依旧只恢复任务卡与 interrupted 提示，不自动续传 PUT；`UploadTaskCard` 对 failed/interrupted 重试会在缺少本地 `File` 时提示重新选择文件。当前**未修改 server / Prisma / OSS presign-callback 后端逻辑 / LCC-LCC2 Viewer / 启动视图 / dataPath**。
@@ -29,18 +29,113 @@
 > 补记：3B-3A「恢复卡片 + 重新选择文件 + fingerprint 校验」已完成第一版：后端 `GET /api/upload-tasks/:id/multipart/model` 现返回 `fileName/originalName/fileSize/fileLastModified/fingerprintAlgo/fingerprint/partSize/totalParts/uploadedBytes/completedPartsCount/uploadedParts/missingParts/canResume`，并新增 `POST /api/upload-tasks/:id/multipart/model/verify-file` 用于校验重新选择的模型文件；前端新增 `web/lib/upload-task/fingerprint.ts`，按 **<3MB 整文件 hash / >=3MB 取前1MB+中间1MB+末尾1MB** 生成 `sample-sha256-v1` 指纹。个人中心 `UploadTaskCard` 对 `interrupted/failed && canResume=true` 展示“继续上传”，选择错误文件会拒绝，选择正确文件后只进入本地 `resume_ready` / “文件校验通过，可继续上传” 状态。**3B-3A 到此为止，不上传 missing parts、不调用 multipart complete、不 publish。** 验收证据保留于 `tmp-browser-fixtures/results/resume-ready-1780911174900.json`。
 > 补记：3B-3B「恢复上传 missing parts + multipart complete + publish」已完成并通过 **3010 真实浏览器验收**：`UploadTaskProvider.prepareResumeTask` 在 3B-3A 校验通过后会继续进入 `resumeTask(taskId, file)`，先读取 `GET /api/upload-tasks/:id/multipart/model` 的 `uploadedParts/missingParts/partSize/totalParts/uploadedBytes`，再把 session 交给 `resumeMultipartUploadTask(...)`。恢复 runner 现以 `uploadedBytes / file.size` 初始化进度，仅对 `missingParts` 调 `/multipart/model/parts/presign -> PUT -> parts/:partNumber/complete`，**不会重传 `uploadedParts`**；若 `missingParts=[]`，则不再上传任何分片，直接调用 `multipart complete`。`multipart complete` 成功后复用后端已回写的 `upload_tasks.modelFileId`，前端再调用 `/upload-tasks/:id/publish`；若任务已有 `modelId`，后端 `publish` 继续幂等返回，避免重复建模。真实验收已确认：**中断后只续传 missing parts、`missingParts=[]` 可直接 complete、failed 任务可继续、canceled 任务不可继续、publish 后任务卡会按 `createdModelId` 去重隐藏并显示正式模型卡**。最终通过证据保留于 `tmp-browser-fixtures/results/resume-missing-parts-1780914415706.json`，对应验收脚本保留于 `tmp-browser-fixtures/verify-3b3b-resume-missing-parts.cjs`。当前 **未修改 UploadModal 主发布流程、未改 task-runner 新上传主流程、未改旧 `/uploads/presign` `/uploads/callback` cover 链路、未提升 multipart 并发（仍为 1）**；3B-3C 再做异常全量回归 / 清理策略。
 > 补记：3B-3C「异常全量回归 / 清理策略」已完成第一轮真实浏览器收口：新增 `tmp-browser-fixtures/verify-3b3c-exception-regression.cjs`，并产出证据 `tmp-browser-fixtures/results/resume-exception-regression-1780916462570.json`。本轮确认：**再次刷新/多次中断后仍只续传剩余 `missingParts`；`complete` 成功但 `publish` 失败后可不重传 part、可重试 `publish`；`publish` 成功但个人中心列表刷新失败时，本地任务卡仍显示处理中，刷新页面后正式模型卡出现且任务卡去重隐藏；错误文件的 `name/size/fingerprint` 三类不一致均继续拒绝，且不触发 part PUT / complete / publish；`canceled` 任务仍不可恢复；恢复链路未触发旧 model `/uploads/presign`，cover 旧链路不受影响。** 本轮最小修复包含：`upload-task-provider.tsx` 增加 resume 并发门闩，避免重复点击触发多次 verify/presign；同时将 `uploadId`/multipart 会话失效的失败提示统一为「上传会话已失效，请重新发布」。多标签页同时恢复锁 **本轮未实现**，先记为 **3B-4 后续优化**（建议前端 BroadcastChannel/本地锁 + 后端 session owner/lease 冲突保护）。孤儿 multipart 清理策略也已明确：`aborted` 会话优先调 OSS AbortMultipartUpload 清理；`failed` 长时间未恢复与 `initiated/uploading` 超期未活动会话转入 `aborted/expired`；`completed` session 与已发布模型文件不做对象删除。
+> 补记：2026-06-20 已完成 LCC controlMode 默认 walk + iframe 焦点 + firstFrameState overlay 三项修复。`initialControlMode` 首次 apply walk 已修复；iframe focus + tabIndex 已补（详情页 + 分享页 + iframe 内部容器）；overlay 不再在首帧就绪前提前消失。`viewerReady` 实验因导致模型卡 Loading 已回滚。详情见 `docs/lcc-web-sdk-integration.md §14.23`。
+> 补记：2026-06-11 已完成 LCC/LCC2 **iframe 独立查看器架构**：`/models/[id]`、`/models/[id]/view` 对 LCC/LCC2 **不再直接挂载** `LccViewer`，改为 `<iframe src="/viewer/lcc/:id">`，每次打开为独立 document，隔离 WebGL / SDK / `requestAnimationFrame` / 模块级全局状态；独立页 `web/app/viewer/lcc/[id]/page.tsx` 内复用 `LccViewer` + `ModelViewerToolbar` + 保存启动视图；`SiteChrome` 对 `/viewer/*` 隐藏 NavBar；外层 Loading 仍只认 `data-lcc-loaded=true + data-lcc-complete-reason=onLoadedStable`。非 LCC 格式仍走 `ModelViewerShell`。详情见 `docs/model-viewer-architecture.md`。
+> 补记：2026-06-20 已完成 LCC/LCC2 **默认启动视图优先级重构**（`web/components/models/lcc-viewer.tsx`）：`launchView`（用户保存，最高）→ `sdkInitialCamera`（`onLoaded` 后、`apply` 任何 fallback 前捕获 SDK 第一视角）→ `explicitPackageDefaultView`（成果包明确 `defaultView/initialView/homeView/camera` 或 `defaultCameraJson`）→ `boundsCenterHomeView` → `bounds/sdkBounds` 兜底；新增 `isValidLccCameraSnapshot()`；`spawnPoint/poses/轨迹` **不参与** defaultView / resetView（`spawnPoint` 仅 dev 诊断）；`resetView()` 按上述链恢复；保存成功后 `commitSavedLaunchView` + `applyView`。未改 `LCCRender.load`、`dataPath`、iframe 完成协议、Loading 动画、水印。`cd web && pnpm build` 通过。
+> 补记：2026-06-20 已完成 LCC **操作模式 UI 命名统一**（仅文案，`web/components/models/model-viewer-toolbar.tsx`）：内部枚举仍为 `walk/orbit`；用户可见 **walk →「第一人称」**、**orbit →「枢轴」**（帮助面板 tab 为「枢轴」；工具栏模式按钮短文案可为「枢轴模式」）；默认 `controlMode=walk`。未改 WASD/QE/Shift/R/H/Esc、resetView、launchView、加载协议。
+> 补记：2026-06-20 已完成 LCC **帮助面板 UI 改造**（`web/components/models/model-viewer-help.tsx`）：居中半透明浮层；仅展示「第一人称 / 枢轴」两种模式 tab；不展示数字人、第三人称、新手指引或未接入能力；H / Esc / 遮罩 / 关闭按钮可关闭；tab 切换只改帮助文案，不改 viewer `controlMode`。详见 `docs/model-viewer-architecture.md`。
+> 补记：2026-06-20 已完成 LCC **第一人称 walk 鼠标基础浏览补齐**（`web/components/models/lcc-viewer.tsx`）：滚轮沿视线方向前后移动（不改 FOV）；右键拖动平移视角（与左键转头互斥，`WALK_PAN_LOOK_RATIO=0.5` 相对转头灵敏度）；不启用 OrbitControls 接管 walk；帮助打开时通过 `isHelpOpen` prop 屏蔽 wheel / pointer。orbit 仍走 OrbitControls，未改。
+> 补记：**LCC Web SDK 运行时已升级 0.6.1**。静态资源目录 `web/public/vendor/lcc-web/0.6.1/`；文件名为 `lcc-web-sdk.js` / `lcc-web-sdk.umd.js`（**非** `lcc-0.6.1.js`）；`LccViewer` 加载 `/vendor/lcc-web/0.6.1/lcc-web-sdk.umd.js`；对照包目录 `LCC-Web-0.6.1/`。历史 0.6.0 路径与文件名见 `docs/lcc-web-sdk-integration.md` 早期章节，**勿再作为运行时依据**。
 
 ## 🚩 最终检查点（重开新对话前，先读本节）
 
 > 本节为「重开新对话」的交接快照。下方各节为历史明细，可按需深入。
 
-### 当前待处理风险（2026-06-12 代码体检）
+### 当前待处理风险（2026-06-20 代码体检）
 
 - ⚠️ **非 LCC Viewer 延迟挂载兜底仍有缺口**：`model-detail-page.tsx` 的 `viewerReady` 检查在达到最大 `requestAnimationFrame` 尝试次数后只会停止轮询，但不会强制挂载 `ModelViewerShell`；若布局稳定慢于预期，普通模型可能一直停在外层 Loading。
 - ⚠️ **LCC iframe 外层 Loading 会遮住内层 error 态**：当前外层只在子文档满足 `data-lcc-loaded=true + completeReason=onLoadedStable` 时才隐藏；如果 iframe 内部真实进入 `error`，外层仍会继续显示 Loading，用户看不到子文档错误信息。
 - ℹ️ **LCC 运行时调试属性当前仍保留在生产 DOM**：`lcc-viewer.tsx` 会持续写入 `data-lcc-debug-*` 诊断属性，便于继续排查加载链问题，但会增加少量 DOM 变更噪音；后续如确认稳定，可考虑按环境变量再做收口。
+- ℹ️ **主详情页 LCC 延迟挂载实验代码仍保留**：`viewerReady / viewerMountSeed` 等逻辑对 LCC 已不再挂载 `ModelViewerShell`（改走 iframe），下一轮可在 iframe 稳定后清理，本轮 intentionally 保留以降低回归风险。
 
-### 本轮工具栏小修完成内容（2026-06-13）
+### LCC Web SDK 运行时（0.6.1，2026-06-20 封板）
+
+| 项 | 口径 |
+|---|---|
+| 版本 | **0.6.1** |
+| 部署文件 | `web/public/vendor/lcc-web/0.6.1/lcc-web-sdk.js`、`lcc-web-sdk.umd.js` |
+| 运行时 URL | `/vendor/lcc-web/0.6.1/lcc-web-sdk.umd.js`（`LccViewer` 内 `LCC_WEB_VERSION = "0.6.1"`） |
+| 对照包 | `LCC-Web-0.6.1/`（官方示例引用 `../sdk/lcc-web-sdk.js`） |
+| 历史残留 | `LCC-Web-0.6.0/`、`lcc-0.6.0.*` 文件名、`/vendor/lcc-web/0.6.0/` **已不在 web 运行时使用** |
+
+SDK **不提供** walk/orbit 鼠标交互；相机控制均在项目层 `lcc-viewer.tsx` + Three.js `OrbitControls`（仅 orbit）。
+
+### LCC 默认启动视图与操作模式（2026-06-20）
+
+#### 架构：iframe 隔离 Viewer
+
+| 项 | 口径 |
+|---|---|
+| 主详情页 LCC/LCC2 | `model-detail-page.tsx` → `<iframe src="/viewer/lcc/:id">`，**不**直接渲染 `LccViewer` |
+| 独立 Viewer 页 | `web/app/viewer/lcc/[id]/page.tsx`：拉取 `GET /api/models/:id`，全屏 `LccViewer` + 工具栏 |
+| 分享沉浸式页 | `model-share-viewer-page.tsx` 同样 iframe 隔离 LCC |
+| 完成协议 | 外层 Loading 收起条件不变：`data-lcc-loaded=true` + `data-lcc-complete-reason=onLoadedStable` |
+| dataPath | 仍为 `.lcc/.lcc2` 入口文件 URL；禁止目录 dataPath；禁止 `meta.lcc/meta.lcc2/meta.splat` |
+
+#### 默认启动视图优先级（`LccViewer.applyInitialView`，已封板）
+
+1. `launchView` — 用户保存的启动视图（最高）
+2. `sdkInitialCamera` — SDK `onLoaded` 后捕获的第一视角
+3. `explicitPackageDefaultView` — 成果包 `defaultView/initialView/homeView/camera` 或 `defaultCameraJson`
+4. `boundsCenterHomeView` — bounds 居中 home 视角
+5. `bounds` / `sdkBounds` — 最后 fit 兜底
+
+`resetView()` 按同一优先级链恢复。`spawnPoint` **仅 dev 诊断**，不参与 defaultView / resetView。
+
+#### 帮助面板（`ModelViewerHelp`，2026-06-20）
+
+- 入口：左下角「工具」展开 → 帮助图标；快捷键 `H`
+- 居中半透明暗罩浮层；Esc / 遮罩 / 右上角关闭
+- 仅两个 tab：**第一人称** / **枢轴**（tab 高亮跟随当前 `controlMode` 打开默认值，切换 tab **只改帮助文案**）
+- **不展示**：数字人、第三人称、新手指引、未接入能力
+
+#### 第一人称 walk 鼠标交互（2026-06-20）
+
+| 输入 | 行为 |
+|------|------|
+| 左键拖动 | 转头（yaw/pitch） |
+| 滚轮 | 沿视线方向前后移动（拉近/拉远，不改 FOV） |
+| 右键拖动 | 平移 `camera.position`（不改朝向；平移速度 = 转头灵敏度 × 0.5 × target 距离） |
+| WASD / Q/E / Shift | 键盘移动（shell / iframe 页注入） |
+
+帮助打开时（`isHelpOpen`）：wheel / 左键 / 右键 / WASD 均不响应。
+
+#### 操作模式（内部 `walk` / `orbit`，UI 文案）
+
+| 内部值 | 默认 | 用户可见文案 |
+|--------|------|-------------|
+| `walk` | ✅ 默认 | **第一人称** |
+| `orbit` | 可切换 | **枢轴**（工具栏按钮短文案可为「枢轴模式」） |
+
+快捷键：WASD / Q / E / Shift / R / H / Esc。**orbit** 下 OrbitControls：左键旋转、滚轮缩放、右键平移。
+
+#### 保存启动视图（iframe 内自闭环，方案 A）
+
+- 按钮：左下角「工具」→「保存启动视图」；**仅** `canSaveLaunchView=true`（后端判定模型归属用户）时显示
+- 流程：`getCurrentView()` → `PUT /api/models/:id/launch-view` → `commitSavedLaunchView` + `applyView`
+- 刷新后 `launchView` 仍优先于 `sdkInitialCamera`
+
+#### 涉及文件（2026-06-11 ~ 2026-06-20）
+
+- `web/app/viewer/lcc/[id]/page.tsx`（iframe 独立页）
+- `web/components/layout/site-chrome.tsx`（`/viewer` 隐藏 NavBar）
+- `web/components/pages/model-detail-page.tsx`（LCC iframe 嵌入 + 外层 Loading 轮询）
+- `web/components/models/lcc-viewer.tsx`（默认视角链、walk 鼠标交互、SDK 0.6.1 加载）
+- `web/components/models/model-viewer-help.tsx`（帮助浮层）
+- `web/components/models/model-viewer-toolbar.tsx`（工具栏 + 模式切换 UI 文案）
+- `web/components/models/model-viewer-shell.tsx`（非 LCC 兼容路径）
+
+#### 验收（`pnpm build` 已通过；浏览器建议项）
+
+- [ ] 社区 / 个人中心连续打开同一 LCC 模型 10 次不空白
+- [ ] SDK 初始视角合理时不被 bounds 立刻覆盖
+- [ ] 保存启动视图 → 刷新 / Reset 均回到保存视角
+- [ ] 非归属用户不显示「保存启动视图」
+- [ ] 默认按钮显示「第一人称」，切换后「枢轴」/「枢轴模式」
+- [ ] 帮助面板仅「第一人称 / 枢轴」；walk 滚轮 / 右键平移可用
+- [ ] 非 LCC 模型 Viewer 行为不变
+
+### 本轮工具栏小修完成内容（2026-06-13；2026-06-20 UI 文案追加）
 
 #### 提交记录
 - `0b5b016` fix: refine LCC viewer chrome and toolbar permissions
@@ -53,11 +148,11 @@
 | 1 | 删除四个青色角框 | `lcc-viewer.tsx` / `viewer-placeholder.tsx` | 纯视觉删除，不影响画布 |
 | 2 | 全屏按钮放到"返回社区"行右侧 | `model-detail-page.tsx` | 顶部同层右侧 |
 | 3 | 外层顶部分享按钮已删除 | `model-detail-page.tsx` | 右侧信息栏分享保留 |
-| 4 | 游客隐藏"保存启动视图"按钮 | `model-viewer-toolbar.tsx` + `page.tsx` | `showSaveLaunchView` props |
-| 5 | 登录用户保留保存按钮 | 同上 | 可用性由 `canShowSaveLaunchView` 控制 |
-| 6 | 工具按钮只保留图标 | `model-viewer-toolbar.tsx` | 去文字、去箭头 |
+| 4 | 非归属用户隐藏"保存启动视图"按钮 | `model-viewer-toolbar.tsx` + iframe 页 | `showSaveLaunchView` + 后端 `canSaveLaunchView` |
+| 5 | 归属用户保留保存按钮 | 同上 | `canSaveLaunchView=true` 时可点 |
+| 6 | 工具按钮只保留图标 | `model-viewer-toolbar.tsx` | 去文字、去箭头（模式切换按钮除外，保留「第一人称/枢轴模式」短文案） |
 | 7 | 底部信息/缩放按钮删除 | `model-viewer-toolbar.tsx` | LCC 变体 |
-| 8 | 观察按钮提前 | `model-viewer-toolbar.tsx` | 第一个主要功能 |
+| 8 | 操作模式切换按钮置前 | `model-viewer-toolbar.tsx` | LCC 工具列首位；**2026-06-20** 文案为「第一人称 / 枢轴模式」 |
 | 9 | 重置图标改为 `Home` | `model-viewer-toolbar.tsx` | tooltip"回到初始视角" |
 | 10 | 保留未开发占位图标 | `model-viewer-toolbar.tsx` | 截图/旋转/平移/测量/标注/图层/信息 |
 
@@ -368,6 +463,32 @@
   - HTTP 冒烟已验证：用户删除自己的模型成功；用户删除他人模型失败；admin 删除任意模型成功；普通用户访问 admin 删除接口返回 `403`；未登录删除接口返回 `401`；删除后 `/api/models`、`/api/models/:id`、`/api/users/me/models`、`/api/users/me/stats` 口径符合预期；`/api/health` 返回 `db: up`。
   - 当前删除管理第一版结论：**仅软删除模型记录**，不做 restore / 回收站，不做物理硬删除，不删除 `model_files`，也**不会立即删除 OSS 文件**。
   - 当前仍未实现：**Admin 后台前端删除按钮**、站内统一确认弹窗、删除审计日志、恢复模型、硬删除、对象存储文件清理。
+- ✅ **模型分享沉浸式观看页已完成**（2026-06-20，`d4ffb40`）：
+  - 新增路由 `web/app/models/[id]/view/page.tsx`，新增组件 `web/components/pages/model-share-viewer-page.tsx`。
+  - 分享链接打开后直接进入纯模型 Viewer 页面，不显示详情信息栏、标题、作者、浏览量、收藏、申请按钮。
+  - 页面 mount 后自动尝试 `requestFullscreen()` + `screen.orientation.lock("landscape")`。
+  - 自动全屏失败时底部显示「进入横屏全屏观看」按钮 +「建议横屏观看」提示，点击后再次尝试全屏横屏。
+  - 若仍不支持横屏，toast 提示「当前浏览器不支持自动横屏，请手动旋转手机横屏浏览」。
+  - 全屏目标为 viewer 容器 `#model-share-viewer-fullscreen-root`，右侧信息栏不进全屏。
+  - 横屏 CSS 使用 `landscape:max-h-dvh landscape:max-w-dvw` 适配，不强制旋转页面。
+  - 修改 `web/components/pages/model-detail-page.tsx` 分享链接改为 `/models/${detail?.id}/view`。
+  - 修改 `web/components/models/model-card.tsx` 分享按钮复制 `/models/${model.id}/view`。
+  - 分享页允许未登录用户访问公开模型，模型不存在时显示简洁错误。
+  - **未改**：LCC 加载协议、后端、Prisma schema/migration、上传逻辑。
+  - `web build` 通过。
+- ✅ **LCC/LCC2 iframe 独立查看器 + 默认启动视图 + 操作模式 UI 已完成**（2026-06-11 ~ 2026-06-20）：
+  - LCC/LCC2 在主详情页与分享页均通过 `/viewer/lcc/:id` iframe 加载，隔离 WebGL/SDK 与主 SPA 生命周期。
+  - 默认视角：`launchView > sdkInitialCamera > explicitPackageDefaultView > boundsCenterHomeView > bounds`；`resetView` 与保存启动视图已对齐。
+  - 操作模式：默认 `walk`（UI 显示「第一人称」），可切换 `orbit`（UI 显示「枢轴模式」）。
+  - 详见「🚩 最终检查点 → LCC 默认启动视图与操作模式（2026-06-20）」。
+  - **未改**：`LCCRender.load`、`dataPath`、iframe 完成协议、后端、OSS/上传。
+  - `web build` 通过。
+- ✅ **默认操作模式改为第一人称（walk）已完成**（2026-06-20）：
+  - 内部枚举仍为 `walk` / `orbit`；默认 `controlMode="walk"`（`LccViewer`、`/viewer/lcc/[id]`、`ModelViewerShell` 的 LCC 路径）。
+  - 用户可见文案（`model-viewer-toolbar.tsx`）：**walk →「第一人称」**、**orbit →「枢轴模式」**（按钮、`aria-label`、`title`）。
+  - LCC 详情页通过 iframe 内工具栏切换；非 LCC 仍走 `ModelViewerShell`。
+  - **未改**：快捷键行为、LCC 加载协议、`onLoadedStable`、`data-lcc-loaded`、后端、Prisma schema/migration。
+  - `web build` 通过。
 
 #### 当前未完成
 

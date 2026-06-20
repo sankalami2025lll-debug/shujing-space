@@ -80,8 +80,10 @@ export function ModelViewerShell({ model, onLaunchViewSaved }: ModelViewerShellP
   const [movementInput, setMovementInput] = useState<ModelViewerMovementInput>(EMPTY_MOVEMENT_INPUT);
   const [moveSpeedMultiplier, setMoveSpeedMultiplier] = useState(1);
   const [saveLaunchViewPending, setSaveLaunchViewPending] = useState(false);
-  const [controlMode, setControlMode] = useState<ModelViewerControlMode>("walk");
   const viewerKind = getModelViewerKind(model);
+  const [controlMode, setControlMode] = useState<ModelViewerControlMode>(
+    viewerKind === "lcc" ? "walk" : "orbit",
+  );
   const processingBlocked = model.processingStatus !== "ready";
   const processingHint = processingStatusText(model.processingStatus);
   const viewerCapabilities = useMemo(() => getViewerCapabilities(viewerKind), [viewerKind]);
@@ -168,8 +170,8 @@ export function ModelViewerShell({ model, onLaunchViewSaved }: ModelViewerShellP
         currentView,
       );
       const nextView = result.launchView ?? currentView;
-      // 保存成功后只更新内存默认视角，不重新 apply，避免画面跳变或模型消失
       viewerHandleRef.current?.commitSavedLaunchView?.(nextView);
+      viewerHandleRef.current?.applyView?.(nextView);
       onLaunchViewSaved?.(nextView);
       toast.success("启动视图已保存");
     } catch (error) {
@@ -213,8 +215,8 @@ export function ModelViewerShell({ model, onLaunchViewSaved }: ModelViewerShellP
   useEffect(() => {
     clearMovementState();
     setIsHelpOpen(false);
-    setControlMode("walk");
-  }, [clearMovementState, model.id]);
+    setControlMode(isLccViewer ? "walk" : "orbit");
+  }, [clearMovementState, isLccViewer, model.id]);
 
   useEffect(() => {
     if (!isLccViewer) {
@@ -373,6 +375,7 @@ export function ModelViewerShell({ model, onLaunchViewSaved }: ModelViewerShellP
             defaultCameraJson={model.defaultCameraJson}
             processingBlocked={processingBlocked}
             controlMode={controlMode}
+            isHelpOpen={isHelpOpen}
           />
         );
       case "glb":
@@ -409,7 +412,14 @@ export function ModelViewerShell({ model, onLaunchViewSaved }: ModelViewerShellP
     <div className="flex h-full flex-col bg-[#0d0d0d]">
       <div ref={viewerViewportRef} className="relative min-h-[360px] flex-1 overflow-hidden lg:min-h-[520px]">
         {renderViewer()}
-        <ModelViewerHelp open={isLccViewer && isHelpOpen} />
+        <ModelViewerHelp
+          open={isLccViewer && isHelpOpen}
+          onClose={() => {
+            clearMovementState();
+            setIsHelpOpen(false);
+          }}
+          controlMode={controlMode}
+        />
         <div className="pointer-events-none absolute bottom-4 left-4 z-20">
           <div className="pointer-events-auto">
             <ModelViewerToolbar

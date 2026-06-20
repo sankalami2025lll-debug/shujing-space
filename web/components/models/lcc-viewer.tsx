@@ -92,9 +92,11 @@ declare global {
 }
 
 type LccViewerStatus = "idle" | "loading" | "loaded" | "error";
+type LccLoadingPhase = "loading" | "initializing" | "first-frame" | "complete" | "hidden";
 type SupportedLccFormat = "lcc" | "lcc2";
 type DefaultViewSource =
   | "launchView"
+  | "sdkInitialCamera"
   | "defaultCamera"
   | "sdkBounds"
   | "boundsCenterHomeView"
@@ -153,8 +155,10 @@ interface LccViewerProps {
   launchView?: ModelLaunchView | null;
   defaultCameraJson?: string | null;
   processingBlocked?: boolean;
-  /** 控制模式：orbit=轨道观察（默认），walk=漫游（FPS） */
+  /** 控制模式：walk=漫游（默认），orbit=轨道观察 */
   controlMode?: ModelViewerControlMode;
+  /** 帮助面板是否打开；打开时屏蔽 walk 模式鼠标交互 */
+  isHelpOpen?: boolean;
 }
 
 let lccSdkPromise: Promise<LccRenderApi> | null = null;
@@ -190,8 +194,12 @@ const ORBIT_PAN_SPEED = 0.60;
 const ORBIT_ZOOM_SPEED = 0.50;
 // 漫游模式：左键原地转头灵敏度与俯仰角限制
 const WALK_LOOK_SENSITIVITY = 0.002;
+/** 右键平移相对左键转头的速度倍率（0.5 = 为转头速度的一半） */
+const WALK_PAN_LOOK_RATIO = 0.5;
 // 漫游 Fly 基础移动系数（相对原 0.002 累计降速；Shift 2x 仍由 moveSpeedMultiplier 叠加，倍率不变）
 const WALK_MOVEMENT_DIM_FACTOR = 0.000588;
+/** 漫游模式滚轮：沿视线前后移动的步长系数（相对 movementBaseStep） */
+const WALK_WHEEL_MOVE_FACTOR = 2;
 const WALK_PITCH_MIN = THREE.MathUtils.degToRad(-85);
 const WALK_PITCH_MAX = THREE.MathUtils.degToRad(85);
 const WALK_EULER_ORDER = "YXZ" as const;
@@ -414,6 +422,34 @@ function clampProgress(percent: number) {
   if (percent < 0) return 0;
   if (percent > 1) return 1;
   return percent;
+}
+
+/**
+ * 统一四段式 Loading 进度映射
+ * loading(0-90%) → initializing(90-98%) → first-frame(98%) → complete(100%) → hidden
+ * 确保单调递增、不倒退。
+ */
+function mapLccDisplayProgress(params: {
+  rawProgress: number;
+  loadingPhase: LccLoadingPhase;
+}): number {
+  const { rawProgress, loadingPhase } = params;
+  const clamped = clampProgress(rawProgress);
+
+  switch (loadingPhase) {
+    case "hidden":
+    case "complete":
+      return 1;
+    case "first-frame":
+      return 0.98;
+    case "initializing":
+      // initializing 阶段：介于 90% 和 rawProgress 之间，但最高不超 98%
+      return Math.max(0.9, Math.min(clamped, 0.98));
+    case "loading":
+    default:
+      // loading 阶段：最高 90%
+      return Math.min(clamped, 0.9);
+  }
 }
 
 /**
@@ -1124,6 +1160,166 @@ function isCameraLikelySeeingBounds(
   return angle <= halfFov + angularRadius + 0.35;
 }
 
+/** 开发态默认视角日志（生产环境静默） */
+function logDefaultView(message: string, details?: Record<string, unknown>) {
+  if (!IS_DEV) return;
+  logLccDebug(`[LCC default view] ${message}`, details);
+}
+
+function logLccFocus(message: string) {
+  if (!IS_DEV) return;
+  logLccDebug(`[LCC focus] ${message}`);
+}
+
+function logLccControl(message: string, details?: Record<string, unknown>) {
+  if (!IS_DEV) return;
+  logLccDebug(`[LCC control] ${message}`, details);
+}
+
+function isValidLccCameraSnapshot(
+  snapshot: CameraSnapshot | null,
+  bounds: THREE.Box3 | null,
+): { valid: boolean; reason?: string } {
+  if (!snapshot) {
+    return { valid: false, reason: "snapshot-missing" };
+  }
+
+  const position = new THREE.Vector3(...snapshot.position);
+  const target = new THREE.Vector3(...snapshot.target);
+  const up = new THREE.Vector3(...snapshot.up);
+
+  if (!isValidVector3(position) || !isValidVector3(target) || !isValidVector3(up)) {
+    return { valid: false, reason: "non-finite-vectors" };
+  }
+
+  const targetDistance = position.distanceTo(target);
+  if (!Number.isFinite(targetDistance) || targetDistance < 0.05) {
+    return { valid: false, reason: "target-too-close" };
+  }
+
+  if (up.lengthSq() < 1e-6) {
+    return { valid: false, reason: "up-near-zero" };
+  }
+
+  if (
+    !Number.isFinite(snapshot.near) ||
+    !Number.isFinite(snapshot.far) ||
+    snapshot.near <= 0 ||
+    snapshot.far <= 0 ||
+    snapshot.far <= snapshot.near
+  ) {
+    return { valid: false, reason: "invalid-planes" };
+  }
+
+  if (bounds && !bounds.isEmpty()) {
+    const sphere = getBoundsSphere(bounds);
+    const maxDim = sanitizeMaxDim(Math.max(...bounds.getSize(new THREE.Vector3()).toArray()));
+    const distanceToCenter = position.distanceTo(sphere.center);
+    const maxAllowedDistance = Math.max(sphere.radius * 80, maxDim * 80, 5000);
+    if (distanceToCenter > maxAllowedDistance) {
+      return { valid: false, reason: "camera-too-far-from-bounds" };
+    }
+
+    const targetDistanceToCenter = target.distanceTo(sphere.center);
+    const maxTargetDistance = Math.max(sphere.radius * 6, maxDim * 6, 500);
+    if (targetDistanceToCenter > maxTargetDistance) {
+      return { valid: false, reason: "target-far-from-bounds" };
+    }
+  }
+
+  return { valid: true };
+}
+
+/** LCCRender.load 后、应用任何 fallback 之前捕获 SDK 初始相机 */
+function captureSdkInitialCameraSnapshot(
+  camera: THREE.PerspectiveCamera,
+  controls: OrbitControls | null,
+  bounds: THREE.Box3 | null,
+): CameraSnapshot | null {
+  const direction = new THREE.Vector3();
+  camera.getWorldDirection(direction);
+  const target = controls?.target.clone() ?? camera.position.clone().add(direction);
+  const summary = bounds ? createBoundsSummary(bounds) : null;
+  const maxDim = summary ? sanitizeMaxDim(Math.max(...summary.size)) : 10;
+  const distance = camera.position.distanceTo(target);
+  const radius = summary
+    ? Math.max(getBoundsSphere(bounds!).radius, maxDim / 2, 1)
+    : Math.max(distance, 10);
+  const planes = computeFitCameraPlanes(maxDim, distance, radius);
+
+  const snapshot: CameraSnapshot = {
+    position: camera.position.toArray() as [number, number, number],
+    target: target.toArray() as [number, number, number],
+    up: camera.up.clone().normalize().toArray() as [number, number, number],
+    near: Number.isFinite(camera.near) && camera.near > 0 ? camera.near : planes.near,
+    far: Number.isFinite(camera.far) && camera.far > camera.near ? camera.far : planes.far,
+    source: "sdkInitialCamera",
+  };
+
+  return snapshot;
+}
+
+const EXPLICIT_PACKAGE_VIEW_FIELDS = [
+  "defaultView",
+  "initialView",
+  "homeView",
+  "camera",
+] as const;
+
+/** 仅读取成果包中明确的 defaultView / initialView / homeView / camera 字段 */
+function extractExplicitPackageDefaultView(args: {
+  runtimeInstance: LccRuntimeInstance | null;
+  defaultCameraJson?: string | null;
+}): CameraSnapshot | null {
+  const fromJson = parseDefaultCameraJson(args.defaultCameraJson);
+  if (fromJson) {
+    return fromJson;
+  }
+
+  const readExplicitField = (container: Record<string, unknown> | null | undefined) => {
+    if (!container) return null;
+    for (const field of EXPLICIT_PACKAGE_VIEW_FIELDS) {
+      const candidate = extractPoseSnapshotCandidate(container[field]);
+      if (candidate) {
+        return candidate;
+      }
+    }
+    return null;
+  };
+
+  const instanceRecord = args.runtimeInstance as Record<string, unknown> | null;
+  const fromInstance = readExplicitField(instanceRecord);
+  if (fromInstance) {
+    return fromInstance;
+  }
+
+  try {
+    const meta = args.runtimeInstance?.getMeta?.();
+    if (meta && typeof meta === "object") {
+      return readExplicitField(meta as Record<string, unknown>);
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
+}
+
+function focusViewerHostElement(root: HTMLElement | null) {
+  if (!root) return;
+  let current: HTMLElement | null = root;
+  while (current) {
+    if (current.tabIndex >= 0) {
+      current.focus({ preventScroll: true });
+      logLccFocus("viewer container focused");
+      return;
+    }
+    current = current.parentElement;
+  }
+  root.focus({ preventScroll: true });
+  logLccFocus("viewer container focused");
+}
+
 function captureCameraPose(camera: THREE.PerspectiveCamera) {
   return {
     position: camera.position.toArray() as [number, number, number],
@@ -1571,7 +1767,8 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
   launchView,
   defaultCameraJson,
   processingBlocked = false,
-  controlMode = "orbit",
+  controlMode = "walk",
+  isHelpOpen = false,
 }, ref) {
   const mountRef = useRef<HTMLDivElement | null>(null);
   const viewerRootRef = useRef<HTMLDivElement | null>(null);
@@ -1593,6 +1790,12 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
   const yawRef = useRef(0);
   const pitchRef = useRef(0);
   const isLookingRef = useRef(false);
+  /** walk 右键平移状态（与左键转头互斥） */
+  const isPanningRef = useRef(false);
+  const panPointerIdRef = useRef<number | null>(null);
+  const lastPanPointerXRef = useRef(0);
+  const lastPanPointerYRef = useRef(0);
+  const isHelpOpenRef = useRef(isHelpOpen);
   const lastLookPointerXRef = useRef(0);
   const lastLookPointerYRef = useRef(0);
   const applyControlModeRef = useRef<(mode: ModelViewerControlMode) => void>(() => {});
@@ -1603,6 +1806,11 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
   const canMoveRef = useRef(false);
   const lastLoadedObjectRef = useRef<THREE.Object3D | null>(null);
   const defaultViewRef = useRef<CameraSnapshot | null>(null);
+  const launchViewSnapshotRef = useRef<CameraSnapshot | null>(null);
+  const sdkInitialCameraSnapshotRef = useRef<CameraSnapshot | null>(null);
+  const explicitPackageDefaultViewRef = useRef<CameraSnapshot | null>(null);
+  const boundsCenterHomeViewRef = useRef<CameraSnapshot | null>(null);
+  const defaultViewSourceRef = useRef<DefaultViewSource | null>(null);
   const currentEntryUrlRef = useRef<string | null>(null);
   const activeInstanceEntryUrlRef = useRef<string | null>(null);
   const activeFormatRef = useRef<SupportedLccFormat | null>(null);
@@ -1632,8 +1840,12 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
   const firstFrameContentReadyAtRef = useRef<number | null>(null);
   const [viewerStatus, setViewerStatus] = useState<LccViewerStatus>("idle");
   const [progress, setProgress] = useState(0);
-  const [firstFrameState, setFirstFrameState] = useState(false);
   const [sdkLoadedState, setSdkLoadedState] = useState(false);
+  // 统一 Loading 阶段状态机 — 四段式视觉进度控制
+  const [loadingPhase, setLoadingPhase] = useState<LccLoadingPhase>("loading");
+  const [visualProgress, setVisualProgress] = useState(0);
+  const [overlayVisible, setOverlayVisible] = useState(true);
+  const overlayHideTimerRef = useRef<number | null>(null);
   const normalizedModelUrl = useMemo(() => modelUrl?.trim() ?? "", [modelUrl]);
   const normalizedViewerUrl = useMemo(() => viewerUrl?.trim() ?? "", [viewerUrl]);
   const normalizedDefaultCameraJson = useMemo(
@@ -1686,10 +1898,6 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
   }, [sdkLoadedState, setDebugAttr]);
   // #endregion
 
-  const platformDefaultCameraSnapshot = useMemo(
-    () => parseDefaultCameraJson(normalizedDefaultCameraJson || null),
-    [normalizedDefaultCameraJson],
-  );
   const resolvedSourceUrl = useMemo(
     () => normalizedViewerUrl || normalizedModelUrl,
     [normalizedModelUrl, normalizedViewerUrl],
@@ -1774,6 +1982,10 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
     loadingCompletedRef.current = true;
     completeCallCountRef.current += 1;
     completeReasonRef.current = reason;
+    // 新阶段状态机：进入 initializing 阶段，进度映射到 90%-98%
+    setLoadingPhase("initializing");
+    // 确保视觉进度至少从 92% 起跳
+    setVisualProgress((current) => Math.max(current, 0.92));
     progressRef.current = 0.98;
     setProgress(0.98);
     setViewerStatus("loaded");
@@ -1852,6 +2064,8 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
       updateControls: controlModeRef.current !== "walk",
     });
     defaultViewRef.current = snapshot;
+    launchViewSnapshotRef.current = snapshot;
+    defaultViewSourceRef.current = "launchView";
     if (controlModeRef.current === "walk") {
       syncYawPitchFromCamera(camera, yawRef, pitchRef);
       if (controls) {
@@ -1942,11 +2156,36 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
     );
   };
 
+  const clearWalkPointerState = () => {
+    isLookingRef.current = false;
+    isPanningRef.current = false;
+    panPointerIdRef.current = null;
+    activePointerIdRef.current = null;
+    isPointerDraggingRef.current = false;
+  };
+
   const clearMovementRuntimeState = () => {
     movementInputRef.current = cloneMovementInput(EMPTY_MOVEMENT_INPUT);
     moveSpeedMultiplierRef.current = 1;
     lastFrameTimeRef.current = null;
-    isLookingRef.current = false;
+    clearWalkPointerState();
+  };
+
+  /** walk 鼠标交互是否应被屏蔽（帮助打开 / 未就绪 / 非 walk） */
+  const isWalkMouseInteractionBlocked = () =>
+    isHelpOpenRef.current || !canMoveRef.current || controlModeRef.current !== "walk";
+
+  /** walk 移动/平移/滚轮后同步 OrbitControls.target 与 SDK 相机 */
+  const syncWalkCameraAfterMove = () => {
+    const camera = cameraRef.current;
+    const controls = controlsRef.current;
+    if (!camera) {
+      return;
+    }
+    if (controls && controlModeRef.current === "walk") {
+      syncWalkControlsTarget(camera, controls);
+    }
+    syncViewerCamera();
   };
 
   /** 切换观察 / 漫游模式：漫游禁用 OrbitControls，改由 yaw/pitch 原地转头 */
@@ -1970,7 +2209,7 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
       applyYawPitchToCamera(camera, yawRef.current, pitchRef.current);
       syncWalkControlsTarget(camera, controls);
       clearMovementRuntimeState();
-      logLccDebug("切换至漫游模式", { yaw: yawRef.current, pitch: pitchRef.current });
+      logLccControl("initial mode walk applied", { yaw: yawRef.current, pitch: pitchRef.current });
       return;
     }
 
@@ -1979,9 +2218,6 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
     controls.dampingFactor = ORBIT_DAMPING_FACTOR;
     syncOrbitTargetFromCamera(camera, controls);
     controls.enabled = true;
-    isLookingRef.current = false;
-    activePointerIdRef.current = null;
-    isPointerDraggingRef.current = false;
     clearMovementRuntimeState();
     logLccDebug("切换至观察模式");
   };
@@ -1997,10 +2233,15 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
     lccRenderRef.current?.setCamera?.(camera);
   };
 
+  useEffect(() => {
+    isHelpOpenRef.current = isHelpOpen;
+    if (isHelpOpen) {
+      clearWalkPointerState();
+    }
+  }, [isHelpOpen]);
+
   const stopPointerInteraction = (hardStop = false) => {
-    activePointerIdRef.current = null;
-    isPointerDraggingRef.current = false;
-    isLookingRef.current = false;
+    clearWalkPointerState();
 
     // 漫游模式：相机由 yaw/pitch 控制，绝不调用 controls.update()
     if (controlModeRef.current === "walk") {
@@ -2126,7 +2367,9 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
       commitSavedLaunchView: (view) => {
         const snapshot = parseLaunchViewSnapshot(view);
         if (snapshot) {
+          launchViewSnapshotRef.current = snapshot;
           defaultViewRef.current = snapshot;
+          defaultViewSourceRef.current = "launchView";
         }
       },
       applyView: (view) => applyLaunchView(view),
@@ -2136,8 +2379,6 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
         if (!camera) {
           return;
         }
-
-        const cachedDefaultView = defaultViewRef.current;
 
         /** 尝试应用某个快照；不可见则返回 false */
         const tryApplyAndCheck = (snapshot: CameraSnapshot): boolean => {
@@ -2156,40 +2397,40 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
           return isCameraLikelySeeingBounds(camera, bounds);
         };
 
-        // 1. 优先恢复到保存的 launchView 或 defaultCamera
-        if (
-          cachedDefaultView &&
-          (cachedDefaultView.source === "launchView" ||
-            cachedDefaultView.source === "defaultCamera")
-        ) {
-          const applied = tryApplyAndCheck(cachedDefaultView);
+        const syncWalkAfterApply = () => {
           if (controlModeRef.current === "walk") {
             syncYawPitchFromCamera(camera, yawRef, pitchRef);
             if (controls) syncWalkControlsTarget(camera, controls);
           }
           syncViewerCamera();
-          if (applied) return;
-          // launchView 已失效，继续 fallback 到 fit
-          logLccWarn("保存的启动视角已失效，自动适配模型");
+        };
+
+        const resetCandidates: Array<CameraSnapshot | null> = [
+          launchViewSnapshotRef.current,
+          sdkInitialCameraSnapshotRef.current,
+          explicitPackageDefaultViewRef.current,
+          boundsCenterHomeViewRef.current,
+          defaultViewRef.current,
+        ];
+
+        for (const snapshot of resetCandidates) {
+          if (!snapshot) continue;
+          const validation = isValidLccCameraSnapshot(snapshot, lastActiveBoundsRef.current);
+          if (!validation.valid) continue;
+          const applied = tryApplyAndCheck(snapshot);
+          syncWalkAfterApply();
+          if (applied) {
+            logDefaultView("resetView applied", { source: snapshot.source });
+            return;
+          }
         }
 
-        // 2. 自动 fitBounds
-        if (fitCurrentView()) return;
-
-        // 3. 兜底：应用缓存的任何默认视角
-        if (cachedDefaultView) {
-          applyCameraSnapshot(camera, cachedDefaultView, controls, {
-            updateControls: controlModeRef.current !== "walk",
-          });
-          if (controlModeRef.current === "walk") {
-            syncYawPitchFromCamera(camera, yawRef, pitchRef);
-            if (controls) syncWalkControlsTarget(camera, controls);
-          }
-          syncViewerCamera();
+        if (fitCurrentView()) {
+          logDefaultView("resetView bounds fallback used");
           return;
         }
 
-        logLccWarn("resetView 暂无默认视角快照，也无法执行 bounds fit");
+        logLccWarn("resetView 暂无可用默认视角快照，也无法执行 bounds fit");
       },
       moveForward: (delta) => {
         moveAlongDirection(getForwardVector(), delta);
@@ -2239,6 +2480,12 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
     globalLoadSequence = loadId;
     activeGlobalLoadId = loadId;
     isDisposedRef.current = false;
+    defaultViewRef.current = null;
+    launchViewSnapshotRef.current = null;
+    sdkInitialCameraSnapshotRef.current = null;
+    explicitPackageDefaultViewRef.current = null;
+    boundsCenterHomeViewRef.current = null;
+    defaultViewSourceRef.current = null;
 
     // 诊断日志：记录本次加载的 loadId、modelUrl、entryUrl
     logLccDebug(`[生命周期] mount loadId=${loadId}`, {
@@ -2405,8 +2652,14 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
       progressRef.current = 0;
       setViewerStatus("idle");
       setProgress(0);
-      setFirstFrameState(false);
       setSdkLoadedState(false);
+      setLoadingPhase("loading");
+      setVisualProgress(0);
+      setOverlayVisible(true);
+      if (overlayHideTimerRef.current !== null) {
+        window.clearTimeout(overlayHideTimerRef.current);
+        overlayHideTimerRef.current = null;
+      }
       return () => {
         effectDisposed = true;
         isDisposedRef.current = true;
@@ -2427,8 +2680,14 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
       progressRef.current = 0;
       setViewerStatus("error");
       setProgress(0);
-      setFirstFrameState(false);
       setSdkLoadedState(false);
+      setLoadingPhase("loading");
+      setVisualProgress(0);
+      setOverlayVisible(true);
+      if (overlayHideTimerRef.current !== null) {
+        window.clearTimeout(overlayHideTimerRef.current);
+        overlayHideTimerRef.current = null;
+      }
       logLccError("未配置 LCC 模型地址");
       return () => {
         effectDisposed = true;
@@ -2463,7 +2722,14 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
       lastFrameTimeRef.current = null;
       setViewerStatus("loading");
       setProgress(0);
-      setFirstFrameState(false);
+      // 重置统一 Loading 状态机
+      setLoadingPhase("loading");
+      setVisualProgress(0);
+      setOverlayVisible(true);
+      if (overlayHideTimerRef.current !== null) {
+        window.clearTimeout(overlayHideTimerRef.current);
+        overlayHideTimerRef.current = null;
+      }
       // #region debug-point lcc-stuck-92
       completeCallCountRef.current = 0;
       setDebugAttr("data-lcc-debug-progress", "0.000");
@@ -2658,26 +2924,92 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
         };
 
         const handlePointerDown = (event: PointerEvent) => {
-          if (controlModeRef.current === "walk" && event.button === 0) {
-            event.preventDefault();
-            event.stopPropagation();
-            isLookingRef.current = true;
-            lastLookPointerXRef.current = event.clientX;
-            lastLookPointerYRef.current = event.clientY;
-            activePointerIdRef.current = event.pointerId;
-            isPointerDraggingRef.current = true;
-            currentRenderer.domElement.setPointerCapture(event.pointerId);
+          focusViewerHostElement(viewerRootRef.current);
+          if (controlModeRef.current === "walk") {
+            if (isWalkMouseInteractionBlocked()) {
+              return;
+            }
+
+            if (event.button === 2) {
+              if (isLookingRef.current || isPanningRef.current) {
+                return;
+              }
+              event.preventDefault();
+              event.stopPropagation();
+              isPanningRef.current = true;
+              panPointerIdRef.current = event.pointerId;
+              lastPanPointerXRef.current = event.clientX;
+              lastPanPointerYRef.current = event.clientY;
+              isPointerDraggingRef.current = true;
+              currentRenderer.domElement.setPointerCapture(event.pointerId);
+              return;
+            }
+
+            if (event.button === 0) {
+              if (isPanningRef.current) {
+                return;
+              }
+              event.preventDefault();
+              event.stopPropagation();
+              isLookingRef.current = true;
+              lastLookPointerXRef.current = event.clientX;
+              lastLookPointerYRef.current = event.clientY;
+              activePointerIdRef.current = event.pointerId;
+              isPointerDraggingRef.current = true;
+              currentRenderer.domElement.setPointerCapture(event.pointerId);
+              return;
+            }
+
             return;
           }
 
-          if (controlModeRef.current !== "walk") {
-            activePointerIdRef.current = event.pointerId;
-            isPointerDraggingRef.current = true;
-          }
+          activePointerIdRef.current = event.pointerId;
+          isPointerDraggingRef.current = true;
         };
 
         const handlePointerMove = (event: PointerEvent) => {
-          if (controlModeRef.current !== "walk" || !isLookingRef.current) {
+          if (controlModeRef.current !== "walk") {
+            return;
+          }
+
+          if (isPanningRef.current) {
+            if (panPointerIdRef.current !== null && event.pointerId !== panPointerIdRef.current) {
+              return;
+            }
+
+            event.preventDefault();
+            event.stopPropagation();
+
+            const deltaX = event.movementX || event.clientX - lastPanPointerXRef.current;
+            const deltaY = event.movementY || event.clientY - lastPanPointerYRef.current;
+            lastPanPointerXRef.current = event.clientX;
+            lastPanPointerYRef.current = event.clientY;
+
+            if (deltaX === 0 && deltaY === 0) {
+              return;
+            }
+
+            const camera = cameraRef.current;
+            if (!camera) {
+              return;
+            }
+
+            const { right } = getWalkMovementBasis(camera);
+            const controls = controlsRef.current;
+            const targetDistance = controls
+              ? Math.max(camera.position.distanceTo(controls.target), 0.5)
+              : 10;
+            // 与左键转头共用 WALK_LOOK_SENSITIVITY：按 target 距离换算为等效屏幕位移
+            const panStep = targetDistance * WALK_LOOK_SENSITIVITY * WALK_PAN_LOOK_RATIO;
+            const panDelta = new THREE.Vector3();
+            panDelta.addScaledVector(right, deltaX * panStep);
+            panDelta.addScaledVector(WORLD_UP, -deltaY * panStep);
+            camera.position.add(panDelta);
+            syncWalkCameraAfterMove();
+            return;
+          }
+
+          if (!isLookingRef.current) {
             return;
           }
 
@@ -2707,6 +3039,20 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
         };
 
         const handlePointerUp = (event: PointerEvent) => {
+          if (controlModeRef.current === "walk" && isPanningRef.current) {
+            if (panPointerIdRef.current === null || event.pointerId === panPointerIdRef.current) {
+              isPanningRef.current = false;
+              panPointerIdRef.current = null;
+              isPointerDraggingRef.current = false;
+              try {
+                currentRenderer.domElement.releasePointerCapture(event.pointerId);
+              } catch {
+                // 指针可能已被释放，忽略
+              }
+            }
+            return;
+          }
+
           if (controlModeRef.current === "walk" && isLookingRef.current) {
             isLookingRef.current = false;
             activePointerIdRef.current = null;
@@ -2735,9 +3081,45 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
           stopPointerInteraction(true);
         };
 
+        const handleContextMenu = (event: MouseEvent) => {
+          if (controlModeRef.current !== "walk") {
+            return;
+          }
+          event.preventDefault();
+        };
+
+        const handleWheel = (event: WheelEvent) => {
+          if (
+            isWalkMouseInteractionBlocked() ||
+            isPanningRef.current ||
+            isLookingRef.current
+          ) {
+            return;
+          }
+
+          event.preventDefault();
+          event.stopPropagation();
+
+          const camera = cameraRef.current;
+          if (!camera) {
+            return;
+          }
+
+          const { forward } = getWalkMovementBasis(camera);
+          const step =
+            movementBaseStepRef.current *
+            moveSpeedMultiplierRef.current *
+            WALK_WHEEL_MOVE_FACTOR;
+          const direction = event.deltaY < 0 ? 1 : -1;
+          camera.position.addScaledVector(forward, step * direction);
+          syncWalkCameraAfterMove();
+        };
+
         currentRenderer.domElement.addEventListener("pointerdown", handlePointerDown);
         currentRenderer.domElement.addEventListener("pointermove", handlePointerMove);
         currentRenderer.domElement.addEventListener("pointerleave", handlePointerLeave);
+        currentRenderer.domElement.addEventListener("wheel", handleWheel, { passive: false });
+        currentRenderer.domElement.addEventListener("contextmenu", handleContextMenu);
         window.addEventListener("pointerup", handlePointerUp);
         window.addEventListener("pointercancel", handlePointerCancel);
         window.addEventListener("blur", handleWindowBlur);
@@ -2745,6 +3127,8 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
           currentRenderer.domElement.removeEventListener("pointerdown", handlePointerDown);
           currentRenderer.domElement.removeEventListener("pointermove", handlePointerMove);
           currentRenderer.domElement.removeEventListener("pointerleave", handlePointerLeave);
+          currentRenderer.domElement.removeEventListener("wheel", handleWheel);
+          currentRenderer.domElement.removeEventListener("contextmenu", handleContextMenu);
           window.removeEventListener("pointerup", handlePointerUp);
           window.removeEventListener("pointercancel", handlePointerCancel);
           window.removeEventListener("blur", handleWindowBlur);
@@ -2849,21 +3233,13 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
               if (isStaleRequest() || isFailed) return;
 
               const savedLaunchViewSnapshot = parseLaunchViewSnapshot(launchViewPropRef.current);
+              const explicitPackageDefaultView = extractExplicitPackageDefaultView({
+                runtimeInstance,
+                defaultCameraJson: normalizedDefaultCameraJson || null,
+              });
               rememberBoundsContext(activeBounds);
+              launchViewSnapshotRef.current = savedLaunchViewSnapshot;
 
-              const resolvedSnapshot =
-                savedLaunchViewSnapshot ??
-                platformDefaultCameraSnapshot ??
-                boundsFitSnapshot ??
-                null;
-              const usedBoundsFallback = false;
-              const source: DefaultViewSource | null =
-                savedLaunchViewSnapshot?.source ??
-                platformDefaultCameraSnapshot?.source ??
-                boundsFitSnapshot?.source ??
-                null;
-
-              // boundsCenterHomeView 不再作为 resolvedSnapshot 的兜底（与 boundsFitSnapshot 冗余，且不够稳定），保留其 maxDim 供后续使用
               const loadedMaxDim = boundsSummary
                 ? sanitizeMaxDim(Math.max(...boundsSummary.size))
                 : 10;
@@ -2894,7 +3270,7 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
                 container: getContainerSize(),
                 isValid: isContainerSizeValid(),
                 hasLaunchView: Boolean(savedLaunchViewSnapshot),
-                hasDefaultCamera: Boolean(platformDefaultCameraSnapshot),
+                hasExplicitPackageDefaultView: Boolean(explicitPackageDefaultView),
                 hasBounds: Boolean(activeBounds),
                 rendererSize: currentRenderer.getSize(new THREE.Vector2()).toArray(),
                 cameraAspect: camera.aspect,
@@ -2902,13 +3278,8 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
                 canvasHeight: currentRenderer.domElement.height,
               });
 
-              /** 应用视角并设置默认视角，返回实际应用的 snapshot（可能和 resolvedSnapshot 不同） */
+              /** 按优先级选择默认视角并应用到相机，返回实际应用的 snapshot */
               const applyInitialView = () => {
-                /**
-                 * onLoaded 前强制同步 renderer size 和 camera aspect。
-                 * 客户端路由进入时，ResizeObserver 回调可能还未触发，导致 canvas size 和 camera.aspect 仍然是旧值。
-                 * 必须在 fitBounds 前重新同步，否则首次 fit 使用的是创建时的 aspect（可能为 0 或 1）。
-                 */
                 if (mountRef.current && currentRenderer) {
                   const w = Math.max(mountRef.current.clientWidth, 1);
                   const h = Math.max(mountRef.current.clientHeight, 1);
@@ -2924,32 +3295,90 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
                     aspect: camera.aspect,
                   });
                 }
-                // 优先尝试 launchView
-                if (resolvedSnapshot) {
-                  if (resolvedSnapshot.source === "launchView") {
-                    applyLaunchViewSnapshotToCamera(camera, resolvedSnapshot, controlsRef.current, {
+
+                // 先让 SDK 更新一帧，再捕获初始相机（不要马上 apply boundsCenterHomeView）
+                try {
+                  lccRender.update();
+                } catch {
+                  /* SDK update 失败时仍尝试捕获当前相机 */
+                }
+                syncViewerCamera();
+
+                const sdkInitialSnapshot = captureSdkInitialCameraSnapshot(
+                  camera,
+                  controlsRef.current,
+                  activeBounds,
+                );
+                sdkInitialCameraSnapshotRef.current = sdkInitialSnapshot;
+                explicitPackageDefaultViewRef.current = explicitPackageDefaultView;
+                boundsCenterHomeViewRef.current = boundsCenterHomeView?.snapshot ?? null;
+
+                const sdkInitialValidation = isValidLccCameraSnapshot(sdkInitialSnapshot, activeBounds);
+                if (sdkInitialSnapshot && sdkInitialValidation.valid) {
+                  logDefaultView("sdkInitialCameraSnapshot captured", {
+                    position: sdkInitialSnapshot.position,
+                    target: sdkInitialSnapshot.target,
+                  });
+                } else if (sdkInitialSnapshot) {
+                  logDefaultView("sdkInitialCameraSnapshot rejected", {
+                    reason: sdkInitialValidation.reason ?? "unknown",
+                  });
+                }
+
+                const priorityCandidates: Array<CameraSnapshot | null> = [
+                  savedLaunchViewSnapshot,
+                  sdkInitialValidation.valid ? sdkInitialSnapshot : null,
+                  explicitPackageDefaultView,
+                  boundsCenterHomeView?.snapshot ?? null,
+                  boundsFitSnapshot,
+                ];
+
+                const tryApplySnapshot = (snapshot: CameraSnapshot): boolean => {
+                  if (snapshot.source === "launchView") {
+                    applyLaunchViewSnapshotToCamera(camera, snapshot, controlsRef.current, {
                       controlMode: controlModeRef.current,
                       maxDim: loadedMaxDim,
                       updateControls: controlModeRef.current !== "walk",
                     });
-                    if (isCameraLikelySeeingBounds(camera, activeBounds)) {
-                      // launchView 可见：直接使用
-                      return resolvedSnapshot;
-                    }
-                    // launchView 不可见 → 自动 fitBounds，但不改变后端已保存值
-                    logLccWarn("保存的启动视角下模型不可见，自动回退到适配视角（不删除后端保存值）");
                   } else {
-                    applyCameraSnapshot(camera, resolvedSnapshot, controlsRef.current, {
+                    applyCameraSnapshot(camera, snapshot, controlsRef.current, {
                       updateControls: controlModeRef.current !== "walk",
                     });
-                    if (isCameraLikelySeeingBounds(camera, activeBounds)) {
-                      return resolvedSnapshot;
-                    }
-                    logLccWarn("默认相机快照下模型不可见，自动回退到适配视角");
                   }
+                  return isCameraLikelySeeingBounds(camera, activeBounds);
+                };
+
+                for (const candidate of priorityCandidates) {
+                  if (!candidate) continue;
+                  const validation = isValidLccCameraSnapshot(candidate, activeBounds);
+                  if (!validation.valid) continue;
+
+                  if (candidate.source === "launchView") {
+                    logDefaultView("launchView used");
+                  } else if (candidate.source === "sdkInitialCamera") {
+                    logDefaultView("sdkInitialCameraSnapshot used");
+                  } else if (candidate.source === "defaultCamera") {
+                    logDefaultView("explicitPackageDefaultView used");
+                  } else if (candidate.source === "boundsCenterHomeView") {
+                    logDefaultView("boundsCenterHomeView used");
+                  }
+
+                  const visible = tryApplySnapshot(candidate);
+                  if (visible) {
+                    defaultViewSourceRef.current = candidate.source;
+                    return candidate;
+                  }
+
+                  if (candidate.source === "launchView") {
+                    logLccWarn("保存的启动视角下模型不可见，自动回退到下一优先级（不删除后端保存值）");
+                    continue;
+                  }
+
+                  logLccWarn("默认视角快照下模型不可见，尝试下一优先级", {
+                    source: candidate.source,
+                  });
                 }
 
-                // fallback：自动 fitBounds
                 if (activeBounds) {
                   const fitSnap = buildBoundsFitSnapshot(
                     camera,
@@ -2960,12 +3389,13 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
                     applyCameraSnapshot(camera, fitSnap, controlsRef.current, {
                       updateControls: controlModeRef.current !== "walk",
                     });
+                    defaultViewSourceRef.current = fitSnap.source;
+                    logDefaultView("bounds fallback used", { source: fitSnap.source });
                     return fitSnap;
                   }
                 }
 
-                // 完全没有 bounds，保留已有视角或默认 camera
-                return resolvedSnapshot;
+                return sdkInitialValidation.valid ? sdkInitialSnapshot : null;
               };
 
               let appliedSnapshot: CameraSnapshot | null = null;
@@ -3013,15 +3443,18 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
                 }
                 syncViewerCamera();
 
-                // defaultViewRef：始终指向用户保存的 launchView（如果有），方便 resetView 恢复
                 if (savedLaunchViewSnapshot) {
                   defaultViewRef.current = savedLaunchViewSnapshot;
+                  defaultViewSourceRef.current = "launchView";
                 } else if (snapshot) {
                   defaultViewRef.current = snapshot;
+                  defaultViewSourceRef.current = snapshot.source;
                 } else {
                   defaultViewRef.current = null;
+                  defaultViewSourceRef.current = null;
                 }
 
+                focusViewerHostElement(viewerRootRef.current);
                 setMovementBaseStep(loadedMaxDim);
                 canMoveRef.current = true;
                 initialViewReadyRef.current = true;
@@ -3039,8 +3472,8 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
                 }
 
                 const resolution: DefaultViewResolution = {
-                  snapshot: resolvedSnapshot,
-                  usedBoundsFallback,
+                  snapshot,
+                  usedBoundsFallback: snapshot?.source === "bounds" || snapshot?.source === "sdkBounds",
                   boundsSummary,
                   boundsSource: boundsSource ?? null,
                 };
@@ -3051,7 +3484,7 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
                   boundsSource: boundsSource ?? null,
                   camera,
                   controls: controlsRef.current,
-                  defaultViewSource: source,
+                  defaultViewSource: defaultViewSourceRef.current,
                   cameraBeforeFit,
                   cameraAfterFit: camera.position.toArray() as [number, number, number],
                 });
@@ -3060,19 +3493,12 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
                   loadId,
                   format: currentFormat,
                   useLcc2,
-                  defaultViewSource:
-                    savedLaunchViewSnapshot
-                      ? "launchView"
-                      : platformDefaultCameraSnapshot
-                        ? "defaultCamera"
-                        : boundsFitSnapshot
-                          ? boundsFitSnapshot.source
-                          : boundsCenterHomeView?.snapshot
-                            ? "boundsCenterHomeView"
-                            : "none",
+                  defaultViewSource: defaultViewSourceRef.current,
                   appliedViewSource: snapshot?.source ?? null,
                   hasLaunchView: Boolean(savedLaunchViewSnapshot),
-                  hasPlatformDefaultCameraJson: Boolean(platformDefaultCameraSnapshot),
+                  hasSdkInitialCamera: Boolean(sdkInitialCameraSnapshotRef.current),
+                  hasExplicitPackageDefaultView: Boolean(explicitPackageDefaultViewRef.current),
+                  hasBoundsCenterHomeView: Boolean(boundsCenterHomeViewRef.current),
                   boundsSource: resolution.boundsSource,
                   center: boundsSummary?.center ?? boundsCenterHomeView?.center ?? null,
                   size: boundsSummary?.size ?? boundsCenterHomeView?.size ?? null,
@@ -3095,7 +3521,7 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
                   up: camera.up.toArray(),
                   cameraNear: camera.near,
                   cameraFar: camera.far,
-                  resetViewSource: resolution.snapshot?.source ?? null,
+                  resetViewSource: defaultViewSourceRef.current,
                   hasMeta: Boolean(runtimeInstance?.getMeta?.()),
                   skippedSpawnPointRotation: Boolean(spawnPointResult.rawRotation),
                 });
@@ -3303,6 +3729,57 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
               }
             }
 
+            // 兜底：viewer loaded 后如果 firstFrame 超过 8 秒仍未出现，但不报错
+            // 仅在 canvas 已可见、canMoveRef.current true 时触发
+            if (
+              loadingCompletedRef.current &&
+              !firstFrameRenderedRef.current &&
+              sdkLoadedRef.current &&
+              canMoveRef.current
+            ) {
+              const loadedElapsed =
+                loadStartedAtRef.current === null ? 0 : now - loadStartedAtRef.current;
+              const loadedSinceSdkOnLoaded =
+                sdkLoadedAtRef.current === null ? 0 : now - sdkLoadedAtRef.current;
+              if (
+                loadedElapsed > 8000 &&
+                loadedSinceSdkOnLoaded > 3000 &&
+                loadingPhase !== "complete" &&
+                loadingPhase !== "hidden"
+              ) {
+                // 兜底：不阻塞模型主体，不设置 error，仅视觉上完成
+                firstFrameRenderedRef.current = true;
+                progressRef.current = 1;
+                setProgress(1);
+                setVisualProgress(1);
+                setLoadingPhase("complete");
+                if (overlayHideTimerRef.current !== null) {
+                  window.clearTimeout(overlayHideTimerRef.current);
+                }
+                overlayHideTimerRef.current = window.setTimeout(() => {
+                  overlayHideTimerRef.current = null;
+                  setOverlayVisible(false);
+                  setLoadingPhase("hidden");
+                }, 300);
+                setDebugAttr("data-lcc-first-frame", "true");
+                markDebugEvent("firstFrameFallback", { loadId, loadedElapsed: Math.round(loadedElapsed) });
+                logLccDebug("first frame fallback triggered, overlay will fade out", {
+                  loadId,
+                  loadedElapsed: Math.round(loadedElapsed),
+                });
+              }
+            }
+
+            // 未加载完成时，用新状态机更新 visualProgress（单调递增）
+            if (!loadingCompletedRef.current && loadingPhase !== "complete" && loadingPhase !== "hidden") {
+              const rawProgress = progressRef.current;
+              const displayProgress = mapLccDisplayProgress({
+                rawProgress,
+                loadingPhase,
+              });
+              setVisualProgress((current) => Math.max(current, displayProgress));
+            }
+
             // 加载完成 (completeViewerLoading) 后，等待模型内容真正可见
             if (loadingCompletedRef.current && !firstFrameRenderedRef.current) {
               const canvasElement = rendererRef.current.domElement;
@@ -3339,7 +3816,17 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
                     firstFrameRenderedRef.current = true;
                     progressRef.current = 1;
                     setProgress(1);
-                    setFirstFrameState(true);
+                    // 新阶段状态机：进入 complete 阶段 → 显示 100% → 300ms 后淡出
+                    setVisualProgress(1);
+                    setLoadingPhase("complete");
+                    if (overlayHideTimerRef.current !== null) {
+                      window.clearTimeout(overlayHideTimerRef.current);
+                    }
+                    overlayHideTimerRef.current = window.setTimeout(() => {
+                      overlayHideTimerRef.current = null;
+                      setOverlayVisible(false);
+                      setLoadingPhase("hidden");
+                    }, 300);
                     setDebugAttr("data-lcc-first-frame", "true");
                     markDebugEvent("firstFrameRendered", { loadId });
                     logLccDebug("model content visible, first frame complete", {
@@ -3450,7 +3937,7 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
     lccFormat,
     lccFormatDecision.source,
     normalizedModelUrl,
-    platformDefaultCameraSnapshot,
+    normalizedDefaultCameraJson,
     normalizedViewerUrl,
     processingBlocked,
     completeViewerLoading,
@@ -3461,13 +3948,17 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
     setDebugAttr,
   ]);
 
-  const showOverlay = processingBlocked || viewerStatus !== "loaded" || !firstFrameState;
+  // 统一 overlay 控制：由新状态机 overlayVisible 主导
+  const showOverlay =
+    processingBlocked ||
+    viewerStatus === "error" ||
+    overlayVisible;
   const displayProgress =
-    viewerStatus === "loaded" && firstFrameRenderedRef.current
-      ? 1
-      : viewerStatus === "loaded"
-        ? 0.98
-        : Math.min(Number.isFinite(progress) ? progress : 0, sdkLoadedState ? 0.98 : 0.95);
+    viewerStatus === "error"
+      ? visualProgress
+      : processingBlocked
+        ? undefined
+        : visualProgress;
   const overlayStatus = processingBlocked
     ? "info"
     : viewerStatus === "error"
@@ -3501,13 +3992,6 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
         }}
       />
       <div className="pointer-events-none absolute inset-x-0 top-0 h-24 bg-gradient-to-b from-cyan-400/10 to-transparent" />
-      {viewerStatus === "loaded" ? (
-        <div
-          aria-hidden="true"
-          className="pointer-events-none absolute inset-x-0 bottom-0 z-[1] bg-[#0d0d0d]"
-          style={{ height: `${LCC_WATERMARK_BOTTOM_BAR_PX}px` }}
-        />
-      ) : null}
 
       <ModelLoadingOverlay
         visible={showOverlay}

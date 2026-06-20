@@ -1,12 +1,33 @@
-# LCC Web SDK 接入记录
-
-> 记录日期：2026-06-12
-> 记录范围：LCC Web SDK 第一步接入，仅包含 SDK 目录判定、静态文件落位、统一 `LccViewer` 外壳准备、文档补录。
-> 明确未改范围：`server/`、数据库、OSS、`deploy/.env.prod`。
+> 记录日期：2026-06-12（持续补记至 2026-06-20）
+> 记录范围：LCC Web SDK 接入、运行时升级、Viewer 交互与文档口径。
+> 明确未改范围：`server/`、数据库、OSS、`deploy/.env.prod`（除非各节单独说明）。
 > 最新口径：当前对象存储实际为 **阿里云 OSS**；文档统一使用 `OSS_* / objectKey / oss-compatible.service.ts` 作为对象存储命名。
-> 最新补记：2026-06-12 已补齐 iframe 独立查看器、卡 92% 运行时排查、appKey 验证、水印来源判断与内部视觉处理记录。
+> **优先读本节**：下方「当前运行时口径（0.6.1）」为 web 实际加载依据；第 1～11 节含 0.6.0 历史接入记录，勿与运行时混淆。
 
-## 1. SDK 原始路径
+## 当前运行时口径（0.6.1，2026-06-20）
+
+| 项 | 值 |
+|---|---|
+| SDK 版本 | **0.6.1**（UMD 内嵌版本字符串 `"0.6.1"`） |
+| 部署目录 | `web/public/vendor/lcc-web/0.6.1/` |
+| 文件名 | `lcc-web-sdk.js`（ESM）、`lcc-web-sdk.umd.js`（UMD） |
+| **非**运行时文件名 | ~~`lcc-0.6.1.js`~~、~~`lcc-0.6.0.js`~~（历史/误称，仓库内不存在于 `web/public`） |
+| 运行时加载 URL | `/vendor/lcc-web/0.6.1/lcc-web-sdk.umd.js` |
+| 代码常量 | `LccViewer` 内 `LCC_WEB_VERSION = "0.6.1"` |
+| 官方对照包 | `LCC-Web-0.6.1/` → `sdk/lcc-web-sdk.js` |
+| LCCRender 公开 API | `load`、`setCamera`、`update`、`unload`、`dispose`、`raycast`、`raycastFromOrigin`、`clearIndexDB`、`getVersion` |
+
+**说明**：SDK 只负责 LCC 场景渲染；walk / orbit 相机与鼠标交互均在项目层 `lcc-viewer.tsx`（walk 自研 + orbit 用 Three.js `OrbitControls`）。
+
+### 默认启动视图优先级（已封板）
+
+`launchView` → `sdkInitialCamera` → `explicitPackageDefaultView`（含 `defaultCameraJson`）→ `boundsCenterHomeView` → `bounds` / `sdkBounds`
+
+`spawnPoint` 仅 dev 诊断，不参与 defaultView / `resetView`。
+
+---
+
+## 1. SDK 原始路径（历史：0.6.0 首次接入）
 
 - 原始目录：`C:\Users\13114\Desktop\公司网站开发\公司官网首页设计\LCC-Web-0.6.0`
 
@@ -1768,3 +1789,100 @@
   - `spawnPoint.rotation` 人工验证后仍斜，已停用
   - `poses / bestTrajectoryPose` 已废弃，不参与默认视角
   - `dataPath`、后端、OSS / ZIP 未改
+
+### 14.23 controlMode 默认 walk + iframe 焦点 + firstFrameState overlay 三项修复
+
+- 修改时间：`2026-06-20`
+- 本轮范围：
+  - `web/components/models/lcc-viewer.tsx`
+  - `web/components/models/model-viewer-shell.tsx`
+  - `web/components/pages/model-detail-page.tsx`
+  - `web/components/pages/model-share-viewer-page.tsx`
+  - `web/app/viewer/lcc/[id]/page.tsx`
+  - `docs/lcc-web-sdk-integration.md`
+  - `docs/dev-checkpoint.md`
+- 是否修改后端 / 数据库 / Prisma / OSS / ZIP / dataPath：
+  - 否
+- 本轮问题：
+  - LCC/LCC2 模型默认第一人称模式（walk）下 WASD 不响应
+  - Loading 动画到 92% 左右提前退场，模型还没真正显示
+- 根因链（三个独立问题）：
+
+  **问题一：首次 applyControlMode 被 guard 跳过（ff2fb40）**
+  - `lcc-viewer.tsx` 中 controlMode 切换由 `applyControlMode` 执行，但其函数体开头有一个防重入 guard `if (controlModeRef.current === mode) return;`
+  - `initialControlMode` 虽然从 props 拿到 `"walk"`，但 `controlModeRef.current` 默认初始值也是 `"walk"`，导致 guard 拦截首次 apply
+  - 修复：`applyControlMode` 不再直接 `return`，改为先执行 `controls.enabled = (mode !== "walk")`，仅在 mode 未变化且 controls 状态一致时才跳过
+  - 文件：`lcc-viewer.tsx`
+
+  **问题二：模型切换时 controlMode 被重置为 orbit（b63794c）**
+  - `model-viewer-shell.tsx` 在模型切换时重新挂载 `LccViewer`，但 `controlMode` props 在用户切换模型后恢复默认值 `"orbit"`
+  - 修复：在 `LccViewer` unmount 时将当前 controlMode 保存到外层共享变量，remount 时复用
+  - 文件：`model-viewer-shell.tsx`
+
+  **问题三：iframe 没有焦点，WASD 不触发（633d49f + 879d414）**
+  - LCC 模型在 `/models/[id]` 和 `/models/[id]/view` 中通过 iframe 加载 `/viewer/lcc/[id]`
+  - iframe 没有焦点时，iframe 内 `document.addEventListener("keydown", ...)` 不会被触发
+  - 修复：
+    - `model-detail-page.tsx`：`handleLccIframeLoad` 中调用 `lccIframeRef.current.focus()` + `setTimeout(600)` 兜底 + `tabIndex={0}`
+    - `model-share-viewer-page.tsx`：同上修复
+    - `page.tsx`：viewer 容器 `tabIndex={0}` + `outline-none` + auto-focus useEffect（模型加载完成后聚焦）
+
+  **问题四：overlay 在首帧尚未就绪时提前消失（3ad12cf）**
+  - `showOverlay = processingBlocked || viewerStatus !== "loaded"` 在 `viewerStatus` 变为 `"loaded"` 时隐藏 overlay
+  - 但 `completeViewerLoading` 触发时首帧渲染还未完成（`firstFrameRenderedRef = false`），模型画面还在加载中
+  - 修复：新增 `firstFrameState` React state，`showOverlay` 改为 `... || !firstFrameState`，overlay 保持显示直到首帧 canvas 内容就绪
+  - 文件：`lcc-viewer.tsx`
+
+  **问题五：viewerReady 实验及回滚（5b7b79d → 79667b0）**
+  - 尝试用更保守的 `viewerReadyState`（延迟 800ms + RAF x2 + canMove + canvas 连通）替代 `firstFrameState`，但导致模型卡 Loading
+  - 已经回滚：删除 `viewerReadyRef / viewerReadyState / readyFinalizeTimerRef / scheduleViewerReadyFinalize / data-lcc-viewer-ready / onViewerReady prop / SHUJING_LCC_VIEWER_READY postMessage`
+  - `showOverlay` 恢复为依赖 `firstFrameState`
+  - 父页面轮询恢复为 `data-lcc-first-frame`
+  - 文件：`lcc-viewer.tsx`, `page.tsx`, `model-detail-page.tsx`, `model-share-viewer-page.tsx`
+
+- 本轮提交记录：
+  - `ff2fb40` fix: initialControlMode 强制首次 apply walk
+  - `b63794c` fix: keep viewer shell default control mode as walk
+  - `633d49f` fix: focus LCC iframe for default keyboard controls
+  - `879d414` fix: focus viewer container in LCC iframe page
+  - `3ad12cf` fix: keep loading overlay until first frame is ready
+  - `5b7b79d` fix: wait for LCC viewer ready before hiding loading（已回滚）
+  - `79667b0` revert: restore LCC loading readiness flow（回滚 5b7b79d）
+- 构建或测试命令：
+  - `cd web && pnpm build`
+- 构建或测试结果：
+  - 每次 `pnpm build` 均通过
+- 当前结论：
+  - `initialControlMode` 首次 apply walk 已修复
+  - 模型切换后默认 walk 已修复
+  - iframe focus + tabIndex 已修复（详情页 + 分享页 + iframe 内部容器）
+  - overlay 不再在首帧就绪前提前消失
+  - `viewerReady` 实验因导致模型卡 Loading 已经回滚
+  - 保留当前 `firstFrameState` + `data-lcc-first-frame` 作为 loading 完成条件
+- 当前风险点：
+  - `firstFrameState` 判定阈值较低（仅需 3 个非背景像素 + 0.3% 比例），不排除部分模型在首帧稀疏像素时判定过早
+  - `attrs.lcp 404` 不影响加载，但控制台会产生一次 404 请求（SDK 0.6.1 不请求 attrs.lcp，是前端 `loadLccSpawnPointSnapshot` 主动 fetch）
+- 下一步建议：
+  - 若再次出现 overlay 提前消失，可调整 `LCC_MODEL_PIXEL_MIN_COUNT` 或 `LCC_MODEL_PIXEL_RATIO_THRESHOLD` 提高首帧判定门槛
+  - 模型处理失败（`processed/lcc/16/` 目录不存在）的问题需在后端排查，与前端加载逻辑无关
+
+### 14.24 帮助面板 + 第一人称 walk 鼠标交互（2026-06-20）
+
+- 帮助面板：`web/components/models/model-viewer-help.tsx`
+  - 居中半透明浮层；仅 tab「第一人称 / 枢轴」
+  - 不含数字人、第三人称、新手指引、未接入能力
+  - tab 切换只改帮助文案，不改 viewer `controlMode`
+- 第一人称鼠标（`lcc-viewer.tsx`，项目层，非 SDK）：
+  - 滚轮：沿视线前后移动 `camera.position`（不改 FOV）
+  - 右键拖动：平移位置（不改 yaw/pitch；`WALK_PAN_LOOK_RATIO = 0.5`）
+  - walk 下 **不**启用 OrbitControls
+- UI 命名：`walk` →「第一人称」；`orbit` →「枢轴」（帮助 tab；工具栏可为「枢轴模式」短文案）
+- 帮助打开：`LccViewer` 接收 `isHelpOpen`，屏蔽 walk 的 wheel / pointer
+- 未改：`LCCRender.load`、`dataPath`、默认视角链、`launchView`、`resetView`、iframe 完成协议
+- 构建：`cd web && pnpm build` 通过
+
+### 14.25 SDK 0.6.1 运行时升级说明
+
+- 自 0.6.0 升级后，静态资源路径与文件名变更（见文首「当前运行时口径」）
+- `web/public/vendor/lcc-web/` 现仅保留 `0.6.1/` 目录
+- 仓库仍保留 `LCC-Web-0.6.0/` 作历史对照；**运行时以 0.6.1 + `lcc-web-sdk.*` 为准**

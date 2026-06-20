@@ -1,6 +1,6 @@
 # 数境空间官网 后端架构与部署方案（当前实现与生产目标）
 
-> 更新日期：2026-06-14
+> 更新日期：2026-06-20
 > 状态：已按当前仓库实际实现重写；本文档为 `web/`、`server/`、对象存储、部署目标和接口口径的最新总说明。
 > 适用：前后端开发、联调、部署运维、文档续写。
 > 说明：项目当前同时保留根目录 `src/` Vite 原型与 `web/` Next.js 正式前端；文档统一使用 `OSS_* / objectKey / oss-compatible.service.ts` 作为当前对象存储命名，当前存储后端为 **阿里云 OSS**。
@@ -21,7 +21,7 @@
 | ORM | Prisma | schema、迁移、seed |
 | 对象存储 | 阿里云 OSS（S3 兼容接入） | 模型文件、封面、视频、LCC/LCC2 成果包均存 OSS，不落服务器本地 |
 | CDN / DNS / SSL / 安全 | Cloudflare | 域名解析、SSL、WAF、边缘缓存 |
-| 3D 原生查看 | LCC Web SDK 0.6.0 + Three.js | LCC / LCC2 当前走 `LccViewer` |
+| 3D 原生查看 | LCC Web SDK **0.6.1** + Three.js | LCC / LCC2 当前走 `LccViewer`；运行时 `/vendor/lcc-web/0.6.1/lcc-web-sdk.umd.js` |
 | 缓存（二期可选） | Redis | 验证码、限流、热点缓存 |
 
 ### 当前红线
@@ -43,13 +43,14 @@
 │  ├─ app/                    App Router 页面
 │  ├─ components/             页面、布局、模型浏览器、后台组件
 │  ├─ lib/api/                前端 API 客户端
-│  └─ public/vendor/lcc-web/  LCC Web SDK 静态资源
+│  └─ public/vendor/lcc-web/  LCC Web SDK 静态资源（当前 0.6.1/）
 ├─ server/                    NestJS 后端
 │  ├─ prisma/                 schema、迁移、seed、管理员初始化
 │  └─ src/modules/            auth/models/uploads/admin/... 业务模块
 ├─ docs/                      当前说明文档
 ├─ 页面功能注释文档/          页面需求与交互依据
-└─ LCC-Web-0.6.0/             官方 SDK 对照包
+├─ LCC-Web-0.6.1/             官方 SDK 对照包（当前版本）
+└─ LCC-Web-0.6.0/             历史 SDK 对照包（运行时不再使用）
 ```
 
 ### 当前已落地模块
