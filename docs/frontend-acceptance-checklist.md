@@ -1,6 +1,6 @@
 # 数境空间官网 全站前端手动验收清单
 
-> 更新日期：2026-06-20（已补齐 LCC SDK 0.6.1、帮助面板、第一人称鼠标交互验收项）
+> 更新日期：2026-06-21（已补齐分享页手机横屏 Viewer Step 1~2 验收项）
 > 适用范围：
 > - **生产目标前端**：`web/` **Next.js 15** App Router（**主验收对象**，见下「测试环境 B」）。
 > - **UI 对照基准**：根目录 `src/` **Vite + React** 原型（Figma 导出版视觉/文案/交互基准，见下「测试环境 A」）。
@@ -40,6 +40,7 @@
 | 二 Home | `src/app/App.tsx` | `/` → `home-page.tsx` |
 | 三 ModelCommunity | `ModelCommunity.tsx` | `/community` |
 | 四 ModelLibrary | `ModelLibrary.tsx` | `/models`、`/models/[id]`、`/models/me`；`UploadModal` / `TrainingModal` |
+| 四·续 ModelShareView | — | `/models/[id]/view` → `model-share-viewer-page.tsx`；LCC iframe `/viewer/lcc/[id]?context=share&readonly=1[&mobile=1]` |
 | 五 AboutUs | `AboutUs.tsx` | `/about` |
 | 六 AuthPage | `AuthPage.tsx` | `/auth` |
 | 七 ContactPage | `ContactPage.tsx` | `/contact` |
@@ -169,7 +170,28 @@
 | L10 | UI | 🔁 | 详情「返回社区」 | 回 `/models`；**Vite** 单页内可保留筛选状态；**Next.js** 独立路由返回可能重置筛选（已知架构差异，不计失败 unless 产品要求保留） | | |
 | L11a | 🔌 | 🔁 | **已登录**点赞/收藏 | 调用写接口；刷新后状态保持；计数更新 | | |
 | L11b | 🔌 | 🔁 | **未登录**点赞/收藏 | toast 提示登录并引导 AuthPage | | |
-| L11c | UI | 🔁 | 分享 | 复制链接/Web Share（无后端） | | |
+| L11c | UI | 🔁 | 分享 | 复制或 Web Share 链接为 `/models/{id}/view`（非详情页 URL） | | |
+
+### 4.2.1 模型分享沉浸式页 ModelShareViewer（`/models/[id]/view`）
+
+> 组件：`web/components/pages/model-share-viewer-page.tsx`  
+> LCC/LCC2：外层壳 + iframe `/viewer/lcc/[id]?context=share&readonly=1`（桌面）或 `&mobile=1`（手机横屏）
+
+| # | 类型 | 设备 | 操作步骤 | 预期结果 | 是否通过 | 备注 |
+|---|---|---|---|---|---|---|
+| SV1 | UI | 💻 | 桌面打开 `/models/{lccId}/view` | 全屏黑底分享壳；LCC iframe 正常加载；**无**竖屏阻断、**无**手机摇杆 | | |
+| SV2 | UI | 💻 | 检查桌面分享 iframe src | 含 `context=share&readonly=1`；**不含** `mobile=1` | | |
+| SV3 | UI | 💻 | 桌面分享全屏按钮 | 可进入全屏；失败时降级「进入全屏观看」（无「建议横屏」） | | |
+| SV4 | UI | 📱 | 手机**竖屏**打开分享链接 | 显示「请横屏浏览模型」阻断层；**不**显示 iframe / 摇杆 | | DevTools：`pointer:coarse` + 窄视口 |
+| SV5 | UI | 📱 | 竖屏点「进入横屏浏览」 | 不报错；失败时仍停留阻断层（iOS/微信可失败） | | |
+| SV6 | UI | 📱 | 手机**横屏**打开分享链接 | 进入横屏分享壳；顶栏含模型名 +「第一人称」静态提示 | | |
+| SV7 | UI | 📱 | 横屏检查 iframe src | 含 `context=share&readonly=1&mobile=1` | | |
+| SV8 | UI | 📱 | 横屏 LCC 加载 | 模型正常显示；外层 Loading 在首帧后收起 | | 协议：`data-lcc-first-frame` |
+| SV9 | UI | 📱 | 左下虚拟摇杆 | 上/下/左/右拖动能前进/后退/平移；松开即停 | | |
+| SV10 | UI | 📱 | 右下「升 / 降 / 重置」 | 按住升降有效；重置回到默认视角 | | |
+| SV11 | UI | 📱 | iframe 内工具栏 | **不显示**桌面左下工具栏；**不显示**「保存启动视图」 | | `readonly=1` |
+| SV12 | UI | 📱 | 帮助打开时（若可触发 `H`） | 手机控制层隐藏；移动停止 | | 本轮无手机帮助入口 |
+
 | L12 | 🔌 | 🔁 | 非法/不存在 id | “模型不存在/返回列表”，不白屏 | | |
 
 ### 4.3 发布 UploadModal / 训练 TrainingModal / 个人中心 PersonalCenter

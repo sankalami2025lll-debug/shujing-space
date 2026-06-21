@@ -1,6 +1,6 @@
 # 统一模型浏览器架构（第一、二阶段 + UI 收口）
 
-> 更新时间：2026-06-20  
+> 更新时间：2026-06-21  
 > 第一阶段目标：先完成“统一壳子 + 引擎接口 + 分发结构”，不一次性接入全部模型引擎。  
 > 第二阶段目标：先稳定“统一工具栏能力接口 + Shell 操作入口”，暂不接新的 GLB 引擎。  
 > 当前详情页 UI：用户前端不显示开发说明模块与顶部标签栏，模型操作统一收口到视图内部左下角折叠工具栏。  
@@ -621,6 +621,86 @@ web/components/models/
 - iOS Safari、微信内置浏览器、部分安卓浏览器自动全屏和锁横屏可能失败
 - 方案通过 try/catch 静默兜底，不影响模型展示
 
+## 十二·续一、手机分享入口壳（Step 1，2026-06-21）
+
+- 路由：`/models/[id]/view` → `web/components/pages/model-share-viewer-page.tsx`
+- 工具：`web/lib/use-mobile-viewer.ts`（`useMobileViewer`、`buildLccShareIframeSrc`）
+
+### 移动端识别
+
+- `isMobileShare = (pointer: coarse) && (innerWidth <= 900 || innerHeight <= 600)`
+- `isLandscape = matchMedia("(orientation: landscape)")`
+- 仅客户端 mount 后生效，避免 SSR hydration 不一致
+
+### 竖屏阻断
+
+- 条件：`isMobileShare && !isLandscape`
+- UI：全屏黑底 +「请横屏浏览模型」+「进入横屏浏览」
+- 不渲染 LCC iframe；点击「进入横屏浏览」尝试 `document.documentElement.requestFullscreen` + `orientation.lock("landscape")`，失败静默
+
+### 横屏分享壳
+
+- 条件：`isMobileShare && isLandscape`
+- 黑底全屏（`100dvh` / `100dvw`）；轻量顶栏：返回、模型名、「第一人称」静态提示（不可切换）、全屏按钮
+- Viewer 区 `touch-none` 为后续触控预留
+
+### 分享 iframe query
+
+| 场景 | iframe src |
+|------|------------|
+| 桌面分享 | `/viewer/lcc/{id}?context=share&readonly=1` |
+| 手机横屏分享 | `/viewer/lcc/{id}?context=share&readonly=1&mobile=1` |
+| 详情页（非分享） | `/viewer/lcc/{id}`（无 query） |
+
+- `readonly=1`：iframe 内 `canShowSaveLaunchView=false`，隐藏「保存启动视图」
+- `mobile=1`：挂载手机触控层（见 §十二·续二）
+- **未改**：`LccViewer`、`LCCRender.load`、`dataPath`、子文档 `data-lcc-loaded` / `onLoadedStable` 协议
+
+### 与原有全屏逻辑的关系
+
+- 保留：模型 `ready` 后 500ms 自动全屏 + 横屏锁定、降级按钮、退出全屏 `orientation.unlock`
+- 竖屏阻断时不触发自动全屏
+- 桌面分享不出现竖屏阻断；桌面全屏降级文案为「进入全屏观看」（不含「建议横屏」）
+
+### 外层 Loading 口径（分享页 / 详情页）
+
+- 外层轮询 iframe 子文档：`data-lcc-viewer-status`、`data-lcc-first-frame === "true"` 后收起 `ModelLoadingOverlay`
+- 子文档根节点仍维护 `data-lcc-loaded`、`data-lcc-complete-reason`（如 `onLoadedStable`）
+
+## 十二·续二、手机分享 iframe 第一人称触控层（Step 2，2026-06-21）
+
+- 组件：`web/components/models/mobile-lcc-game-controls.tsx`
+- 挂载页：`web/app/viewer/lcc/[id]/page.tsx`
+- 显示条件：`searchParams.mobile === "1"` **且** `!isHelpOpen` **且** 模型 `processingStatus === "ready"`
+
+### UI 布局
+
+| 区域 | 内容 |
+|------|------|
+| 左下（24px） | 虚拟摇杆：外圈半透明灰黑，内圈冰蓝半透明 |
+| 右下（24px） | 「升」「降」「重置」三按钮 |
+
+### 交互
+
+- 摇杆 Pointer Events → `setMovementInput({ forward/backward/left/right })`，阈值归一化 `0.2`
+- 「升」/「降」按住 → `up` / `down`（对应桌面 `E` / `Q`）；与摇杆状态合并后统一下发
+- 「重置」→ `viewerHandleRef.resetView()`，并清零移动输入
+- 样式：`touch-action: none`、`user-select: none`；`preventDefault` + `stopPropagation` 避免触发 canvas 转头
+- unmount / 帮助打开 / disabled：清零 `setMovementInput`
+
+### 与桌面工具栏分工
+
+- `mobile=1`：**不渲染** `ModelViewerToolbar`（避免与摇杆左下角冲突）
+- 非 `mobile=1`：仍显示完整工具栏（含帮助、模式切换、保存启动视图等）
+- 强制 `controlMode = "walk"`（手机分享场景）
+
+### 未实现（Step 3+）
+
+- 右侧滑动区转头
+- 双指捏合 / 双指平移
+- 手机专用帮助面板
+- 枢轴模式手机 UI
+
 ## 十三、默认操作模式（2026-06-20）
 
 - 所有模型页面默认操作模式从 `"orbit"`（观察模式）改为 `"walk"`（漫游模式）
@@ -635,3 +715,4 @@ web/components/models/
 3. 为 BIM / PLY / OSGB 明确后续候选引擎和接入边界
 4. 在"文件结构"Tab 中逐步接入不同格式的结构树
 5. 在"操作记录"Tab 中沉淀统一事件模型
+6. **手机分享 Step 3**：右侧滑动转头、双指手势；手机帮助面板（可选）

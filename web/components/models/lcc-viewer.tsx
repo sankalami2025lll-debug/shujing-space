@@ -194,6 +194,14 @@ const ORBIT_PAN_SPEED = 0.60;
 const ORBIT_ZOOM_SPEED = 0.50;
 // 漫游模式：左键原地转头灵敏度与俯仰角限制
 const WALK_LOOK_SENSITIVITY = 0.002;
+/** 手机端转头相对桌面左键转头的灵敏度倍率 */
+const WALK_MOBILE_LOOK_SENSITIVITY_FACTOR = 0.85;
+/** 手机双指捏合相对桌面滚轮沿视线移动的速度倍率 */
+const WALK_MOBILE_PINCH_SENSITIVITY_FACTOR = 0.7;
+/** 手机双指平移相对桌面右键平移的速度倍率 */
+const WALK_MOBILE_PAN_SENSITIVITY_FACTOR = 0.8;
+/** 手机双指捏合：约多少像素间距变化等价于一次桌面滚轮步进 */
+const WALK_MOBILE_PINCH_REFERENCE_PX = 60;
 /** 右键平移相对左键转头的速度倍率（0.5 = 为转头速度的一半） */
 const WALK_PAN_LOOK_RATIO = 0.5;
 // 漫游 Fly 基础移动系数（相对原 0.002 累计降速；Shift 2x 仍由 moveSpeedMultiplier 叠加，倍率不变）
@@ -230,6 +238,72 @@ function applyYawPitchToCamera(
   camera.quaternion.setFromEuler(_walkEuler);
   camera.up.copy(WORLD_UP);
   camera.updateMatrixWorld(true);
+}
+
+/** 第一人称 walk：按屏幕像素增量更新 yaw/pitch（桌面左键与手机右侧滑动共用） */
+function applyWalkLookDelta(
+  yawRef: { current: number },
+  pitchRef: { current: number },
+  deltaX: number,
+  deltaY: number,
+  sensitivity: number = WALK_LOOK_SENSITIVITY,
+) {
+  if (deltaX === 0 && deltaY === 0) {
+    return;
+  }
+
+  yawRef.current -= deltaX * sensitivity;
+  pitchRef.current -= deltaY * sensitivity;
+  pitchRef.current = THREE.MathUtils.clamp(
+    pitchRef.current,
+    WALK_PITCH_MIN,
+    WALK_PITCH_MAX,
+  );
+}
+
+/** 第一人称 walk：沿视线前后移动（桌面滚轮与手机双指捏合共用） */
+function applyWalkMoveAlongView(
+  camera: THREE.PerspectiveCamera,
+  amount: number,
+  movementBaseStep: number,
+  moveSpeedMultiplier: number,
+  source: "mobile" | "wheel" = "wheel",
+) {
+  if (amount === 0) {
+    return;
+  }
+
+  const { forward } = getWalkMovementBasis(camera);
+  const baseStep = movementBaseStep * moveSpeedMultiplier * WALK_WHEEL_MOVE_FACTOR;
+  const moveDistance =
+    source === "mobile"
+      ? amount * (baseStep / WALK_MOBILE_PINCH_REFERENCE_PX) * WALK_MOBILE_PINCH_SENSITIVITY_FACTOR
+      : amount * baseStep;
+  camera.position.addScaledVector(forward, moveDistance);
+}
+
+/** 第一人称 walk：按屏幕像素增量平移相机位置（桌面右键与手机双指同向拖动共用） */
+function applyWalkPanByScreenDelta(
+  camera: THREE.PerspectiveCamera,
+  controls: OrbitControls | null,
+  deltaX: number,
+  deltaY: number,
+  source: "mobile" | "mouse" = "mouse",
+) {
+  if (deltaX === 0 && deltaY === 0) {
+    return;
+  }
+
+  const { right } = getWalkMovementBasis(camera);
+  const targetDistance = controls
+    ? Math.max(camera.position.distanceTo(controls.target), 0.5)
+    : 10;
+  const panStep = targetDistance * WALK_LOOK_SENSITIVITY * WALK_PAN_LOOK_RATIO;
+  const scale = source === "mobile" ? WALK_MOBILE_PAN_SENSITIVITY_FACTOR : 1;
+  const panDelta = new THREE.Vector3();
+  panDelta.addScaledVector(right, deltaX * panStep * scale);
+  panDelta.addScaledVector(WORLD_UP, -deltaY * panStep * scale);
+  camera.position.add(panDelta);
 }
 
 /** 漫游模式下仅同步 OrbitControls.target，不调用 controls.update，避免 target 反控相机 */
@@ -2462,6 +2536,50 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
           lastFrameTimeRef.current = null;
         }
       },
+      lookByDelta: (delta) => {
+        if (isWalkMouseInteractionBlocked()) {
+          return;
+        }
+        const sensitivity =
+          delta.source === "mobile"
+            ? WALK_LOOK_SENSITIVITY * WALK_MOBILE_LOOK_SENSITIVITY_FACTOR
+            : WALK_LOOK_SENSITIVITY;
+        applyWalkLookDelta(yawRef, pitchRef, delta.x, delta.y, sensitivity);
+      },
+      moveAlongView: (delta) => {
+        if (isWalkMouseInteractionBlocked()) {
+          return;
+        }
+        const camera = cameraRef.current;
+        if (!camera) {
+          return;
+        }
+        applyWalkMoveAlongView(
+          camera,
+          delta.amount,
+          movementBaseStepRef.current,
+          moveSpeedMultiplierRef.current,
+          delta.source === "mobile" ? "mobile" : "wheel",
+        );
+        syncWalkCameraAfterMove();
+      },
+      panByDelta: (delta) => {
+        if (isWalkMouseInteractionBlocked()) {
+          return;
+        }
+        const camera = cameraRef.current;
+        if (!camera) {
+          return;
+        }
+        applyWalkPanByScreenDelta(
+          camera,
+          controlsRef.current,
+          delta.x,
+          delta.y,
+          delta.source === "mobile" ? "mobile" : "mouse",
+        );
+        syncWalkCameraAfterMove();
+      },
       setControlMode: (mode) => {
         applyControlModeRef.current(mode);
       },
@@ -2994,17 +3112,13 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
               return;
             }
 
-            const { right } = getWalkMovementBasis(camera);
-            const controls = controlsRef.current;
-            const targetDistance = controls
-              ? Math.max(camera.position.distanceTo(controls.target), 0.5)
-              : 10;
-            // 与左键转头共用 WALK_LOOK_SENSITIVITY：按 target 距离换算为等效屏幕位移
-            const panStep = targetDistance * WALK_LOOK_SENSITIVITY * WALK_PAN_LOOK_RATIO;
-            const panDelta = new THREE.Vector3();
-            panDelta.addScaledVector(right, deltaX * panStep);
-            panDelta.addScaledVector(WORLD_UP, -deltaY * panStep);
-            camera.position.add(panDelta);
+            applyWalkPanByScreenDelta(
+              camera,
+              controlsRef.current,
+              deltaX,
+              deltaY,
+              "mouse",
+            );
             syncWalkCameraAfterMove();
             return;
           }
@@ -3025,17 +3139,7 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
           lastLookPointerXRef.current = event.clientX;
           lastLookPointerYRef.current = event.clientY;
 
-          if (deltaX === 0 && deltaY === 0) {
-            return;
-          }
-
-          yawRef.current -= deltaX * WALK_LOOK_SENSITIVITY;
-          pitchRef.current -= deltaY * WALK_LOOK_SENSITIVITY;
-          pitchRef.current = THREE.MathUtils.clamp(
-            pitchRef.current,
-            WALK_PITCH_MIN,
-            WALK_PITCH_MAX,
-          );
+          applyWalkLookDelta(yawRef, pitchRef, deltaX, deltaY);
         };
 
         const handlePointerUp = (event: PointerEvent) => {
@@ -3105,13 +3209,14 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
             return;
           }
 
-          const { forward } = getWalkMovementBasis(camera);
-          const step =
-            movementBaseStepRef.current *
-            moveSpeedMultiplierRef.current *
-            WALK_WHEEL_MOVE_FACTOR;
           const direction = event.deltaY < 0 ? 1 : -1;
-          camera.position.addScaledVector(forward, step * direction);
+          applyWalkMoveAlongView(
+            camera,
+            direction,
+            movementBaseStepRef.current,
+            moveSpeedMultiplierRef.current,
+            "wheel",
+          );
           syncWalkCameraAfterMove();
         };
 

@@ -1,4 +1,4 @@
-> 记录日期：2026-06-12（持续补记至 2026-06-20）
+> 记录日期：2026-06-12（持续补记至 2026-06-21）
 > 记录范围：LCC Web SDK 接入、运行时升级、Viewer 交互与文档口径。
 > 明确未改范围：`server/`、数据库、OSS、`deploy/.env.prod`（除非各节单独说明）。
 > 最新口径：当前对象存储实际为 **阿里云 OSS**；文档统一使用 `OSS_* / objectKey / oss-compatible.service.ts` 作为对象存储命名。
@@ -1886,3 +1886,31 @@
 - 自 0.6.0 升级后，静态资源路径与文件名变更（见文首「当前运行时口径」）
 - `web/public/vendor/lcc-web/` 现仅保留 `0.6.1/` 目录
 - 仓库仍保留 `LCC-Web-0.6.0/` 作历史对照；**运行时以 0.6.1 + `lcc-web-sdk.*` 为准**
+
+### 14.26 手机分享横屏 Viewer（Step 1~2，2026-06-21）
+
+> 架构与验收详见 `docs/model-viewer-architecture.md` §十二·续一 / §十二·续二、`docs/frontend-acceptance-checklist.md` §4.2.1。  
+> **本节仅记录与 LCC iframe / walk 输入链相关的边界**；未改 `LccViewer`、`LCCRender.load`、`dataPath`、首帧完成协议。
+
+#### Step 1：分享外层壳（`model-share-viewer-page.tsx`）
+
+- 工具：`web/lib/use-mobile-viewer.ts`（`useMobileViewer`、`buildLccShareIframeSrc`）
+- 手机竖屏：全屏阻断「请横屏浏览模型」，不挂载 iframe
+- 手机横屏：轻量顶栏 + iframe `?context=share&readonly=1&mobile=1`
+- 桌面分享：iframe `?context=share&readonly=1`（无 `mobile=1`）
+- `readonly=1` 在 iframe 页隐藏「保存启动视图」；保留自动全屏 / 横屏锁定 / 降级按钮
+
+#### Step 2：iframe 内手机触控层（`mobile-lcc-game-controls.tsx`）
+
+- 挂载：`web/app/viewer/lcc/[id]/page.tsx`，条件 `mobile=1 && !isHelpOpen && ready`
+- 左下虚拟摇杆 + 右下升/降/重置 → `ModelViewerHandle.setMovementInput` / `resetView`
+- `mobile=1` 时隐藏 `ModelViewerToolbar`，强制 `controlMode = "walk"`
+- 未做：右侧滑动转头、双指手势、手机帮助面板
+
+#### 与 SDK / walk 的关系
+
+- 移动输入仍走项目层 walk 循环（与桌面 WASD / EQ 同一 `setMovementInput` 通道）
+- 触控层 `preventDefault` / `touch-action: none`，避免与 canvas 左键转头冲突
+- 外层 Loading 仍轮询子文档 `data-lcc-first-frame=true`（非仅 `onLoadedStable`）
+
+- 构建：`cd web && pnpm build` 通过（2026-06-21）

@@ -1,13 +1,21 @@
 "use client";
 
+/**
+ * 页面名称：模型分享沉浸式观看页 ModelShareViewerPage
+ * 页面用途：分享链接 /models/[id]/view 的外层壳；桌面与手机横屏展示 LCC iframe，手机竖屏阻断并提示横屏
+ * 主要功能：移动端识别、竖屏横屏阻断、iframe query（context=share&readonly=1[&mobile=1]）、全屏/横屏锁定
+ * 对应路由：web/app/models/[id]/view/page.tsx
+ */
+
 import { useState, useEffect, useCallback, useRef } from "react";
 import Link from "next/link";
-import { ArrowLeft, Expand, Loader2 } from "lucide-react";
+import { ArrowLeft, Expand, Loader2, RotateCw } from "lucide-react";
 import { toast } from "sonner";
 import { ModelLoadingOverlay } from "@/components/models/model-loading-overlay";
 import { getModelDetail } from "@/lib/api/models";
 import { isLccModel } from "@/lib/model-viewer-kind";
 import { ApiError } from "@/lib/http";
+import { buildLccShareIframeSrc, useMobileViewer } from "@/lib/use-mobile-viewer";
 import type { ModelDetail } from "@/lib/types";
 
 const ORIENTATION_LANDSCAPE = "landscape" as const;
@@ -20,6 +28,10 @@ interface ScreenOrientationWithLock {
 export default function ModelShareViewerPage({ modelId }: { modelId: string }) {
   const numericId = Number.parseInt(modelId, 10);
   const idValid = Number.isFinite(numericId) && numericId > 0;
+
+  const { mounted: mobileMounted, isMobileShare, isLandscape } = useMobileViewer();
+  const showMobilePortraitBlock = mobileMounted && isMobileShare && !isLandscape;
+  const showMobileLandscapeShell = mobileMounted && isMobileShare && isLandscape;
 
   const [detail, setDetail] = useState<ModelDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(true);
@@ -41,7 +53,10 @@ export default function ModelShareViewerPage({ modelId }: { modelId: string }) {
   const lccIframeRef = useRef<HTMLIFrameElement | null>(null);
   const lccIframeVisibilityPollRef = useRef<number | null>(null);
   const lccExpectedPath = detail?.id ? `/viewer/lcc/${detail.id}` : null;
-  const lccIframeKey = `${detail?.id ?? "pending"}-${detail?.viewerUrl || ""}`;
+  const lccIframeSrc = detail?.id
+    ? buildLccShareIframeSrc(detail.id, showMobileLandscapeShell)
+    : null;
+  const lccIframeKey = `${detail?.id ?? "pending"}-${detail?.viewerUrl || ""}-${lccIframeSrc ?? ""}`;
   const showLccOuterOverlay = isLcc && !lccIframeModelLoaded && !lccIframeViewerErrored;
 
   useEffect(() => {
@@ -102,14 +117,15 @@ export default function ModelShareViewerPage({ modelId }: { modelId: string }) {
   useEffect(() => {
     if (!detail || detail.processingStatus !== "ready") return;
     if (attemptedAutoFullscreen) return;
+    // 手机竖屏阻断层不挂载 viewer，跳过自动全屏
+    if (showMobilePortraitBlock) return;
 
-    // 延迟一下等 DOM 就绪
     const timer = setTimeout(() => {
       void tryAutoFullscreen();
     }, 500);
 
     return () => clearTimeout(timer);
-  }, [detail, tryAutoFullscreen, attemptedAutoFullscreen]);
+  }, [detail, tryAutoFullscreen, attemptedAutoFullscreen, showMobilePortraitBlock]);
 
   useEffect(() => {
     if (!attemptedAutoFullscreen || showFullscreenButton) return;
@@ -118,12 +134,29 @@ export default function ModelShareViewerPage({ modelId }: { modelId: string }) {
         try {
           const orientation = screen.orientation as unknown as ScreenOrientationWithLock;
           orientation.unlock?.();
-        } catch { /* 忽略 */ }
+        } catch {
+          /* 忽略 */
+        }
       }
     };
     document.addEventListener("fullscreenchange", handleFsChange);
     return () => document.removeEventListener("fullscreenchange", handleFsChange);
   }, [attemptedAutoFullscreen, showFullscreenButton]);
+
+  /** 手机竖屏：尝试全屏 + 锁定横屏；失败静默，继续显示提示层 */
+  const handlePortraitEnterLandscape = useCallback(async () => {
+    try {
+      await document.documentElement.requestFullscreen?.();
+      try {
+        const orientation = screen.orientation as unknown as ScreenOrientationWithLock;
+        await orientation.lock?.(ORIENTATION_LANDSCAPE);
+      } catch {
+        // iOS / 微信等环境可能不支持，正常降级
+      }
+    } catch {
+      // 失败不 toast，用户可手动旋转设备
+    }
+  }, []);
 
   const handleManualFullscreen = useCallback(async () => {
     const el = fullscreenTargetRef.current;
@@ -139,12 +172,15 @@ export default function ModelShareViewerPage({ modelId }: { modelId: string }) {
       }
       setShowFullscreenButton(false);
     } catch {
-      toast.info("当前浏览器不支持自动横屏，请手动旋转手机横屏浏览");
+      if (showMobileLandscapeShell) {
+        toast.info("当前浏览器不支持自动横屏，请手动旋转手机横屏浏览");
+      } else {
+        toast.info("当前浏览器暂不支持全屏");
+      }
     }
-  }, []);
+  }, [showMobileLandscapeShell]);
 
   const handleLccIframeLoad = useCallback(() => {
-    // iframe 加载完成后自动聚焦，使其接收键盘事件（WASD 漫游）
     lccIframeRef.current?.focus({ preventScroll: true });
     setTimeout(() => lccIframeRef.current?.focus({ preventScroll: true }), 600);
 
@@ -213,21 +249,23 @@ export default function ModelShareViewerPage({ modelId }: { modelId: string }) {
         lccIframeVisibilityPollRef.current = null;
       }
     };
-  }, [detail, isLcc]);
+  }, [detail, isLcc, lccIframeSrc]);
 
   const renderViewer = () => {
     if (!detail) return null;
 
-    if (isLcc) {
+    if (isLcc && lccIframeSrc) {
       return (
-        <div className="relative h-full w-full"
+        <div
+          className="relative h-full w-full touch-none"
           data-lcc-detail-model-loaded={lccIframeModelLoaded ? "true" : "false"}
           data-lcc-detail-show-overlay={showLccOuterOverlay ? "true" : "false"}
+          data-share-mobile-shell={showMobileLandscapeShell ? "true" : "false"}
         >
           <iframe
             ref={lccIframeRef}
             key={lccIframeKey}
-            src={`/viewer/lcc/${detail.id}`}
+            src={lccIframeSrc}
             className="h-full w-full border-0"
             allow="fullscreen"
             title={detail.title}
@@ -277,53 +315,100 @@ export default function ModelShareViewerPage({ modelId }: { modelId: string }) {
     );
   }
 
+  // 手机竖屏：阻断模型 iframe，仅展示横屏引导
+  if (showMobilePortraitBlock) {
+    return (
+      <div
+        className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-black px-6 text-center"
+        data-share-portrait-block="true"
+      >
+        <div className="mb-6 flex h-16 w-16 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.04]">
+          <RotateCw className="h-8 w-8 text-cyan-400/90" aria-hidden />
+        </div>
+        <h1 className="text-[20px] font-medium text-white">请横屏浏览模型</h1>
+        <p className="mt-3 max-w-[280px] text-[14px] leading-relaxed text-gray-400">
+          为了获得更好的三维浏览体验，请将手机横向放置。
+        </p>
+        <button
+          type="button"
+          onClick={() => {
+            void handlePortraitEnterLandscape();
+          }}
+          className="mt-8 rounded-full border border-cyan-400/35 bg-cyan-950/50 px-8 py-3 text-[15px] font-medium text-cyan-200 transition-all hover:border-cyan-300/50 hover:bg-cyan-900/60 active:scale-[0.98]"
+        >
+          进入横屏浏览
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div
       id="model-share-viewer-fullscreen-root"
       ref={fullscreenTargetRef}
-      className="fixed inset-0 z-50 flex flex-col bg-black overflow-hidden
-        landscape:max-h-dvh landscape:max-w-dvw"
+      className="fixed inset-0 z-50 flex flex-col overflow-hidden bg-black max-h-[100dvh] max-w-[100dvw] landscape:max-h-dvh landscape:max-w-dvw"
+      data-share-mobile-landscape={showMobileLandscapeShell ? "true" : "false"}
     >
-      {/* 极简顶栏 */}
-      <div className="flex items-center justify-between px-3 h-11 flex-shrink-0 bg-black/60 z-30">
+      {/* 顶栏：手机横屏更轻量；桌面保留返回 + 全屏 */}
+      <div
+        className={`z-30 flex flex-shrink-0 items-center justify-between px-3 ${
+          showMobileLandscapeShell ? "h-10 bg-black/50 backdrop-blur-sm" : "h-11 bg-black/60"
+        }`}
+      >
         <Link
           href="/models"
-          className="flex items-center gap-1.5 text-[13px] text-gray-400 hover:text-white transition-colors"
+          className="flex shrink-0 items-center gap-1.5 text-[13px] text-gray-400 transition-colors hover:text-white"
         >
-          <ArrowLeft className="w-4 h-4" />
-          返回社区
+          <ArrowLeft className="h-4 w-4" />
+          {showMobileLandscapeShell ? "返回" : "返回社区"}
         </Link>
+
+        {showMobileLandscapeShell ? (
+          <div className="flex min-w-0 flex-1 items-center justify-center gap-2 px-2">
+            <p className="truncate text-[13px] text-gray-200">{detail.title}</p>
+            <span className="shrink-0 rounded-md border border-white/10 bg-white/[0.06] px-2 py-0.5 text-[11px] text-gray-400">
+              第一人称
+            </span>
+          </div>
+        ) : (
+          <div className="flex-1" />
+        )}
+
         <button
           type="button"
           onClick={handleManualFullscreen}
           title="全屏"
-          className="w-8 h-8 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center hover:bg-white/10 hover:border-white/20 transition-all"
+          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-white/10 bg-white/5 transition-all hover:border-white/20 hover:bg-white/10"
         >
-          <Expand className="w-4 h-4 text-gray-400" />
+          <Expand className="h-4 w-4 text-gray-400" />
         </button>
       </div>
 
       {/* Viewer 区域 */}
       <div
         ref={viewerContainerRef}
-        className="relative flex-1 overflow-hidden
-          landscape:h-full"
+        className={`relative min-h-0 flex-1 overflow-hidden ${
+          showMobileLandscapeShell
+            ? "h-[calc(100dvh-2.5rem)] w-full touch-none"
+            : "landscape:h-full"
+        }`}
       >
         {renderViewer()}
       </div>
 
-      {/* 横屏提示 + 全屏入口（自动全屏失败后显示） */}
-      {showFullscreenButton && (
-        <div className="absolute inset-x-0 bottom-0 z-40 flex flex-col items-center gap-3 pb-10 pt-20 bg-gradient-to-t from-black/80 via-black/40 to-transparent pointer-events-none">
+      {/* 自动全屏失败降级：桌面不展示「建议横屏」文案；手机横屏保留横屏提示 */}
+      {showFullscreenButton && !showMobilePortraitBlock && (
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 z-40 flex flex-col items-center gap-3 bg-gradient-to-t from-black/80 via-black/40 to-transparent pb-10 pt-20">
           <button
             type="button"
             onClick={handleManualFullscreen}
-            className="pointer-events-auto px-8 py-3 rounded-2xl border border-cyan-400/30 bg-cyan-950/60 text-cyan-200 text-[15px] font-medium backdrop-blur-md
-              hover:bg-cyan-900/70 hover:border-cyan-300/50 transition-all active:scale-95"
+            className="pointer-events-auto rounded-2xl border border-cyan-400/30 bg-cyan-950/60 px-8 py-3 text-[15px] font-medium text-cyan-200 backdrop-blur-md transition-all hover:border-cyan-300/50 hover:bg-cyan-900/70 active:scale-95"
           >
-            进入横屏全屏观看
+            {showMobileLandscapeShell ? "进入横屏全屏观看" : "进入全屏观看"}
           </button>
-          <p className="text-[12px] text-gray-500 pointer-events-auto">建议横屏观看</p>
+          {showMobileLandscapeShell && (
+            <p className="pointer-events-auto text-[12px] text-gray-500">建议横屏观看</p>
+          )}
         </div>
       )}
     </div>

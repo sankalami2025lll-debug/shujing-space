@@ -5,6 +5,32 @@ import type { LaunchViewSaveResult, ModelDetail, ModelLaunchView } from "@/lib/t
 
 export type ModelViewerControlMode = "orbit" | "walk";
 
+/** 转头增量来源：mobile 使用略低于桌面的灵敏度 */
+export type ModelViewerLookDeltaSource = "desktop" | "mobile";
+
+export type ModelViewerLookDelta = {
+  x: number;
+  y: number;
+  source?: ModelViewerLookDeltaSource;
+};
+
+/** 沿视线前后移动来源：wheel 为 ±1 步进；mobile 为捏合像素间距变化 */
+export type ModelViewerMoveAlongViewSource = "mobile" | "wheel";
+
+export type ModelViewerMoveAlongViewDelta = {
+  amount: number;
+  source?: ModelViewerMoveAlongViewSource;
+};
+
+/** 第一人称平移来源 */
+export type ModelViewerPanDeltaSource = "mobile" | "mouse";
+
+export type ModelViewerPanByDelta = {
+  x: number;
+  y: number;
+  source?: ModelViewerPanDeltaSource;
+};
+
 export type ModelViewerHandle = {
   resetView?: () => void;
   fitView?: () => void;
@@ -24,6 +50,12 @@ export type ModelViewerHandle = {
   moveDown?: (delta?: number) => void;
   setMoveSpeedMultiplier?: (multiplier: number) => void;
   setMovementInput?: (input: ModelViewerMovementInput) => void;
+  /** 第一人称 walk：按屏幕像素增量转头（复用 yaw/pitch，不改变相机位置） */
+  lookByDelta?: (delta: ModelViewerLookDelta) => void;
+  /** 第一人称 walk：沿视线前后移动（桌面滚轮 ±1 / 手机捏合像素间距变化） */
+  moveAlongView?: (delta: ModelViewerMoveAlongViewDelta) => void;
+  /** 第一人称 walk：按屏幕像素增量平移相机（不改变 yaw/pitch） */
+  panByDelta?: (delta: ModelViewerPanByDelta) => void;
   /** 切换观察（OrbitControls 轨道）/ 漫游（FPS yaw-pitch + WASD）模式 */
   setControlMode?: (mode: ModelViewerControlMode) => void;
   getControlMode?: () => ModelViewerControlMode;

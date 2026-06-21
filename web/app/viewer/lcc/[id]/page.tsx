@@ -15,11 +15,14 @@
  */
 
 import { useEffect, useRef, useState, useCallback, useMemo } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
 import { LccViewer } from "@/components/models/lcc-viewer";
 import { ModelLoadingOverlay } from "@/components/models/model-loading-overlay";
 import { ModelViewerToolbar } from "@/components/models/model-viewer-toolbar";
 import { ModelViewerHelp } from "@/components/models/model-viewer-help";
+import { MobileLccGameControls } from "@/components/models/mobile-lcc-game-controls";
+import { MobileLccHelpOverlay } from "@/components/models/mobile-lcc-help-overlay";
+import { MobileLccViewerChrome } from "@/components/models/mobile-lcc-viewer-chrome";
 import { getModelDetail } from "@/lib/api/models";
 import { getModelViewerKind } from "@/lib/model-viewer-kind";
 import { http, ApiError } from "@/lib/http";
@@ -72,10 +75,17 @@ function isTypingElement(target: EventTarget | null): boolean {
 export default function LccViewerIframePage() {
   /* ---- URL 参数 ---- */
   const params = useParams();
+  const searchParams = useSearchParams();
   const rawId = params?.id;
   const modelId = typeof rawId === "string" ? rawId : Array.isArray(rawId) ? rawId[0] : "";
   const numericId = Number.parseInt(modelId, 10);
   const idValid = Number.isFinite(numericId) && numericId > 0;
+
+  // 分享页 iframe query：context=share / readonly=1 / mobile=1（mobile 预留给第 2 步触控层）
+  const isShareContext = searchParams.get("context") === "share";
+  const isReadonly = searchParams.get("readonly") === "1";
+  const isMobileViewer = searchParams.get("mobile") === "1";
+  void isShareContext;
 
   /* ---- 模型数据状态 ---- */
   const [detail, setDetail] = useState<ModelDetail | null>(null);
@@ -95,6 +105,8 @@ export default function LccViewerIframePage() {
   const [isHelpOpen, setIsHelpOpen] = useState(false);
   // saveLaunchViewPending：保存启动视图 loading 态
   const [saveLaunchViewPending, setSaveLaunchViewPending] = useState(false);
+  /** mobile=1 首次 ready 后是否已应用默认 walk（避免用户切 orbit 后被 effect 打回） */
+  const hasAppliedMobileDefaultModeRef = useRef(false);
 
   /* ---- 自动聚焦 viewer 容器（确保 iframe / 独立页面获得键盘焦点，WASD 可用） ---- */
   const viewerContainerRef = useRef<HTMLDivElement | null>(null);
@@ -116,9 +128,12 @@ export default function LccViewerIframePage() {
   const processingBlocked = detail ? detail.processingStatus !== "ready" : true;
   // 仅 LCC viewer 具备的能力集
   const viewerCapabilities = useMemo(() => LCC_VIEWER_CAPABILITIES, []);
-  // 保存启动视图按钮是否可用（模型已就绪 + 后端允许 + viewer 支持）
+  // 保存启动视图：分享只读（readonly=1）时不展示；mobile=1 触控层在第 2 步接入
   const canShowSaveLaunchView =
-    !processingBlocked && Boolean(detail?.canSaveLaunchView) && viewerCapabilities.saveView;
+    !isReadonly &&
+    !processingBlocked &&
+    Boolean(detail?.canSaveLaunchView) &&
+    viewerCapabilities.saveView;
 
   /* ---- 清除移动状态（窗口失焦/关闭帮助/退出漫游时调用） ---- */
   const clearMovementState = useCallback(() => {
@@ -192,6 +207,35 @@ export default function LccViewerIframePage() {
       if (nextValue) clearMovementState();
       return nextValue;
     });
+  }, [clearMovementState]);
+
+  /** 打开手机端帮助：清零移动输入，隐藏触控层 */
+  const handleOpenMobileHelp = useCallback(() => {
+    clearMovementState();
+    setIsHelpOpen(true);
+  }, [clearMovementState]);
+
+  /** 关闭手机端帮助 */
+  const handleCloseMobileHelp = useCallback(() => {
+    clearMovementState();
+    setIsHelpOpen(false);
+  }, [clearMovementState]);
+
+  /** 手机端切换第一人称 / 枢轴 */
+  const handleMobileControlModeChange = useCallback(
+    (nextMode: ModelViewerControlMode) => {
+      if (nextMode === controlMode) return;
+      clearMovementState();
+      setControlMode(nextMode);
+      viewerHandleRef.current?.setControlMode?.(nextMode);
+    },
+    [clearMovementState, controlMode],
+  );
+
+  /** 手机端重置视角（常驻 chrome） */
+  const handleMobileResetView = useCallback(() => {
+    clearMovementState();
+    viewerHandleRef.current?.resetView?.();
   }, [clearMovementState]);
 
   /* ---- 切换控制模式（观察/漫游） ---- */
@@ -387,10 +431,22 @@ export default function LccViewerIframePage() {
 
   /* ---- 模型切换时重置状态 ---- */
   useEffect(() => {
+    hasAppliedMobileDefaultModeRef.current = false;
     clearMovementState();
     setIsHelpOpen(false);
     setControlMode("walk");
   }, [clearMovementState, detail?.id]);
+
+  /* ---- 手机分享 iframe：首次 ready 后默认第一人称 walk（不覆盖用户后续手动切换） ---- */
+  useEffect(() => {
+    if (!isMobileViewer || !detail || processingBlocked) return;
+    if (hasAppliedMobileDefaultModeRef.current) return;
+
+    hasAppliedMobileDefaultModeRef.current = true;
+    setControlMode("walk");
+    viewerHandleRef.current?.setControlMode?.("walk");
+    clearMovementState();
+  }, [isMobileViewer, detail, processingBlocked, clearMovementState]);
 
   /* ---- 渲染：Loading ---- */
   if (detailLoading) {
@@ -433,36 +489,68 @@ export default function LccViewerIframePage() {
         isHelpOpen={isHelpOpen}
       />
 
-      {/* 帮助面板（LCC 操作说明） */}
-      <ModelViewerHelp
-        open={isHelpOpen}
-        onClose={() => {
-          clearMovementState();
-          setIsHelpOpen(false);
-        }}
-        controlMode={controlMode}
-      />
+      {/* 帮助面板：mobile=1 使用触屏专用帮助；桌面沿用 ModelViewerHelp */}
+      {isMobileViewer ? (
+        <MobileLccHelpOverlay
+          open={isHelpOpen}
+          onClose={handleCloseMobileHelp}
+          controlMode={controlMode}
+        />
+      ) : (
+        <ModelViewerHelp
+          open={isHelpOpen}
+          onClose={() => {
+            clearMovementState();
+            setIsHelpOpen(false);
+          }}
+          controlMode={controlMode}
+        />
+      )}
 
-      {/* 底部左侧工具栏 */}
-      <div className="pointer-events-none absolute bottom-4 left-4 z-20">
-        <div className="pointer-events-auto">
-          <ModelViewerToolbar
-            capabilities={viewerCapabilities}
-            onResetView={handleResetView}
-            onFitView={handleFitView}
-            onToggleFullscreen={handleFullscreen}
-            onSaveLaunchView={handleSaveLaunchView}
-            showSaveLaunchView={canShowSaveLaunchView}
-            onToggleHelp={handleToggleHelp}
-            isHelpOpen={isHelpOpen}
-            canShowSaveLaunchView={canShowSaveLaunchView}
-            saveLaunchViewPending={saveLaunchViewPending}
-            controlMode={controlMode}
-            onToggleControlMode={handleToggleControlMode}
-            canToggleControlMode={!processingBlocked}
+      {/* 手机分享：常驻 chrome（模式切换 / 重置 / 帮助） */}
+      {isMobileViewer && !processingBlocked && !isHelpOpen && (
+        <MobileLccViewerChrome
+          controlMode={controlMode}
+          onControlModeChange={handleMobileControlModeChange}
+          onResetView={handleMobileResetView}
+          onOpenHelp={handleOpenMobileHelp}
+        />
+      )}
+
+      {/* 手机 walk 专属触控层：orbit 下不渲染，避免透明层挡住 OrbitControls */}
+      {isMobileViewer &&
+        controlMode === "walk" &&
+        !isHelpOpen &&
+        !processingBlocked && (
+          <MobileLccGameControls
+            viewerHandleRef={viewerHandleRef}
+            onMovementInputChange={setMovementInput}
+            disabled={isHelpOpen || processingBlocked}
           />
+        )}
+
+      {/* 桌面 / 非手机分享：左下角工具栏（与摇杆位置冲突，mobile 时不展示） */}
+      {!isMobileViewer && (
+        <div className="pointer-events-none absolute bottom-4 left-4 z-20">
+          <div className="pointer-events-auto">
+            <ModelViewerToolbar
+              capabilities={viewerCapabilities}
+              onResetView={handleResetView}
+              onFitView={handleFitView}
+              onToggleFullscreen={handleFullscreen}
+              onSaveLaunchView={handleSaveLaunchView}
+              showSaveLaunchView={canShowSaveLaunchView}
+              onToggleHelp={handleToggleHelp}
+              isHelpOpen={isHelpOpen}
+              canShowSaveLaunchView={canShowSaveLaunchView}
+              saveLaunchViewPending={saveLaunchViewPending}
+              controlMode={controlMode}
+              onToggleControlMode={handleToggleControlMode}
+              canToggleControlMode={!processingBlocked}
+            />
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }
