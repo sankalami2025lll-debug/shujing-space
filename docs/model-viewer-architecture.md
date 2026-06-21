@@ -653,7 +653,7 @@ web/components/models/
 | 详情页（非分享） | `/viewer/lcc/{id}`（无 query） |
 
 - `readonly=1`：iframe 内 `canShowSaveLaunchView=false`，隐藏「保存启动视图」
-- `mobile=1`：挂载手机触控层（见 §十二·续二）
+- `mobile=1`：挂载手机 chrome + walk 触控层（见 §十二·续二～续七）
 - **未改**：`LccViewer`、`LCCRender.load`、`dataPath`、子文档 `data-lcc-loaded` / `onLoadedStable` 协议
 
 ### 与原有全屏逻辑的关系
@@ -667,39 +667,101 @@ web/components/models/
 - 外层轮询 iframe 子文档：`data-lcc-viewer-status`、`data-lcc-first-frame === "true"` 后收起 `ModelLoadingOverlay`
 - 子文档根节点仍维护 `data-lcc-loaded`、`data-lcc-complete-reason`（如 `onLoadedStable`）
 
-## 十二·续二、手机分享 iframe 第一人称触控层（Step 2，2026-06-21）
+## 十二·续二、手机分享 iframe 第一人称 walk 触控层（Step 2~4，2026-06-21）
 
 - 组件：`web/components/models/mobile-lcc-game-controls.tsx`
 - 挂载页：`web/app/viewer/lcc/[id]/page.tsx`
-- 显示条件：`searchParams.mobile === "1"` **且** `!isHelpOpen` **且** 模型 `processingStatus === "ready"`
+- 显示条件：`searchParams.mobile === "1"` **且** `controlMode === "walk"` **且** `!isHelpOpen` **且** 模型 `processingStatus === "ready"`
 
 ### UI 布局
 
 | 区域 | 内容 |
 |------|------|
 | 左下（24px） | 虚拟摇杆：外圈半透明灰黑，内圈冰蓝半透明 |
-| 右下（24px） | 「升」「降」「重置」三按钮 |
+| 右侧 60% | 透明 look 区：单指转头 + 双指捏合 / 平移 |
+| 右下（24px） | 「升」「降」两按钮（重置已移至 chrome） |
 
 ### 交互
 
 - 摇杆 Pointer Events → `setMovementInput({ forward/backward/left/right })`，阈值归一化 `0.2`
 - 「升」/「降」按住 → `up` / `down`（对应桌面 `E` / `Q`）；与摇杆状态合并后统一下发
-- 「重置」→ `viewerHandleRef.resetView()`，并清零移动输入
-- 样式：`touch-action: none`、`user-select: none`；`preventDefault` + `stopPropagation` 避免触发 canvas 转头
-- unmount / 帮助打开 / disabled：清零 `setMovementInput`
+- 右侧单指滑动 → `lookByDelta({ yawDelta, pitchDelta, source: "mobile" })`（×0.85 灵敏度）
+- 双指 pinch → `moveAlongView`；双指 pan → `panByDelta`（与桌面滚轮 / 右键平移同一 handle）
+- 双指与单指 look 互斥（`blockSingleLookUntilReleaseRef`）
+- 样式：`touch-action: none`、`user-select: none`；`preventDefault` + `stopPropagation`
+- unmount / 帮助打开 / 切 orbit / disabled：清零 `setMovementInput`
 
 ### 与桌面工具栏分工
 
 - `mobile=1`：**不渲染** `ModelViewerToolbar`（避免与摇杆左下角冲突）
 - 非 `mobile=1`：仍显示完整工具栏（含帮助、模式切换、保存启动视图等）
-- 强制 `controlMode = "walk"`（手机分享场景）
+- 模式切换由 `MobileLccViewerChrome` 负责（见 §十二·续六），不再强制 lock walk
 
-### 未实现（Step 3+）
+## 十二·续三、walk 触屏 handle 扩展（Step 3~4，2026-06-21）
 
-- 右侧滑动区转头
-- 双指捏合 / 双指平移
-- 手机专用帮助面板
-- 枢轴模式手机 UI
+- 类型：`web/components/models/viewers/types.ts` — `ModelViewerLookDelta`、`lookByDelta`、`moveAlongView`、`panByDelta`
+- 实现：`web/components/models/lcc-viewer.tsx` — `applyWalkLookDelta()`、`applyWalkMoveAlongView()`、`applyWalkPanByScreenDelta()`
+- 桌面 walk 滚轮 / 右键平移与手机双指共用同一 handle，**未改** `resetView` 与默认视角链
+
+## 十二·续四、手机帮助面板（Step 5，2026-06-21）
+
+- 组件：`web/components/models/mobile-lcc-help-overlay.tsx`
+- 入口：chrome「帮助」按钮（`mobile-lcc-viewer-chrome.tsx`）
+- 第一人称 / 枢轴双 tab；**仅触屏说明**（虚拟摇杆、右侧滑动、双指、升降、OrbitControls 触屏）
+- **不展示**：WASD、鼠标、滚轮、Q/E、Shift
+- tab 切换只改帮助文案；帮助打开时隐藏 `MobileLccGameControls` 并停止移动输入
+- 桌面 `ModelViewerHelp` **不变**
+
+## 十二·续五、枢轴 orbit 手机操作（Step 6 可行性 + Step 7，2026-06-21）
+
+- `controlMode === "orbit"` 时启用 OrbitControls，walk 循环 `controls.enabled = false`
+- OrbitControls 0.184 默认触屏：单指旋转、双指 dolly、双指 pan
+- orbit 下 **不渲染** `MobileLccGameControls`，避免与 OrbitControls 抢 touch
+- chrome 仍可切换回第一人称
+
+## 十二·续六、手机常驻 chrome（Step 7，2026-06-21）
+
+- 组件：`web/components/models/mobile-lcc-viewer-chrome.tsx`
+- 底部四按钮：**第一人称** / **枢轴** / **重置** / **帮助**
+- `hasAppliedMobileDefaultModeRef`：首次 ready 默认 walk，不覆盖用户后续 orbit 选择
+- 「重置」→ `resetView()` + 清零 `setMovementInput`
+
+## 十二·续七、手机分享第一版封板与已知风险（Commit `ba7c895`，2026-06-21）
+
+### 阶段提交
+
+- Commit：`ba7c895` — `feat: add mobile landscape share viewer`
+- 构建：`cd web && pnpm build` 通过
+
+### 主要文件
+
+| 文件 | 职责 |
+|------|------|
+| `web/lib/use-mobile-viewer.ts` | `isMobileShare` / `isLandscape` / `buildLccShareIframeSrc` |
+| `web/components/pages/model-share-viewer-page.tsx` | 竖屏阻断、横屏壳、iframe + 外层 Loading |
+| `web/app/viewer/lcc/[id]/page.tsx` | query 解析、mode 状态、chrome / help / game controls 编排 |
+| `web/components/models/mobile-lcc-viewer-chrome.tsx` | 模式 / 重置 / 帮助入口 |
+| `web/components/models/mobile-lcc-game-controls.tsx` | walk 专用触控 |
+| `web/components/models/mobile-lcc-help-overlay.tsx` | 触屏帮助 |
+| `web/components/models/lcc-viewer.tsx` | walk handle 实现 |
+| `web/components/models/viewers/types.ts` | handle 类型 |
+
+### 红线未改
+
+- `server/`、Prisma、OSS / 上传 / ZIP
+- `LCCRender.load`、`.lcc/.lcc2` 入口 URL `dataPath`
+- `launchView / sdkInitialCamera / defaultCamera / boundsCenterHomeView` 链
+- `resetView` 算法、`onLoadedStable / data-lcc-loaded` 协议
+- 桌面工具栏与桌面帮助面板
+
+### 已知风险
+
+1. 需真机验收 iPhone Safari / 微信内置浏览器 / Android Chrome
+2. 外层横屏顶栏固定「第一人称」徽章可能与 iframe 内 orbit 不同步
+3. 手机竖屏 hydration 前可能短暂闪出非 `mobile=1` iframe
+4. 小屏横屏下 chrome 四按钮可能略拥挤
+5. 摇杆 / 转头 / 双指灵敏度需真机微调
+6. 分享外层 Loading 以 `data-lcc-first-frame` 收起；真机闪屏时再评估对齐 `onLoadedStable`
 
 ## 十三、默认操作模式（2026-06-20）
 
@@ -715,4 +777,4 @@ web/components/models/
 3. 为 BIM / PLY / OSGB 明确后续候选引擎和接入边界
 4. 在"文件结构"Tab 中逐步接入不同格式的结构树
 5. 在"操作记录"Tab 中沉淀统一事件模型
-6. **手机分享 Step 3**：右侧滑动转头、双指手势；手机帮助面板（可选）
+6. **手机分享第一版后续**：真机验收签字；视结果优化 hydration 闪帧、外层徽章同步、触屏灵敏度

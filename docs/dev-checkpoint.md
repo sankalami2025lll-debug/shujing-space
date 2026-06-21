@@ -1,6 +1,6 @@
 # 数境空间官网 阶段开发检查点
 
-> 更新日期：2026-06-21（已补齐手机分享横屏 Viewer Step 1~2：入口壳 + iframe 触控层）
+> 更新日期：2026-06-21（手机分享横屏游戏化查看器第一版已封板，Commit `ba7c895`）
 > 范围：仅记录已实际落地的改动与事实，供后续 Agent 续接。
 > 索引：LCC Web SDK 接入记录详见 `docs/lcc-web-sdk-integration.md`
 > 索引：模型浏览器统一架构详见 `docs/model-viewer-architecture.md`
@@ -38,6 +38,11 @@
 > 补记：**LCC Web SDK 运行时已升级 0.6.1**。静态资源目录 `web/public/vendor/lcc-web/0.6.1/`；文件名为 `lcc-web-sdk.js` / `lcc-web-sdk.umd.js`（**非** `lcc-0.6.1.js`）；`LccViewer` 加载 `/vendor/lcc-web/0.6.1/lcc-web-sdk.umd.js`；对照包目录 `LCC-Web-0.6.1/`。历史 0.6.0 路径与文件名见 `docs/lcc-web-sdk-integration.md` 早期章节，**勿再作为运行时依据**。
 > 补记：2026-06-21 已完成手机分享页 **Step 1（入口壳）**：新增 `web/lib/use-mobile-viewer.ts`（`useMobileViewer` + `buildLccShareIframeSrc`）；`model-share-viewer-page.tsx` 增加 coarse 指针 + 小视口识别、竖屏横屏阻断层、横屏轻量顶栏（模型名 +「第一人称」静态提示）；分享 iframe query 桌面为 `?context=share&readonly=1`、手机横屏为 `?context=share&readonly=1&mobile=1`；`viewer/lcc/[id]/page.tsx` 读取 query，`readonly=1` 隐藏「保存启动视图」。保留原有自动全屏 / 横屏锁定 / 降级按钮；桌面不出现竖屏阻断。未改 `LccViewer`、`LCCRender.load`、`dataPath`、完成协议。`cd web && pnpm build` 通过。详见 `docs/model-viewer-architecture.md` §十二·续一。
 > 补记：2026-06-21 已完成手机分享 **Step 2（iframe 内第一人称触控层）**：新增 `web/components/models/mobile-lcc-game-controls.tsx`；仅 iframe `mobile=1` 且非帮助打开时显示左下虚拟摇杆 + 右上升/降/重置；通过 `ModelViewerHandle.setMovementInput` / `resetView` 驱动 walk；`mobile=1` 时隐藏桌面 `ModelViewerToolbar` 避免与摇杆冲突；强制 `walk` 模式。未做右侧滑动转头、双指捏合/平移、手机帮助面板、枢轴切换。未改 `lcc-viewer.tsx`。`cd web && pnpm build` 通过。详见 `docs/model-viewer-architecture.md` §十二·续二。
+> 补记：2026-06-21 已完成手机分享 **Step 3（右侧单指滑动转头）**：`ModelViewerHandle.lookByDelta` + `LccViewer.applyWalkLookDelta()` 复用桌面 yaw/pitch；`MobileLccGameControls` 右侧 60% 透明区单指滑动转头。`cd web && pnpm build` 通过。
+> 补记：2026-06-21 已完成手机分享 **Step 4（双指捏合 / 平移）**：`ModelViewerHandle.moveAlongView` / `panByDelta` 复用桌面滚轮 / 右键平移逻辑；双指仅在右侧 look 区生效，与摇杆/按钮互斥。`cd web && pnpm build` 通过。
+> 补记：2026-06-21 已完成手机分享 **Step 5（手机帮助面板）**：新增 `mobile-lcc-help-overlay.tsx`；触屏专用文案；第一人称 / 枢轴双 tab（tab 只改帮助文案）；iframe 内右上角「帮助」入口。未改桌面 `ModelViewerHelp`。`cd web && pnpm build` 通过。
+> 补记：2026-06-21 已完成手机分享 **Step 7（第一人称 / 枢轴模式切换）**：新增 `mobile-lcc-viewer-chrome.tsx`（第一人称 / 枢轴 / 重置 / 帮助）；orbit 下隐藏 `MobileLccGameControls`，canvas 由 OrbitControls 触屏接管；重置移至 chrome；`hasAppliedMobileDefaultModeRef` 防 ready effect 打回 walk。`cd web && pnpm build` 通过。
+> 补记：**手机端模型分享链接横屏游戏化查看器第一版封板**（Commit `ba7c895` `feat: add mobile landscape share viewer`）：分享链 `/models/{id}/view` → 手机竖屏阻断 → 横屏壳 → iframe `?context=share&readonly=1&mobile=1`；walk 触控（摇杆 / 右侧转头 / 双指捏合平移 / 升降 / chrome 重置）+ orbit 触控（OrbitControls 单指旋转 / 双指缩放平移）+ 手机帮助双 tab + 桌面隔离。详见下方「手机分享横屏 Viewer（第一版，2026-06-21）」及 `docs/model-viewer-architecture.md` §十二·续一～续七、`docs/frontend-acceptance-checklist.md` §4.2.1。`cd web && pnpm build` 通过。
 
 ## 🚩 最终检查点（重开新对话前，先读本节）
 
@@ -49,6 +54,19 @@
 - ⚠️ **LCC iframe 外层 Loading 会遮住内层 error 态**：当前外层只在子文档满足 `data-lcc-loaded=true + completeReason=onLoadedStable` 时才隐藏；如果 iframe 内部真实进入 `error`，外层仍会继续显示 Loading，用户看不到子文档错误信息。
 - ℹ️ **LCC 运行时调试属性当前仍保留在生产 DOM**：`lcc-viewer.tsx` 会持续写入 `data-lcc-debug-*` 诊断属性，便于继续排查加载链问题，但会增加少量 DOM 变更噪音；后续如确认稳定，可考虑按环境变量再做收口。
 - ℹ️ **主详情页 LCC 延迟挂载实验代码仍保留**：`viewerReady / viewerMountSeed` 等逻辑对 LCC 已不再挂载 `ModelViewerShell`（改走 iframe），下一轮可在 iframe 稳定后清理，本轮 intentionally 保留以降低回归风险。
+- ⚠️ **手机分享第一版待真机验收**：iPhone Safari / 微信内置浏览器 / Android Chrome 触屏与 WebGL 手感尚未签字确认（见下方「手机分享已知风险」）。
+- ⚠️ **外层横屏顶栏「第一人称」静态徽章**：与 iframe 内切「枢轴」后可能不同步（P3，待优化）。
+- ⚠️ **手机竖屏 hydration 闪帧**：`useMobileViewer` mount 前可能短暂渲染非 `mobile=1` iframe（P2，待优化）。
+
+### 手机分享已知风险（第一版，2026-06-21）
+
+1. **需真机验收**：iPhone Safari、微信内置浏览器 iOS/Android、Android Chrome。
+2. **外层顶栏固定「第一人称」徽章**可能与 iframe 内 orbit 模式不同步。
+3. **竖屏 hydration 前**可能短暂闪出非 `mobile=1` iframe。
+4. **小屏横屏**下 chrome 四按钮可能略拥挤（flex-wrap）。
+5. **摇杆 / 转头 / 双指缩放平移灵敏度**需真机微调。
+6. **分享外层 Loading** 当前以 `data-lcc-first-frame` 收起；若真机闪屏，再评估对齐 `onLoadedStable`。
+7. **Step 8 静态代码审查 + Step 9 真机验收记录**：Agent 环境未完成真机签字，见会话记录；须用户补测 `/models/{lccId}/view`。
 
 ### LCC Web SDK 运行时（0.6.1，2026-06-20 封板）
 
@@ -126,13 +144,20 @@ SDK **不提供** walk/orbit 鼠标交互；相机控制均在项目层 `lcc-vie
 - `web/components/pages/model-detail-page.tsx`（LCC iframe 嵌入 + 外层 Loading 轮询）
 - `web/components/pages/model-share-viewer-page.tsx`（分享外层壳 + 手机竖屏阻断 / 横屏壳）
 - `web/lib/use-mobile-viewer.ts`（移动端识别 + iframe src 构建）
-- `web/components/models/mobile-lcc-game-controls.tsx`（分享 `mobile=1` 虚拟摇杆与升/降/重置）
-- `web/components/models/lcc-viewer.tsx`（默认视角链、walk 鼠标交互、SDK 0.6.1 加载）
+- `web/components/models/mobile-lcc-viewer-chrome.tsx`（手机常驻：第一人称 / 枢轴 / 重置 / 帮助）
+- `web/components/models/mobile-lcc-game-controls.tsx`（walk 专用：摇杆 / 右侧 look 区 / 升降）
+- `web/components/models/mobile-lcc-help-overlay.tsx`（手机帮助：双 tab 触屏说明）
+- `web/components/models/viewers/types.ts`（`lookByDelta` / `moveAlongView` / `panByDelta` 等 handle 类型）
+- `web/components/models/lcc-viewer.tsx`（默认视角链、walk 鼠标/触屏交互、SDK 0.6.1 加载）
 - `web/components/models/model-viewer-help.tsx`（帮助浮层）
 - `web/components/models/model-viewer-toolbar.tsx`（工具栏 + 模式切换 UI 文案；`mobile=1` 时不展示）
 - `web/components/models/model-viewer-shell.tsx`（非 LCC 兼容路径）
 
-### 手机分享横屏 Viewer（Step 1~2，2026-06-21）
+### 手机分享横屏 Viewer（第一版，2026-06-21）
+
+> **阶段提交**：`ba7c895` — `feat: add mobile landscape share viewer`  
+> **阶段主题**：手机端模型分享链接横屏游戏化查看器第一版  
+> **构建**：`cd web && pnpm build` 通过
 
 #### 路由与入口
 
@@ -140,8 +165,8 @@ SDK **不提供** walk/orbit 鼠标交互；相机控制均在项目层 `lcc-vie
 |---|---|
 | 分享链接 | `/models/{id}/view`（`model-detail-page` / `model-card` 生成） |
 | 手机竖屏 | 全屏黑底阻断层：「请横屏浏览模型」+「进入横屏浏览」；**不渲染** iframe |
-| 手机横屏 | 轻量顶栏（返回、模型名、「第一人称」静态提示、全屏）+ iframe 占满主区域 |
-| 桌面分享 | 原分享壳；无竖屏阻断；iframe 带 `context=share&readonly=1` |
+| 手机横屏 | 轻量顶栏（返回、模型名、「第一人称」**静态**提示、全屏）+ iframe 占满主区域 + iframe 内手机 chrome |
+| 桌面分享 | 原分享壳；无竖屏阻断；iframe 带 `context=share&readonly=1`；**无** mobile chrome / 摇杆 |
 
 #### 移动端识别（`useMobileViewer`）
 
@@ -155,29 +180,65 @@ SDK **不提供** walk/orbit 鼠标交互；相机控制均在项目层 `lcc-vie
 |------|------|
 | `context=share` | 来自分享页 iframe |
 | `readonly=1` | 分享只读：隐藏「保存启动视图」；不改保存 API |
-| `mobile=1` | 手机横屏分享：挂载 `MobileLccGameControls`；隐藏桌面工具栏 |
+| `mobile=1` | 手机横屏分享：挂载 `MobileLccViewerChrome` + walk 时 `MobileLccGameControls`；隐藏桌面 `ModelViewerToolbar` |
 
-#### 手机触控层（Step 2，`MobileLccGameControls`）
+#### 第一人称 walk 手机操作（`MobileLccGameControls`，仅 `controlMode === "walk"`）
 
-- 显示条件：`mobile=1` **且** `!isHelpOpen` **且** 模型 `ready`
-- 左下：虚拟摇杆 → `forward/backward/left/right`（`setMovementInput`）
-- 右下：升 / 降 / 重置 → `up/down` + `resetView()`
-- unmount / 帮助打开时清零 `setMovementInput`
-- **未做**：右侧滑动转头、双指捏合/平移、手机帮助、枢轴切换
+| 输入 | 行为 |
+|------|------|
+| 左下虚拟摇杆 | 前进 / 后退 / 左 / 右 → `setMovementInput` |
+| 右侧 60% 单指滑动 | 转头 → `lookByDelta`（灵敏度 ×0.85） |
+| 双指捏合 | 沿视线拉近 / 拉远 → `moveAlongView` |
+| 双指拖动 | 平移 → `panByDelta` |
+| 右下「升 / 降」 | 按住 `up` / `down` |
+| chrome「重置」 | `resetView()` + 清零移动输入 |
 
-#### Step 3+ 待办（未实现）
+- 显示条件：`mobile=1` **且** `controlMode === "walk"` **且** `!isHelpOpen` **且** 模型 `ready`
+- 帮助打开 / unmount / 切 orbit：清零 `setMovementInput`
 
-- 右侧滑动区转头
-- 双指捏合缩放、双指平移
-- 手机专用帮助面板
-- 多标签页 / 触控与 canvas 左键转头冲突细调
+#### 枢轴 orbit 手机操作
 
-#### 验收（`pnpm build` 已通过；浏览器建议项）
+- 复用 Three.js `OrbitControls`（与桌面 orbit 同一套）
+- 单指旋转、双指缩放、双指平移（OrbitControls 默认触屏映射）
+- walk 时 `controls.enabled = false`；orbit 时启用 OrbitControls，**不渲染** `MobileLccGameControls`
+
+#### 手机常驻 chrome（`MobileLccViewerChrome`）
+
+- 底部四按钮：**第一人称** / **枢轴** / **重置** / **帮助**
+- 切换模式 → `setControlMode("walk" | "orbit")`；首次 ready 默认 walk（`hasAppliedMobileDefaultModeRef` 防 effect 打回）
+- 帮助打开时 chrome 仍可见；walk 游戏层隐藏
+
+#### 手机帮助面板（`MobileLccHelpOverlay`）
+
+- 第一人称 / 枢轴双 tab；**只显示触屏说明**
+- **不显示** WASD / 鼠标 / 滚轮 / Q/E / Shift
+- tab 切换只改帮助文案，不改 viewer `controlMode`（与桌面帮助一致）
+
+#### 桌面端隔离
+
+| 场景 | 行为 |
+|------|------|
+| 桌面 `/models/{id}/view` | 无竖屏阻断、无 mobile chrome、无摇杆 |
+| 桌面 `/viewer/lcc/{id}`（无 `mobile=1`） | 完整 `ModelViewerToolbar` + 桌面 `ModelViewerHelp` |
+| 桌面 walk / orbit | 鼠标 / 键盘 / 滚轮行为不变 |
+
+#### 红线未改（第一版）
+
+- 未改 `server/`、Prisma、OSS / 上传 / ZIP
+- 未改 `LCCRender.load`、`.lcc/.lcc2` 入口文件 URL `dataPath` 规则
+- 未改 `launchView / sdkInitialCamera / defaultCamera / boundsCenterHomeView` 默认视角链路
+- 未改 `resetView` 算法本体
+- 未改 `onLoadedStable / data-lcc-loaded` 完成协议
+- 未改桌面端工具栏与桌面帮助面板
+
+#### 验收（`pnpm build` 已通过；**真机待签字**）
 
 - [ ] 手机竖屏打开 `/models/{id}/view` 见横屏提示、无 iframe
-- [ ] 手机横屏 iframe src 含 `mobile=1`；摇杆与升/降/重置可用
-- [ ] 分享 readonly 无「保存启动视图」；详情页 iframe 无 query 时工具栏仍正常
-- [ ] 桌面分享无摇杆；WASD/鼠标 walk 未回归
+- [ ] 手机横屏 iframe src 含 `mobile=1`；walk 摇杆 / 转头 / 双指 / 升降可用
+- [ ] chrome 切换第一人称 / 枢轴；orbit 下 OrbitControls 触屏可用
+- [ ] 手机帮助双 tab 仅触屏说明；打开时 walk 层隐藏
+- [ ] 分享 readonly 无「保存启动视图」；详情页 iframe 无 query 时桌面工具栏仍正常
+- [ ] 桌面分享 / 桌面 viewer 无 mobile 控制层；WASD / 鼠标 walk 未回归
 
 #### 验收（LCC 通用，`pnpm build` 已通过；浏览器建议项）
 
@@ -543,17 +604,13 @@ SDK **不提供** walk/orbit 鼠标交互；相机控制均在项目层 `lcc-vie
   - LCC 详情页通过 iframe 内工具栏切换；非 LCC 仍走 `ModelViewerShell`。
   - **未改**：快捷键行为、LCC 加载协议、`onLoadedStable`、`data-lcc-loaded`、后端、Prisma schema/migration。
   - `web build` 通过。
-- ✅ **手机分享横屏 Viewer Step 1（入口壳）已完成**（2026-06-21）：
-  - `web/lib/use-mobile-viewer.ts`：`useMobileViewer` + `buildLccShareIframeSrc`。
-  - `model-share-viewer-page.tsx`：手机竖屏阻断、横屏分享壳、iframe query；保留自动全屏/横屏锁定/降级。
-  - `viewer/lcc/[id]/page.tsx`：读取 `context` / `readonly` / `mobile`；`readonly=1` 隐藏保存启动视图。
-  - **未改**：`LccViewer`、`LCCRender.load`、`dataPath`、完成协议、后端。
-  - `web build` 通过。
-- ✅ **手机分享 Step 2（iframe 第一人称触控层）已完成**（2026-06-21）：
-  - `web/components/models/mobile-lcc-game-controls.tsx`：虚拟摇杆 + 升/降/重置。
-  - 仅 `mobile=1` 显示；`mobile=1` 时隐藏 `ModelViewerToolbar`；强制 walk。
-  - **未做**：右侧滑动转头、双指手势、手机帮助、枢轴手机 UI。
-  - **未改**：`lcc-viewer.tsx` 加载与 `resetView` 算法本体。
+- ✅ **手机分享横屏游戏化查看器第一版已完成**（2026-06-21，Commit `ba7c895`）：
+  - Step 1~2：入口壳 + 虚拟摇杆 / 升降（`use-mobile-viewer.ts`、`model-share-viewer-page.tsx`、`mobile-lcc-game-controls.tsx`）。
+  - Step 3~4：`lookByDelta` / `moveAlongView` / `panByDelta` + 右侧转头与双指手势（`lcc-viewer.tsx`、`viewers/types.ts`）。
+  - Step 5~7：手机帮助双 tab（`mobile-lcc-help-overlay.tsx`）、常驻 chrome 模式切换（`mobile-lcc-viewer-chrome.tsx`）、orbit 复用 OrbitControls。
+  - 桌面隔离：桌面分享 / 无 `mobile=1` 的 viewer 不显示 mobile 层；桌面工具栏与帮助不变。
+  - **未改**：`server/`、Prisma、OSS/上传、`LCCRender.load`、`dataPath`、默认视角链、`resetView` 算法、`onLoadedStable` 协议。
+  - **待办**：真机验收（见「手机分享已知风险」）。
   - `web build` 通过。
 
 #### 当前未完成
@@ -567,8 +624,8 @@ SDK **不提供** walk/orbit 鼠标交互；相机控制均在项目层 `lcc-vie
 | 关键路径自动化测试 | ⚠️ `server` 已有 `users/models/admin/uploads/interactions` 单测；`web` 仍无自动化用例 |
 | `/models/me` hydration mismatch | ⚠️ 待单独定位并修复 |
 | BIM/IFC 原生 Viewer | ❌ 尚未接入 |
-| 手机分享 Step 3（右侧滑动转头 / 双指手势） | ❌ 未做 |
-| 手机分享专用帮助面板 | ❌ 未做 |
+| 手机分享第一版真机验收 | ⚠️ 待 iPhone Safari / 微信 / Android Chrome 签字 |
+| 手机分享 P2/P3 优化 | ⚠️ 竖屏 hydration 闪帧、外层「第一人称」徽章与 orbit 不同步 |
 
 #### 建议下一步（当前主线）
 

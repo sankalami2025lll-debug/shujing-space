@@ -66,7 +66,7 @@ export function useMobileViewer(): MobileViewerState {
   return { mounted: true, ...state };
 }
 
-/** 分享页 LCC iframe query：桌面 readonly；手机横屏额外带 mobile=1 */
+/** 分享页 LCC iframe query：桌面 readonly；手机分享（无论设备方向）额外带 mobile=1 */
 export function buildLccShareIframeSrc(modelId: number, mobile: boolean): string {
   const params = new URLSearchParams({
     context: "share",

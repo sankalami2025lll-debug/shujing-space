@@ -15,7 +15,7 @@ type HelpTab = "walk" | "orbit";
 
 /** 手机端第一人称触屏操作说明项 */
 const MOBILE_WALK_HELP_ITEMS = [
-  { label: "左侧摇杆", description: "前后左右移动" },
+  { label: "左侧按住并滑动", description: "前后左右移动" },
   { label: "右侧滑动", description: "转动视角" },
   { label: "双指捏合", description: "拉近 / 拉远" },
   { label: "双指拖动", description: "平移视角" },

@@ -3,7 +3,7 @@
 /**
  * 组件名称：MobileLccGameControls
  * 组件用途：分享 iframe mobile=1 场景下的第一人称触控层
- * 主要功能：虚拟摇杆移动、右侧单指转头、双指捏合/平移、升/降（重置由 MobileLccViewerChrome 提供）
+ * 主要功能：左半屏动态隐形摇杆移动、右半屏单指转头与双指捏合/平移、升/降（重置由 MobileLccViewerChrome 提供）
  * 对应路由：/viewer/lcc/[id]?mobile=1
  */
 
@@ -20,14 +20,17 @@ const EMPTY_MOVEMENT: ModelViewerMovementInput = {
   down: false,
 };
 
-/** 摇杆外圈半径（px） */
-const JOYSTICK_OUTER_RADIUS = 56;
-/** 摇杆内圈半径（px） */
+/** 动态摇杆外圈半径（px），直径约 104px */
+const JOYSTICK_OUTER_RADIUS = 52;
+/** 动态摇杆内圈半径（px），直径约 44px */
 const JOYSTICK_KNOB_RADIUS = 22;
-/** 方向触发死区（归一化 0~1） */
-const JOYSTICK_AXIS_THRESHOLD = 0.2;
-/** 右侧转头触控区宽度（占屏宽比例） */
-const LOOK_ZONE_WIDTH_RATIO = 0.6;
+/** 方向触发死区（px） */
+const JOYSTICK_MOVE_THRESHOLD = 12;
+/** 内圈最大偏移半径（px） */
+const JOYSTICK_MAX_RADIUS = 52;
+/** 左半屏移动区 / 右半屏视角区各占屏宽比例（互不重叠） */
+const MOVE_ZONE_WIDTH_RATIO = 0.5;
+const LOOK_ZONE_WIDTH_RATIO = 0.5;
 /** 右侧转头区顶部留白（iframe 内无顶栏，预留安全区） */
 const LOOK_ZONE_TOP_OFFSET_PX = 0;
 /** 双指捏合 / 平移触发阈值（px），过滤轻微手抖 */
@@ -55,16 +58,20 @@ export function MobileLccGameControls({
 }: MobileLccGameControlsProps) {
   const movementRef = useRef<ModelViewerMovementInput>({ ...EMPTY_MOVEMENT });
   const [knobOffset, setKnobOffset] = useState({ x: 0, y: 0 });
+  /** 动态摇杆外圈中心（相对控制层容器坐标），仅在 active 时使用 */
+  const [joystickOrigin, setJoystickOrigin] = useState({ x: 0, y: 0 });
   const [upActive, setUpActive] = useState(false);
   const [downActive, setDownActive] = useState(false);
   const [joystickActive, setJoystickActive] = useState(false);
   const [lookActive, setLookActive] = useState(false);
 
-  const joystickOuterRef = useRef<HTMLDivElement | null>(null);
+  const controlLayerRef = useRef<HTMLDivElement | null>(null);
+  const moveZoneRef = useRef<HTMLDivElement | null>(null);
   const lookZoneRef = useRef<HTMLDivElement | null>(null);
   const joystickPointerIdRef = useRef<number | null>(null);
   const lookPointerIdRef = useRef<number | null>(null);
   const lookLastPointRef = useRef<{ x: number; y: number } | null>(null);
+  /** pointerdown 时的 client 坐标，作为摇杆中心与 dx/dy 基准 */
   const joystickCenterRef = useRef({ x: 0, y: 0 });
 
   /** 右侧触控区内活跃 pointer（仅本区域参与双指手势） */
@@ -103,9 +110,21 @@ export function MobileLccGameControls({
     blockSingleLookUntilReleaseRef.current = false;
   }, [clearTwoFingerGesture, stopLookingState]);
 
+  const clearJoystickDirections = useCallback(() => {
+    applyMovement({
+      forward: false,
+      backward: false,
+      left: false,
+      right: false,
+      up: movementRef.current.up,
+      down: movementRef.current.down,
+    });
+  }, [applyMovement]);
+
   const stopAllMovement = useCallback(() => {
     movementRef.current = { ...EMPTY_MOVEMENT };
     setKnobOffset({ x: 0, y: 0 });
+    setJoystickOrigin({ x: 0, y: 0 });
     setUpActive(false);
     setDownActive(false);
     setJoystickActive(false);
@@ -189,23 +208,19 @@ export function MobileLccGameControls({
     (clientX: number, clientY: number) => {
       const dx = clientX - joystickCenterRef.current.x;
       const dy = clientY - joystickCenterRef.current.y;
-      const maxRadius = JOYSTICK_OUTER_RADIUS - JOYSTICK_KNOB_RADIUS;
       const distance = Math.hypot(dx, dy);
-      const clampedDistance = Math.min(distance, maxRadius);
+      const clampedDistance = Math.min(distance, JOYSTICK_MAX_RADIUS);
       const angle = Math.atan2(dy, dx);
       const clampedX = Math.cos(angle) * clampedDistance;
       const clampedY = Math.sin(angle) * clampedDistance;
 
       setKnobOffset({ x: clampedX, y: clampedY });
 
-      const normalizedX = clampedDistance > 0 ? clampedX / maxRadius : 0;
-      const normalizedY = clampedDistance > 0 ? clampedY / maxRadius : 0;
-
       applyMovement({
-        forward: normalizedY < -JOYSTICK_AXIS_THRESHOLD,
-        backward: normalizedY > JOYSTICK_AXIS_THRESHOLD,
-        left: normalizedX < -JOYSTICK_AXIS_THRESHOLD,
-        right: normalizedX > JOYSTICK_AXIS_THRESHOLD,
+        forward: dy < -JOYSTICK_MOVE_THRESHOLD,
+        backward: dy > JOYSTICK_MOVE_THRESHOLD,
+        left: dx < -JOYSTICK_MOVE_THRESHOLD,
+        right: dx > JOYSTICK_MOVE_THRESHOLD,
         up: movementRef.current.up,
         down: movementRef.current.down,
       });
@@ -213,29 +228,34 @@ export function MobileLccGameControls({
     [applyMovement],
   );
 
-  const handleJoystickPointerDown = useCallback(
+  const handleMoveZonePointerDown = useCallback(
     (event: React.PointerEvent<HTMLDivElement>) => {
       if (disabled) return;
       event.preventDefault();
       event.stopPropagation();
 
-      const outer = joystickOuterRef.current;
-      if (!outer) return;
+      const layer = controlLayerRef.current;
+      if (!layer) return;
 
-      const rect = outer.getBoundingClientRect();
+      const rect = layer.getBoundingClientRect();
       joystickCenterRef.current = {
-        x: rect.left + rect.width / 2,
-        y: rect.top + rect.height / 2,
+        x: event.clientX,
+        y: event.clientY,
       };
+      setJoystickOrigin({
+        x: event.clientX - rect.left,
+        y: event.clientY - rect.top,
+      });
       joystickPointerIdRef.current = event.pointerId;
       setJoystickActive(true);
-      outer.setPointerCapture(event.pointerId);
+      setKnobOffset({ x: 0, y: 0 });
+      event.currentTarget.setPointerCapture(event.pointerId);
       applyJoystickFromClient(event.clientX, event.clientY);
     },
     [applyJoystickFromClient, disabled],
   );
 
-  const handleJoystickPointerMove = useCallback(
+  const handleMoveZonePointerMove = useCallback(
     (event: React.PointerEvent<HTMLDivElement>) => {
       if (disabled || joystickPointerIdRef.current !== event.pointerId) return;
       event.preventDefault();
@@ -254,15 +274,7 @@ export function MobileLccGameControls({
       joystickPointerIdRef.current = null;
       setJoystickActive(false);
       setKnobOffset({ x: 0, y: 0 });
-
-      applyMovement({
-        forward: false,
-        backward: false,
-        left: false,
-        right: false,
-        up: movementRef.current.up,
-        down: movementRef.current.down,
-      });
+      clearJoystickDirections();
 
       try {
         event.currentTarget.releasePointerCapture(event.pointerId);
@@ -270,7 +282,7 @@ export function MobileLccGameControls({
         /* 指针可能已释放 */
       }
     },
-    [applyMovement],
+    [clearJoystickDirections],
   );
 
   const setVerticalAxis = useCallback(
@@ -409,19 +421,21 @@ export function MobileLccGameControls({
 
   return (
     <div
+      ref={controlLayerRef}
       className="pointer-events-none absolute inset-0 z-30"
       data-mobile-lcc-controls="true"
       aria-hidden={false}
     >
-      {/* 右侧触控区：单指转头 + 双指捏合/平移；z-10，摇杆/按钮 z-20 优先捕获 */}
+      {/* 右半屏视角区：单指转头 + 双指捏合/平移（与左半屏移动区不重叠） */}
       <div
         ref={lookZoneRef}
         role="presentation"
         data-mobile-look-zone="true"
-        className="pointer-events-auto absolute right-0 z-10"
+        className="pointer-events-auto absolute z-10"
         style={{
           top: LOOK_ZONE_TOP_OFFSET_PX,
           bottom: 0,
+          left: `${MOVE_ZONE_WIDTH_RATIO * 100}%`,
           width: `${LOOK_ZONE_WIDTH_RATIO * 100}%`,
           ...controlLayerStyle,
         }}
@@ -432,36 +446,53 @@ export function MobileLccGameControls({
         aria-hidden={lookActive}
       />
 
-      {/* 左下角虚拟摇杆 */}
+      {/* 左半屏隐形移动区：按下时在触点显示动态摇杆（与右半屏视角区不重叠） */}
       <div
-        className="pointer-events-auto absolute bottom-6 left-6 z-20"
-        style={controlLayerStyle}
-      >
+        ref={moveZoneRef}
+        role="presentation"
+        data-mobile-move-zone="true"
+        className="pointer-events-auto absolute left-0 top-0 bottom-0 z-[15]"
+        style={{
+          width: `${MOVE_ZONE_WIDTH_RATIO * 100}%`,
+          ...controlLayerStyle,
+        }}
+        onPointerDown={handleMoveZonePointerDown}
+        onPointerMove={handleMoveZonePointerMove}
+        onPointerUp={releaseJoystick}
+        onPointerCancel={releaseJoystick}
+      />
+
+      {/* 动态摇杆：仅在 pointerdown 后显示于按下位置 */}
+      {joystickActive && (
         <div
-          ref={joystickOuterRef}
-          role="presentation"
-          className="relative flex items-center justify-center rounded-full border border-white/15 bg-black/45 backdrop-blur-sm"
+          className="pointer-events-none absolute z-20"
+          data-mobile-dynamic-joystick="true"
           style={{
-            width: JOYSTICK_OUTER_RADIUS * 2,
-            height: JOYSTICK_OUTER_RADIUS * 2,
+            left: joystickOrigin.x,
+            top: joystickOrigin.y,
+            transform: "translate(-50%, -50%)",
             ...controlLayerStyle,
           }}
-          onPointerDown={handleJoystickPointerDown}
-          onPointerMove={handleJoystickPointerMove}
-          onPointerUp={releaseJoystick}
-          onPointerCancel={releaseJoystick}
         >
           <div
-            className="absolute rounded-full border border-cyan-400/35 bg-cyan-400/25 shadow-[0_0_12px_rgba(45,212,191,0.15)]"
+            role="presentation"
+            className="relative flex items-center justify-center rounded-full border border-white/25 bg-white/[0.22] backdrop-blur-[2px]"
             style={{
-              width: JOYSTICK_KNOB_RADIUS * 2,
-              height: JOYSTICK_KNOB_RADIUS * 2,
-              transform: `translate(${knobOffset.x}px, ${knobOffset.y}px)`,
-              transition: joystickActive ? "none" : "transform 0.12s ease-out",
+              width: JOYSTICK_OUTER_RADIUS * 2,
+              height: JOYSTICK_OUTER_RADIUS * 2,
             }}
-          />
+          >
+            <div
+              className="absolute rounded-full border border-white/45 bg-white/[0.42]"
+              style={{
+                width: JOYSTICK_KNOB_RADIUS * 2,
+                height: JOYSTICK_KNOB_RADIUS * 2,
+                transform: `translate(${knobOffset.x}px, ${knobOffset.y}px)`,
+              }}
+            />
+          </div>
         </div>
-      </div>
+      )}
 
       {/* 右下角升 / 降 */}
       <div
