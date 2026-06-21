@@ -3,7 +3,7 @@
 /**
  * 页面名称：模型分享沉浸式观看页 ModelShareViewerPage
  * 页面用途：分享链接 /models/[id]/view 的外层壳；手机直接进入横屏 viewer（必要时页面级旋转舞台），桌面保持原分享壳
- * 主要功能：移动端识别、页面级强制横屏布局、iframe query（context=share&readonly=1[&mobile=1]）、桌面全屏
+ * 主要功能：移动端整页横屏舞台铺满、iframe query（context=share&readonly=1[&mobile=1]）、桌面全屏
  * 对应路由：web/app/models/[id]/view/page.tsx
  */
 
@@ -19,12 +19,12 @@ import type { ModelDetail } from "@/lib/types";
 
 const ORIENTATION_LANDSCAPE = "landscape" as const;
 
-/** 手机竖屏且无法系统横屏时：用 CSS 旋转实现页面级横屏舞台，不提示用户旋转 */
+/** 手机竖屏且无法系统横屏时：整页横屏舞台（100dvh×100dvw 旋转 90°），子内容需 h-full w-full 铺满 */
 function MobileForcedLandscapeStage({ children }: { children: ReactNode }) {
   return (
     <div className="fixed inset-0 z-50 overflow-hidden bg-black">
       <div
-        className="absolute left-1/2 top-1/2 flex flex-col overflow-hidden bg-black"
+        className="absolute left-1/2 top-1/2 overflow-hidden bg-black"
         style={{
           width: "100dvh",
           height: "100dvw",
@@ -270,7 +270,7 @@ export default function ModelShareViewerPage({ modelId }: { modelId: string }) {
             ref={lccIframeRef}
             key={lccIframeKey}
             src={lccIframeSrc}
-            className="h-full w-full border-0"
+            className="block h-full w-full border-0 bg-black"
             allow="fullscreen"
             title={detail.title}
             tabIndex={0}
@@ -319,54 +319,43 @@ export default function ModelShareViewerPage({ modelId }: { modelId: string }) {
     );
   }
 
-  // 分享壳内容：手机为沉浸式横屏 viewer；桌面保留原顶栏与全屏
-  const shareShellContent = (
+  // 手机分享壳：无外层顶栏，iframe 铺满整个横屏舞台；桌面保留原顶栏与全屏
+  const mobileShareShellContent = (
+    <div
+      ref={viewerContainerRef}
+      className="relative h-full w-full overflow-hidden touch-none bg-black"
+      data-share-mobile-viewer-stage="true"
+    >
+      {renderViewer()}
+    </div>
+  );
+
+  const desktopShareShellContent = (
     <>
-      <div
-        className={`z-30 flex flex-shrink-0 items-center justify-between px-3 ${
-          showMobileShareShell ? "h-10 bg-black/50 backdrop-blur-sm" : "h-11 bg-black/60"
-        }`}
-      >
+      <div className="z-30 flex h-11 flex-shrink-0 items-center justify-between bg-black/60 px-3">
         <Link
           href="/models"
           className="flex shrink-0 items-center gap-1.5 text-[13px] text-gray-400 transition-colors hover:text-white"
         >
           <ArrowLeft className="h-4 w-4" />
-          {showMobileShareShell ? "返回" : "返回社区"}
+          返回社区
         </Link>
-
-        {showMobileShareShell ? (
-          <p className="min-w-0 flex-1 truncate px-2 text-center text-[13px] text-gray-200">
-            {detail.title}
-          </p>
-        ) : (
-          <div className="flex-1" />
-        )}
-
-        {!showMobileShareShell && (
-          <button
-            type="button"
-            onClick={handleManualFullscreen}
-            title="全屏"
-            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-white/10 bg-white/5 transition-all hover:border-white/20 hover:bg-white/10"
-          >
-            <Expand className="h-4 w-4 text-gray-400" />
-          </button>
-        )}
-
-        {showMobileShareShell && <div className="w-12 shrink-0" aria-hidden />}
+        <div className="flex-1" />
+        <button
+          type="button"
+          onClick={handleManualFullscreen}
+          title="全屏"
+          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-white/10 bg-white/5 transition-all hover:border-white/20 hover:bg-white/10"
+        >
+          <Expand className="h-4 w-4 text-gray-400" />
+        </button>
       </div>
 
-      <div
-        ref={viewerContainerRef}
-        className={`relative min-h-0 flex-1 overflow-hidden ${
-          showMobileShareShell ? "h-[calc(100%-2.5rem)] w-full touch-none" : "landscape:h-full"
-        }`}
-      >
+      <div ref={viewerContainerRef} className="relative min-h-0 flex-1 overflow-hidden landscape:h-full">
         {renderViewer()}
       </div>
 
-      {showFullscreenButton && !showMobileShareShell && (
+      {showFullscreenButton && (
         <div className="pointer-events-none absolute inset-x-0 bottom-0 z-40 flex flex-col items-center gap-3 bg-gradient-to-t from-black/80 via-black/40 to-transparent pb-10 pt-20">
           <button
             type="button"
@@ -380,21 +369,37 @@ export default function ModelShareViewerPage({ modelId }: { modelId: string }) {
     </>
   );
 
-  const shareShellRootClass =
-    "relative flex flex-col overflow-hidden bg-black max-h-[100dvh] max-w-[100dvw] landscape:max-h-dvh landscape:max-w-dvw h-full w-full";
+  const desktopShareShellRootClass =
+    "relative flex h-full w-full max-h-[100dvh] max-w-[100dvw] flex-col overflow-hidden bg-black landscape:max-h-dvh landscape:max-w-dvw";
 
-  if (useForcedLandscapeStage) {
+  const mobileShareShellRootClass = "h-full w-full overflow-hidden bg-black";
+
+  if (showMobileShareShell && useForcedLandscapeStage) {
     return (
       <MobileForcedLandscapeStage>
         <div
           id="model-share-viewer-fullscreen-root"
           ref={fullscreenTargetRef}
-          className={shareShellRootClass}
+          className={mobileShareShellRootClass}
           data-share-mobile-forced-landscape="true"
         >
-          {shareShellContent}
+          {mobileShareShellContent}
         </div>
       </MobileForcedLandscapeStage>
+    );
+  }
+
+  if (showMobileShareShell) {
+    return (
+      <div
+        id="model-share-viewer-fullscreen-root"
+        ref={fullscreenTargetRef}
+        className={`fixed inset-0 z-50 ${mobileShareShellRootClass}`}
+        style={{ width: "100dvw", height: "100dvh" }}
+        data-share-mobile-shell="true"
+      >
+        {mobileShareShellContent}
+      </div>
     );
   }
 
@@ -402,10 +407,10 @@ export default function ModelShareViewerPage({ modelId }: { modelId: string }) {
     <div
       id="model-share-viewer-fullscreen-root"
       ref={fullscreenTargetRef}
-      className={`fixed inset-0 z-50 ${shareShellRootClass}`}
-      data-share-mobile-shell={showMobileShareShell ? "true" : "false"}
+      className={`fixed inset-0 z-50 ${desktopShareShellRootClass}`}
+      data-share-mobile-shell="false"
     >
-      {shareShellContent}
+      {desktopShareShellContent}
     </div>
   );
 }
