@@ -159,6 +159,8 @@ interface LccViewerProps {
   controlMode?: ModelViewerControlMode;
   /** 帮助面板是否打开；打开时屏蔽 walk 模式鼠标交互 */
   isHelpOpen?: boolean;
+  /** 外层页面已承担 Loading（如手机分享 iframe）；隐藏本组件内 Loading Overlay，避免双层交接闪烁 */
+  suppressLoadingOverlay?: boolean;
 }
 
 let lccSdkPromise: Promise<LccRenderApi> | null = null;
@@ -1843,6 +1845,7 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
   processingBlocked = false,
   controlMode = "walk",
   isHelpOpen = false,
+  suppressLoadingOverlay = false,
 }, ref) {
   const mountRef = useRef<HTMLDivElement | null>(null);
   const viewerRootRef = useRef<HTMLDivElement | null>(null);
@@ -4053,11 +4056,10 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
     setDebugAttr,
   ]);
 
-  // 统一 overlay 控制：由新状态机 overlayVisible 主导
-  const showOverlay =
-    processingBlocked ||
-    viewerStatus === "error" ||
-    overlayVisible;
+  // 统一 overlay 控制：由新状态机 overlayVisible 主导；手机分享外层已负责 Loading 时不展示内层
+  const showOverlay = suppressLoadingOverlay
+    ? processingBlocked || viewerStatus === "error"
+    : processingBlocked || viewerStatus === "error" || overlayVisible;
   const displayProgress =
     viewerStatus === "error"
       ? visualProgress

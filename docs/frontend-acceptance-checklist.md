@@ -1,6 +1,6 @@
 # 数境空间官网 全站前端手动验收清单
 
-> 更新日期：2026-06-21（手机分享横屏游戏化查看器第一版验收项，Commit `ba7c895`）
+> 更新日期：2026-06-21（手机分享 UX 修正 + 横屏舞台铺满 + Loading 修复；首版 Commit `ba7c895`）
 > 适用范围：
 > - **生产目标前端**：`web/` **Next.js 15** App Router（**主验收对象**，见下「测试环境 B」）。
 > - **UI 对照基准**：根目录 `src/` **Vite + React** 原型（Figma 导出版视觉/文案/交互基准，见下「测试环境 A」）。
@@ -175,33 +175,32 @@
 ### 4.2.1 模型分享沉浸式页 ModelShareViewer（`/models/[id]/view`）
 
 > 组件：`web/components/pages/model-share-viewer-page.tsx`  
-> LCC/LCC2：外层壳 + iframe `/viewer/lcc/[id]?context=share&readonly=1`（桌面）或 `&mobile=1`（手机横屏）
+> LCC/LCC2：外层壳 + iframe `/viewer/lcc/[id]?context=share&readonly=1`（桌面）或 `&mobile=1`（手机，无论竖横屏）  
+> 手机分享：**无**竖屏阻断、**无**外层顶栏；直开横屏舞台铺满；iframe 内右上角「工具」按钮
 
 | # | 类型 | 设备 | 操作步骤 | 预期结果 | 是否通过 | 备注 |
 |---|---|---|---|---|---|---|
-| SV1 | UI | 💻 | 桌面打开 `/models/{lccId}/view` | 全屏黑底分享壳；LCC iframe 正常加载；**无**竖屏阻断、**无**手机摇杆 | | |
+| SV1 | UI | 💻 | 桌面打开 `/models/{lccId}/view` | 全屏黑底分享壳；顶栏含返回社区+全屏；LCC iframe 正常；**无**手机触控层 | | |
 | SV2 | UI | 💻 | 检查桌面分享 iframe src | 含 `context=share&readonly=1`；**不含** `mobile=1` | | |
-| SV3 | UI | 💻 | 桌面分享全屏按钮 | 可进入全屏；失败时降级「进入全屏观看」（无「建议横屏」） | | |
-| SV4 | UI | 📱 | 手机**竖屏**打开分享链接 | 显示「请横屏浏览模型」阻断层；**不**显示 iframe / 摇杆 | | DevTools：`pointer:coarse` + 窄视口 |
-| SV5 | UI | 📱 | 竖屏点「进入横屏浏览」 | 不报错；失败时仍停留阻断层（iOS/微信可失败） | | |
-| SV6 | UI | 📱 | 手机**横屏**打开分享链接 | 进入横屏分享壳；顶栏含模型名 +「第一人称」静态提示 | | |
+| SV3 | UI | 💻 | 桌面分享全屏按钮 | 可进入全屏；失败时降级「进入全屏观看」 | | |
+| SV4 | UI | 📱 | 手机**竖屏**打开分享链接 | **无**「请横屏浏览模型」阻断；**无**外层返回/标题/全屏；横屏舞台铺满；iframe 含 `mobile=1` | | DevTools：`pointer:coarse` + 窄视口 |
+| SV5 | UI | 📱 | 手机竖屏检查铺满 | 模型 iframe 占满横屏舞台；**无**底部大面积黑边 | | CSS rotate 舞台 |
+| SV6 | UI | 📱 | 手机**横屏**打开分享链接 | 直接铺满 viewport；**无**外层顶栏 | | |
 | SV7 | UI | 📱 | 横屏检查 iframe src | 含 `context=share&readonly=1&mobile=1` | | |
-| SV8 | UI | 📱 | 横屏 LCC 加载 | 模型正常显示；外层 Loading 在首帧后收起 | | 协议：`data-lcc-first-frame` |
-| SV9 | UI | 📱 | 左下虚拟摇杆 | 上/下/左/右拖动能前进/后退/平移；松开即停 | | |
-| SV10 | UI | 📱 | 右下「升 / 降」 | 按住升降有效 | | |
-| SV10a | UI | 📱 | 右侧单指滑动（look 区） | 视角转头；不与双指冲突 | | 真机优先 |
-| SV10b | UI | 📱 | 双指捏合 / 拖动（look 区） | 捏合拉近/拉远；双指拖动平移 | | 真机优先 |
-| SV11 | UI | 📱 | iframe 内工具栏 | **不显示**桌面左下工具栏；**不显示**「保存启动视图」 | | `readonly=1` |
-| SV12 | UI | 📱 | 底部 chrome 四按钮 | 可见「第一人称 / 枢轴 / 重置 / 帮助」 | | |
-| SV13 | UI | 📱 | chrome 切「枢轴」 | walk 摇杆隐藏；单指旋转 / 双指缩放平移可用 | | OrbitControls |
-| SV14 | UI | 📱 | chrome 切回「第一人称」 | 摇杆与 look 区恢复 | | |
-| SV15 | UI | 📱 | chrome「重置」 | 回到默认视角；移动输入清零 | | |
-| SV16 | UI | 📱 | chrome「帮助」 | 打开手机帮助浮层；walk 层隐藏、移动停止 | | |
-| SV17 | UI | 📱 | 帮助双 tab | 第一人称 / 枢轴；**仅**触屏说明；无 WASD/鼠标/滚轮/QE/Shift | | |
-| SV18 | UI | 📱 | 帮助关闭 | Esc / 遮罩 / 关闭按钮；walk 层恢复 | | |
-| SV19 | UI | 💻 | 桌面 `/viewer/lcc/{id}`（无 mobile） | 完整桌面工具栏 + 桌面帮助；**无** mobile chrome | | |
-| SV20 | UI | 📱 | **真机** iPhone Safari | 竖屏阻断 → 横屏 walk/orbit/帮助全流程 | | **待签字** |
-| SV21 | UI | 📱 | **真机** 微信内置浏览器 | 同上；全屏/锁横屏可失败但不白屏 | | **待签字** |
+| SV8 | UI | 📱 | 横屏 LCC 加载 | 模型正常显示；Loading 完成后**无**二次放大 Logo 闪烁 | | 外层 first-frame；内层 suppressLoadingOverlay |
+| SV9 | UI | 📱 | 右上角「工具」默认态 | 仅显示「工具」按钮；**不**常驻展开四按钮 | | |
+| SV10 | UI | 📱 | 点击「工具」展开 | 显示第一人称 / 枢轴 / 重置 / 帮助；再点收起 | | |
+| SV11 | UI | 📱 | 左半屏按住移动 | 触点出现动态半透明摇杆；拖动前进/后退/平移；松手消失 | | 非固定左下摇杆 |
+| SV12 | UI | 📱 | 右半屏单指滑动 | 只转头，不移动 | | 50/50 分区 |
+| SV13 | UI | 📱 | 右半屏双指捏合/拖动 | 拉近拉远 / 平移；一指左+一指右不触发双指 | | |
+| SV14 | UI | 📱 | 右下「升 / 降」 | 按住升降有效 | | |
+| SV15 | UI | 📱 | iframe 内工具栏 | **不显示**桌面工具栏；**不显示**「保存启动视图」 | | `readonly=1` |
+| SV16 | UI | 📱 | chrome 切「枢轴」 | walk 触控层隐藏；OrbitControls 触屏可用；操作后 chrome 收起 | | |
+| SV17 | UI | 📱 | chrome「帮助」 | 打开帮助浮层；walk 层隐藏；双 tab 仅触屏说明 | | |
+| SV18 | UI | 📱 | 帮助文案 | 含「左侧按住并滑动」；无 WASD/鼠标/滚轮/QE/Shift | | |
+| SV19 | UI | 💻 | 桌面 `/viewer/lcc/{id}`（无 mobile） | 完整桌面工具栏 + 内层 Loading 正常；**无** mobile chrome | | |
+| SV20 | UI | 📱 | **真机** iPhone Safari | 竖屏/横屏直开、铺满、Loading 无闪烁、walk/orbit/帮助全流程 | | **待签字** |
+| SV21 | UI | 📱 | **真机** 微信内置浏览器 | 同上 | | **待签字** |
 | SV22 | UI | 📱 | **真机** Android Chrome | 同上 | | **待签字** |
 
 | L12 | 🔌 | 🔁 | 非法/不存在 id | “模型不存在/返回列表”，不白屏 | | |

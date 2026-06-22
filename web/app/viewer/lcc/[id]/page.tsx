@@ -70,6 +70,45 @@ function isTypingElement(target: EventTarget | null): boolean {
   return tagName === "input" || tagName === "textarea" || tagName === "select";
 }
 
+interface ScreenOrientationWithLock {
+  lock?: (orientation: string) => Promise<void>;
+  unlock?: () => Promise<void>;
+}
+
+type FullscreenElement = HTMLElement & {
+  webkitRequestFullscreen?: () => Promise<void>;
+};
+
+const ORIENTATION_LANDSCAPE = "landscape";
+
+/** 检测当前环境是否支持 Fullscreen API（标准或 webkit 前缀） */
+function isFullscreenApiSupported(element?: HTMLElement | null): boolean {
+  if (typeof document === "undefined") return false;
+  const target = (element ?? document.documentElement) as FullscreenElement;
+  return (
+    typeof target.requestFullscreen === "function" ||
+    typeof target.webkitRequestFullscreen === "function"
+  );
+}
+
+/** 读取当前全屏元素（兼容 webkit 前缀） */
+function getCurrentFullscreenElement(): Element | null {
+  const doc = document as Document & { webkitFullscreenElement?: Element | null };
+  return document.fullscreenElement ?? doc.webkitFullscreenElement ?? null;
+}
+
+/** 对指定元素发起真实全屏请求 */
+async function requestElementFullscreen(element: HTMLElement): Promise<void> {
+  const el = element as FullscreenElement;
+  if (typeof el.requestFullscreen === "function") {
+    await el.requestFullscreen();
+    return;
+  }
+  if (typeof el.webkitRequestFullscreen === "function") {
+    await el.webkitRequestFullscreen();
+  }
+}
+
 /* ---------- 页面组件 ---------- */
 
 export default function LccViewerIframePage() {
@@ -85,7 +124,8 @@ export default function LccViewerIframePage() {
   const isShareContext = searchParams.get("context") === "share";
   const isReadonly = searchParams.get("readonly") === "1";
   const isMobileViewer = searchParams.get("mobile") === "1";
-  void isShareContext;
+  /** 手机分享 iframe：外层 model-share-viewer-page 已负责 Loading，内层不再展示避免双层闪烁 */
+  const isMobileShareViewer = isMobileViewer && isShareContext;
 
   /* ---- 模型数据状态 ---- */
   const [detail, setDetail] = useState<ModelDetail | null>(null);
@@ -107,9 +147,37 @@ export default function LccViewerIframePage() {
   const [saveLaunchViewPending, setSaveLaunchViewPending] = useState(false);
   /** mobile=1 首次 ready 后是否已应用默认 walk（避免用户切 orbit 后被 effect 打回） */
   const hasAppliedMobileDefaultModeRef = useRef(false);
+  /** 手机工具菜单：viewer 根容器是否处于浏览器真实全屏 */
+  const [isViewerFullscreen, setIsViewerFullscreen] = useState(false);
+  /** 手机工具菜单：当前 iframe 环境是否支持 Fullscreen API */
+  const [fullscreenSupported, setFullscreenSupported] = useState(false);
 
   /* ---- 自动聚焦 viewer 容器（确保 iframe / 独立页面获得键盘焦点，WASD 可用） ---- */
   const viewerContainerRef = useRef<HTMLDivElement | null>(null);
+
+  /** 同步 viewer 根容器的真实全屏状态（Esc / 系统手势退出后更新按钮文案） */
+  const syncFullscreenState = useCallback(() => {
+    const element = viewerContainerRef.current;
+    if (!element) {
+      setIsViewerFullscreen(false);
+      return;
+    }
+    setIsViewerFullscreen(getCurrentFullscreenElement() === element);
+  }, []);
+
+  useEffect(() => {
+    setFullscreenSupported(isFullscreenApiSupported());
+    syncFullscreenState();
+  }, [syncFullscreenState]);
+
+  useEffect(() => {
+    document.addEventListener("fullscreenchange", syncFullscreenState);
+    document.addEventListener("webkitfullscreenchange", syncFullscreenState);
+    return () => {
+      document.removeEventListener("fullscreenchange", syncFullscreenState);
+      document.removeEventListener("webkitfullscreenchange", syncFullscreenState);
+    };
+  }, [syncFullscreenState]);
   useEffect(() => {
     if (detailLoading || !detail) return;
     const container = viewerContainerRef.current;
@@ -144,20 +212,36 @@ export default function LccViewerIframePage() {
     viewerHandleRef.current?.setMoveSpeedMultiplier?.(1);
   }, []);
 
-  /* ---- 全屏 ---- */
-  const handleFullscreen = useCallback(() => {
+  /* ---- 全屏（手机工具菜单：真实 Fullscreen API，由用户点击触发） ---- */
+  const handleFullscreen = useCallback(async () => {
     const element = viewerContainerRef.current;
-    if (!element) return;
-    if (document.fullscreenElement === element) {
-      document.exitFullscreen().catch(() => {});
-      return;
+    if (!element || !fullscreenSupported) return;
+
+    try {
+      const activeElement = getCurrentFullscreenElement();
+      if (activeElement === element) {
+        await document.exitFullscreen();
+        try {
+          const orientation = screen.orientation as unknown as ScreenOrientationWithLock;
+          await orientation.unlock?.();
+        } catch {
+          /* orientation unlock 失败静默 */
+        }
+        return;
+      }
+
+      await requestElementFullscreen(element);
+
+      try {
+        const orientation = screen.orientation as unknown as ScreenOrientationWithLock;
+        await orientation.lock?.(ORIENTATION_LANDSCAPE);
+      } catch {
+        /* orientation lock 失败静默，不影响全屏本身 */
+      }
+    } catch {
+      toast.error("当前环境不支持全屏");
     }
-    if (!document.fullscreenElement) {
-      element.requestFullscreen().catch(() => {});
-      return;
-    }
-    element.requestFullscreen().catch(() => {});
-  }, []);
+  }, [fullscreenSupported]);
 
   /* ---- 重置视角 ---- */
   const handleResetView = useCallback(() => {
@@ -487,6 +571,7 @@ export default function LccViewerIframePage() {
         processingBlocked={processingBlocked}
         controlMode={controlMode}
         isHelpOpen={isHelpOpen}
+        suppressLoadingOverlay={isMobileShareViewer}
       />
 
       {/* 帮助面板：mobile=1 使用触屏专用帮助；桌面沿用 ModelViewerHelp */}
@@ -507,11 +592,14 @@ export default function LccViewerIframePage() {
         />
       )}
 
-      {/* 手机分享：常驻 chrome（模式切换 / 重置 / 帮助） */}
+      {/* 手机分享：常驻 chrome（模式切换 / 真实全屏 / 重置 / 帮助） */}
       {isMobileViewer && !processingBlocked && !isHelpOpen && (
         <MobileLccViewerChrome
           controlMode={controlMode}
           onControlModeChange={handleMobileControlModeChange}
+          onToggleFullscreen={handleFullscreen}
+          isFullscreen={isViewerFullscreen}
+          fullscreenSupported={fullscreenSupported}
           onResetView={handleMobileResetView}
           onOpenHelp={handleOpenMobileHelp}
         />

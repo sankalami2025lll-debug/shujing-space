@@ -272,6 +272,7 @@ export default function ModelShareViewerPage({ modelId }: { modelId: string }) {
             src={lccIframeSrc}
             className="block h-full w-full border-0 bg-black"
             allow="fullscreen"
+            allowFullScreen
             title={detail.title}
             tabIndex={0}
             onLoad={handleLccIframeLoad}

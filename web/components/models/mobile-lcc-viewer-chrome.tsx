@@ -3,7 +3,7 @@
 /**
  * 组件名称：MobileLccViewerChrome
  * 组件用途：分享 iframe mobile=1 场景下的右上角工具按钮组（默认收起）
- * 主要功能：「工具」展开/收起；第一人称与枢轴切换；重置视角；打开帮助面板
+ * 主要功能：「工具」展开/收起；第一人称与枢轴切换；真实全屏；重置视角；打开帮助面板
  * 对应路由：/viewer/lcc/[id]?mobile=1
  */
 
@@ -15,6 +15,12 @@ export interface MobileLccViewerChromeProps {
   controlMode: ModelViewerControlMode;
   /** 切换第一人称 / 枢轴 */
   onControlModeChange: (mode: ModelViewerControlMode) => void;
+  /** 切换真实浏览器全屏（Fullscreen API） */
+  onToggleFullscreen?: () => void;
+  /** 当前 viewer 根容器是否处于全屏 */
+  isFullscreen?: boolean;
+  /** 当前环境是否支持 Fullscreen API */
+  fullscreenSupported?: boolean;
   /** 重置视角（会先清零移动输入） */
   onResetView: () => void;
   /** 打开帮助面板 */
@@ -36,6 +42,9 @@ function stopChromePointerEvent(event: React.SyntheticEvent) {
 export function MobileLccViewerChrome({
   controlMode,
   onControlModeChange,
+  onToggleFullscreen,
+  isFullscreen = false,
+  fullscreenSupported = true,
   onResetView,
   onOpenHelp,
 }: MobileLccViewerChromeProps) {
@@ -50,6 +59,12 @@ export function MobileLccViewerChrome({
 
   const handleModeChange = (mode: ModelViewerControlMode) => {
     onControlModeChange(mode);
+    collapse();
+  };
+
+  const handleToggleFullscreen = () => {
+    if (!fullscreenSupported || !onToggleFullscreen) return;
+    onToggleFullscreen();
     collapse();
   };
 
@@ -88,6 +103,11 @@ export function MobileLccViewerChrome({
             active={controlMode === "orbit"}
             onClick={() => handleModeChange("orbit")}
           />
+          <ChromeButton
+            label={isFullscreen ? "退出全屏" : "全屏"}
+            disabled={!fullscreenSupported}
+            onClick={handleToggleFullscreen}
+          />
           <ChromeButton label="重置" onClick={handleResetView} />
           <ChromeButton label="帮助" onClick={handleOpenHelp} />
         </>
@@ -99,24 +119,30 @@ export function MobileLccViewerChrome({
 function ChromeButton({
   label,
   active = false,
+  disabled = false,
   onClick,
 }: {
   label: string;
   active?: boolean;
+  disabled?: boolean;
   onClick: () => void;
 }) {
   return (
     <button
       type="button"
+      disabled={disabled}
       className={`min-w-[4.5rem] rounded-lg border px-3 py-1.5 text-[12px] font-medium backdrop-blur-sm transition-colors ${
-        active
-          ? "border-cyan-400/45 bg-cyan-950/55 text-cyan-50"
-          : "border-white/15 bg-black/50 text-white hover:border-cyan-400/25 hover:bg-black/60"
+        disabled
+          ? "cursor-not-allowed border-white/10 bg-black/35 text-white/45 opacity-40"
+          : active
+            ? "border-cyan-400/45 bg-cyan-950/55 text-cyan-50"
+            : "border-white/15 bg-black/50 text-white hover:border-cyan-400/25 hover:bg-black/60"
       }`}
       style={chromeButtonStyle}
       onPointerDown={stopChromePointerEvent}
       onClick={(event) => {
         stopChromePointerEvent(event);
+        if (disabled) return;
         onClick();
       }}
     >

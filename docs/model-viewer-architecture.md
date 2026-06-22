@@ -621,7 +621,7 @@ web/components/models/
 - iOS Safari、微信内置浏览器、部分安卓浏览器自动全屏和锁横屏可能失败
 - 方案通过 try/catch 静默兜底，不影响模型展示
 
-## 十二·续一、手机分享入口壳（Step 1，2026-06-21）
+## 十二·续一、手机分享入口壳（Step 1 + UX 直开横屏，2026-06-21）
 
 - 路由：`/models/[id]/view` → `web/components/pages/model-share-viewer-page.tsx`
 - 工具：`web/lib/use-mobile-viewer.ts`（`useMobileViewer`、`buildLccShareIframeSrc`）
@@ -630,72 +630,69 @@ web/components/models/
 
 - `isMobileShare = (pointer: coarse) && (innerWidth <= 900 || innerHeight <= 600)`
 - `isLandscape = matchMedia("(orientation: landscape)")`
+- 手机分享 iframe：**无论设备方向**均带 `mobile=1`（`buildLccShareIframeSrc(id, isMobileShare)`）
 - 仅客户端 mount 后生效，避免 SSR hydration 不一致
 
-### 竖屏阻断
+### 直开横屏（已删除竖屏阻断页）
 
-- 条件：`isMobileShare && !isLandscape`
-- UI：全屏黑底 +「请横屏浏览模型」+「进入横屏浏览」
-- 不渲染 LCC iframe；点击「进入横屏浏览」尝试 `document.documentElement.requestFullscreen` + `orientation.lock("landscape")`，失败静默
+- **不再显示**「请横屏浏览模型 / 进入横屏浏览 / 建议横屏观看」
+- 手机竖屏：`MobileForcedLandscapeStage` — 外层 `fixed inset-0 overflow-hidden`；内层 `width:100dvh; height:100dvw; transform:translate(-50%,-50%) rotate(90deg)`；整页横屏化
+- 手机横屏：`fixed inset-0` + iframe `100dvw×100dvh`，不旋转
+- 静默尝试 `requestFullscreen` + `orientation.lock("landscape")`；失败不 toast、不降级按钮
 
-### 横屏分享壳
+### 手机分享壳布局（UX 修正后）
 
-- 条件：`isMobileShare && isLandscape`
-- 黑底全屏（`100dvh` / `100dvw`）；轻量顶栏：返回、模型名、「第一人称」静态提示（不可切换）、全屏按钮
-- Viewer 区 `touch-none` 为后续触控预留
+- **无**外层顶栏（返回 / 模型名 / 全屏 / 「第一人称」徽章已删除；依赖浏览器/微信自带导航）
+- iframe `width:100%; height:100%; display:block; background:black` 铺满横屏舞台
+- 桌面分享：保留原顶栏 + 全屏按钮 + 「进入全屏观看」降级
 
 ### 分享 iframe query
 
 | 场景 | iframe src |
 |------|------------|
 | 桌面分享 | `/viewer/lcc/{id}?context=share&readonly=1` |
-| 手机横屏分享 | `/viewer/lcc/{id}?context=share&readonly=1&mobile=1` |
+| 手机分享 | `/viewer/lcc/{id}?context=share&readonly=1&mobile=1` |
 | 详情页（非分享） | `/viewer/lcc/{id}`（无 query） |
 
-- `readonly=1`：iframe 内 `canShowSaveLaunchView=false`，隐藏「保存启动视图」
-- `mobile=1`：挂载手机 chrome + walk 触控层（见 §十二·续二～续七）
-- **未改**：`LccViewer`、`LCCRender.load`、`dataPath`、子文档 `data-lcc-loaded` / `onLoadedStable` 协议
+- `readonly=1`：iframe 内隐藏「保存启动视图」
+- `mobile=1`：挂载手机 chrome + walk 触控层（见 §十二·续二～续八）
+- **未改**：`LCCRender.load`、`dataPath`、子文档 `data-lcc-loaded` / `onLoadedStable` 协议
 
-### 与原有全屏逻辑的关系
+### 外层 Loading 口径（分享页）
 
-- 保留：模型 `ready` 后 500ms 自动全屏 + 横屏锁定、降级按钮、退出全屏 `orientation.unlock`
-- 竖屏阻断时不触发自动全屏
-- 桌面分享不出现竖屏阻断；桌面全屏降级文案为「进入全屏观看」（不含「建议横屏」）
+- 外层轮询 iframe 子文档 `data-lcc-first-frame === "true"` 后收起 `ModelLoadingOverlay`
+- 手机分享 iframe 内 Loading 已禁用（见 §十二·续八），避免双层交接闪烁
 
-### 外层 Loading 口径（分享页 / 详情页）
-
-- 外层轮询 iframe 子文档：`data-lcc-viewer-status`、`data-lcc-first-frame === "true"` 后收起 `ModelLoadingOverlay`
-- 子文档根节点仍维护 `data-lcc-loaded`、`data-lcc-complete-reason`（如 `onLoadedStable`）
-
-## 十二·续二、手机分享 iframe 第一人称 walk 触控层（Step 2~4，2026-06-21）
+## 十二·续二、手机分享 iframe 第一人称 walk 触控层（Step 2~4 + UX 动态摇杆，2026-06-21）
 
 - 组件：`web/components/models/mobile-lcc-game-controls.tsx`
 - 挂载页：`web/app/viewer/lcc/[id]/page.tsx`
-- 显示条件：`searchParams.mobile === "1"` **且** `controlMode === "walk"` **且** `!isHelpOpen` **且** 模型 `processingStatus === "ready"`
+- 显示条件：`mobile=1` **且** `controlMode === "walk"` **且** `!isHelpOpen` **且** 模型 `ready`
 
-### UI 布局
+### 触控分区（UX 修正：50/50 不重叠）
 
-| 区域 | 内容 |
-|------|------|
-| 左下（24px） | 虚拟摇杆：外圈半透明灰黑，内圈冰蓝半透明 |
-| 右侧 60% | 透明 look 区：单指转头 + 双指捏合 / 平移 |
-| 右下（24px） | 「升」「降」两按钮（重置已移至 chrome） |
+| 区域 | 范围 | 行为 |
+|------|------|------|
+| 移动区 | 左 50% | 隐形区；`pointerdown` 显示动态半透明摇杆于触点 |
+| 视角区 | 左 50% ~ 100%（宽 50%） | 单指 look + 双指 pinch/pan |
+| 升降 | 右下 | 「升」「降」按钮 |
 
-### 交互
+### 动态隐形摇杆（已替换固定左下摇杆）
 
-- 摇杆 Pointer Events → `setMovementInput({ forward/backward/left/right })`，阈值归一化 `0.2`
-- 「升」/「降」按住 → `up` / `down`（对应桌面 `E` / `Q`）；与摇杆状态合并后统一下发
-- 右侧单指滑动 → `lookByDelta({ yawDelta, pitchDelta, source: "mobile" })`（×0.85 灵敏度）
-- 双指 pinch → `moveAlongView`；双指 pan → `panByDelta`（与桌面滚轮 / 右键平移同一 handle）
-- 双指与单指 look 互斥（`blockSingleLookUntilReleaseRef`）
-- 样式：`touch-action: none`、`user-select: none`；`preventDefault` + `stopPropagation`
-- unmount / 帮助打开 / 切 orbit / disabled：清零 `setMovementInput`
+- 平时不显示；左半屏 `pointerdown` 在触点显示外圈（~104px）+ 内圈（~44px）
+- 阈值 12px；最大半径 52px；松手隐藏并清零方向（保留升/降状态）
+- 帮助文案：「左侧按住并滑动：前后左右移动」
+
+### 交互（视角区）
+
+- 单指滑动 → `lookByDelta`（×0.85 灵敏度）
+- 双指 pinch → `moveAlongView`；双指 pan → `panByDelta`
+- 双指与单指 look 互斥；双指仅右侧区注册（一指左+一指右不触发双指）
 
 ### 与桌面工具栏分工
 
-- `mobile=1`：**不渲染** `ModelViewerToolbar`（避免与摇杆左下角冲突）
-- 非 `mobile=1`：仍显示完整工具栏（含帮助、模式切换、保存启动视图等）
-- 模式切换由 `MobileLccViewerChrome` 负责（见 §十二·续六），不再强制 lock walk
+- `mobile=1`：**不渲染** `ModelViewerToolbar`
+- 模式切换由 `MobileLccViewerChrome` 负责（见 §十二·续六）
 
 ## 十二·续三、walk 触屏 handle 扩展（Step 3~4，2026-06-21）
 
@@ -719,14 +716,16 @@ web/components/models/
 - orbit 下 **不渲染** `MobileLccGameControls`，避免与 OrbitControls 抢 touch
 - chrome 仍可切换回第一人称
 
-## 十二·续六、手机常驻 chrome（Step 7，2026-06-21）
+## 十二·续六、手机 chrome 工具按钮（Step 7 + UX 收起，2026-06-21）
 
 - 组件：`web/components/models/mobile-lcc-viewer-chrome.tsx`
-- 底部四按钮：**第一人称** / **枢轴** / **重置** / **帮助**
-- `hasAppliedMobileDefaultModeRef`：首次 ready 默认 walk，不覆盖用户后续 orbit 选择
-- 「重置」→ `resetView()` + 清零 `setMovementInput`
+- 位置：右上角 `right:16px; top:16px`
+- **默认收起**：仅显示「工具」；点击展开第一人称 / 枢轴 / 重置 / 帮助（竖向排列）
+- 点击任一操作后自动收起；`stopPropagation` 防误触 canvas
+- 帮助打开时 chrome 不渲染
+- `hasAppliedMobileDefaultModeRef`：首次 ready 默认 walk
 
-## 十二·续七、手机分享第一版封板与已知风险（Commit `ba7c895`，2026-06-21）
+## 十二·续七、手机分享第一版封板（Commit `ba7c895`，2026-06-21）
 
 ### 阶段提交
 
@@ -738,30 +737,43 @@ web/components/models/
 | 文件 | 职责 |
 |------|------|
 | `web/lib/use-mobile-viewer.ts` | `isMobileShare` / `isLandscape` / `buildLccShareIframeSrc` |
-| `web/components/pages/model-share-viewer-page.tsx` | 竖屏阻断、横屏壳、iframe + 外层 Loading |
-| `web/app/viewer/lcc/[id]/page.tsx` | query 解析、mode 状态、chrome / help / game controls 编排 |
-| `web/components/models/mobile-lcc-viewer-chrome.tsx` | 模式 / 重置 / 帮助入口 |
-| `web/components/models/mobile-lcc-game-controls.tsx` | walk 专用触控 |
+| `web/components/pages/model-share-viewer-page.tsx` | 直开横屏舞台、外层 Loading、桌面分享壳 |
+| `web/app/viewer/lcc/[id]/page.tsx` | query 解析、`suppressLoadingOverlay`、chrome / help / game controls |
+| `web/components/models/mobile-lcc-viewer-chrome.tsx` | 右上角「工具」收起/展开 |
+| `web/components/models/mobile-lcc-game-controls.tsx` | 动态摇杆 + 50/50 触控 |
 | `web/components/models/mobile-lcc-help-overlay.tsx` | 触屏帮助 |
-| `web/components/models/lcc-viewer.tsx` | walk handle 实现 |
+| `web/components/models/lcc-viewer.tsx` | walk handle + `suppressLoadingOverlay` prop |
 | `web/components/models/viewers/types.ts` | handle 类型 |
 
-### 红线未改
+## 十二·续八、UX 修正与 Loading 双层修复（2026-06-21）
 
-- `server/`、Prisma、OSS / 上传 / ZIP
-- `LCCRender.load`、`.lcc/.lcc2` 入口 URL `dataPath`
-- `launchView / sdkInitialCamera / defaultCamera / boundsCenterHomeView` 链
-- `resetView` 算法、`onLoadedStable / data-lcc-loaded` 协议
-- 桌面工具栏与桌面帮助面板
+### UX 修正摘要
 
-### 已知风险
+| 项 | 改动 |
+|---|---|
+| 直开横屏 | 删竖屏阻断；`MobileForcedLandscapeStage` 整页旋转 |
+| 舞台铺满 | 删手机外层顶栏；iframe 100% 高度（无 `calc(100%-2.5rem)`） |
+| 工具 chrome | 底部常驻四按钮 → 右上角默认收起「工具」 |
+| 摇杆 | 固定左下 → 左半屏动态隐形摇杆 |
+| 触控区 | 左 50% 移动 / 右 50% 视角（消除原 50%+60% 重叠） |
 
-1. 需真机验收 iPhone Safari / 微信内置浏览器 / Android Chrome
-2. 外层横屏顶栏固定「第一人称」徽章可能与 iframe 内 orbit 不同步
-3. 手机竖屏 hydration 前可能短暂闪出非 `mobile=1` iframe
-4. 小屏横屏下 chrome 四按钮可能略拥挤
-5. 摇杆 / 转头 / 双指灵敏度需真机微调
-6. 分享外层 Loading 以 `data-lcc-first-frame` 收起；真机闪屏时再评估对齐 `onLoadedStable`
+### Loading 双层闪烁修复
+
+**原因**：外层在 `data-lcc-first-frame=true` 收起 Loading 时，iframe 内 `LccViewer` overlay 仍显示约 300ms（complete 阶段淡出），用户看到放大 Logo 闪一下。
+
+**修复**（方案 A）：
+
+- `LccViewer` 新增 `suppressLoadingOverlay?: boolean`
+- `page.tsx`：`isMobileShareViewer = mobile=1 && context=share` 时传入 `suppressLoadingOverlay={true}`
+- 内层跳过加载态 overlay；**仍保留** `processingBlocked` / `error` overlay
+- 外层 `model-share-viewer-page` 独占手机分享 Loading 展示
+
+### 已知风险（UX 修正后）
+
+1. 需真机验收 iPhone Safari / 微信 / Android Chrome
+2. `useMobileViewer` mount 前可能短暂无 `mobile=1` iframe（hydration 闪帧）
+3. CSS 旋转舞台下触控坐标需真机验证
+4. 浏览器/微信顶部系统栏无法网页旋转（系统限制）
 
 ## 十三、默认操作模式（2026-06-20）
 
@@ -777,4 +789,4 @@ web/components/models/
 3. 为 BIM / PLY / OSGB 明确后续候选引擎和接入边界
 4. 在"文件结构"Tab 中逐步接入不同格式的结构树
 5. 在"操作记录"Tab 中沉淀统一事件模型
-6. **手机分享第一版后续**：真机验收签字；视结果优化 hydration 闪帧、外层徽章同步、触屏灵敏度
+6. **手机分享后续**：真机验收签字；视结果优化 hydration 闪帧、CSS 旋转舞台触控坐标
