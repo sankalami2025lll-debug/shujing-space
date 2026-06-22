@@ -2,15 +2,14 @@
 
 /**
  * 页面名称：模型分享沉浸式观看页 ModelShareViewerPage
- * 页面用途：分享链接 /models/[id]/view 的外层壳；手机竖屏提示横屏、横屏沉浸、真实全屏占满屏幕
- * 主要功能：移动端竖屏阻断、横屏沉浸舞台、外层 Fullscreen API + 锁横屏、iframe query（context=share&readonly=1&mobile=1）
+ * 页面用途：分享链接 /models/[id]/view 的外层壳；手机直接进入横屏 viewer（必要时页面级旋转舞台），桌面保持原分享壳
+ * 主要功能：移动端整页横屏舞台铺满、iframe query（context=share&readonly=1[&mobile=1]）、桌面全屏
  * 对应路由：web/app/models/[id]/view/page.tsx
  */
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, type ReactNode } from "react";
 import Link from "next/link";
 import { ArrowLeft, Expand, Loader2 } from "lucide-react";
-import { toast } from "sonner";
 import { ModelLoadingOverlay } from "@/components/models/model-loading-overlay";
 import { getModelDetail } from "@/lib/api/models";
 import { isLccModel } from "@/lib/model-viewer-kind";
@@ -20,81 +19,40 @@ import type { ModelDetail } from "@/lib/types";
 
 const ORIENTATION_LANDSCAPE = "landscape" as const;
 
+/** 手机竖屏且无法系统横屏时：整页横屏舞台（100dvh×100dvw 旋转 90°），子内容需 h-full w-full 铺满 */
+function MobileForcedLandscapeStage({ children }: { children: ReactNode }) {
+  return (
+    <div className="fixed inset-0 z-50 overflow-hidden bg-black">
+      <div
+        className="absolute left-1/2 top-1/2 overflow-hidden bg-black"
+        style={{
+          width: "100dvh",
+          height: "100dvw",
+          transform: "translate(-50%, -50%) rotate(90deg)",
+          transformOrigin: "center center",
+        }}
+        data-share-forced-landscape-stage="true"
+      >
+        {children}
+      </div>
+    </div>
+  );
+}
+
 interface ScreenOrientationWithLock {
   lock?: (orientation: string) => Promise<void>;
   unlock?: () => Promise<void>;
-}
-
-type FullscreenCapableElement = HTMLElement & {
-  webkitRequestFullscreen?: () => Promise<void>;
-};
-
-type FullscreenDocument = Document & {
-  webkitFullscreenElement?: Element | null;
-  webkitExitFullscreen?: () => Promise<void>;
-};
-
-function getCurrentFullscreenElement(doc: Document = document): Element | null {
-  const d = doc as FullscreenDocument;
-  return doc.fullscreenElement ?? d.webkitFullscreenElement ?? null;
-}
-
-async function requestElementFullscreen(element: HTMLElement): Promise<void> {
-  const el = element as FullscreenCapableElement;
-  if (typeof el.requestFullscreen === "function") {
-    await el.requestFullscreen();
-    return;
-  }
-  if (typeof el.webkitRequestFullscreen === "function") {
-    await el.webkitRequestFullscreen();
-  }
-}
-
-async function exitDocumentFullscreen(doc: Document = document): Promise<void> {
-  const d = doc as FullscreenDocument;
-  if (doc.fullscreenElement) {
-    await doc.exitFullscreen();
-    return;
-  }
-  if (d.webkitFullscreenElement) {
-    await d.webkitExitFullscreen?.();
-  }
-}
-
-/** 手机竖屏且未全屏：提示用户横屏，不展示模型舞台 */
-function MobilePortraitBlocker() {
-  return (
-    <div
-      className="fixed inset-0 z-[10000] flex flex-col items-center justify-center gap-3 bg-black px-6 text-center"
-      data-share-portrait-blocker="true"
-    >
-      <p className="text-[16px] font-medium text-white">请横屏观看</p>
-      <p className="text-[13px] text-gray-500">将手机横置后可进入模型沉浸浏览；也可在横屏后点击「全屏」</p>
-    </div>
-  );
 }
 
 export default function ModelShareViewerPage({ modelId }: { modelId: string }) {
   const numericId = Number.parseInt(modelId, 10);
   const idValid = Number.isFinite(numericId) && numericId > 0;
 
-  const {
-    mounted: mobileMounted,
-    isMobileShare,
-    isLandscapeDebounced,
-  } = useMobileViewer();
-
-  /** 手机分享场景 */
+  const { mounted: mobileMounted, isMobileShare, isLandscape } = useMobileViewer();
+  /** 手机分享场景：无论设备方向，直接进入横屏 viewer 形态（不再显示竖屏阻断页） */
   const showMobileShareShell = mobileMounted && isMobileShare;
-  /** 防抖后竖屏（全屏中不因旋转瞬间闪回阻断层） */
-  const isPortraitDebounced = showMobileShareShell && !isLandscapeDebounced;
-  /** 浏览器真实全屏：外层 #model-share-viewer-fullscreen-root */
-  const [isViewerFullscreen, setIsViewerFullscreen] = useState(false);
-
-  const shouldShowPortraitBlocker =
-    showMobileShareShell && isPortraitDebounced && !isViewerFullscreen;
-  const shouldShowMobileViewer =
-    showMobileShareShell && (!isPortraitDebounced || isViewerFullscreen);
+  /** 手机竖屏时浏览器无法系统横屏：用页面级旋转舞台铺满横屏画面 */
+  const useForcedLandscapeStage = showMobileShareShell && !isLandscape;
 
   const [detail, setDetail] = useState<ModelDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(true);
@@ -121,94 +79,6 @@ export default function ModelShareViewerPage({ modelId }: { modelId: string }) {
     : null;
   const lccIframeKey = `${detail?.id ?? "pending"}-${detail?.viewerUrl || ""}-${lccIframeSrc ?? ""}`;
   const showLccOuterOverlay = isLcc && !lccIframeModelLoaded && !lccIframeViewerErrored;
-
-  /** 同步外层沉浸根节点的真实全屏状态 */
-  const syncFullscreenState = useCallback(() => {
-    const root = fullscreenTargetRef.current;
-    if (!root) {
-      setIsViewerFullscreen(false);
-      return;
-    }
-    const active = getCurrentFullscreenElement();
-    setIsViewerFullscreen(active === root);
-  }, []);
-
-  useEffect(() => {
-    syncFullscreenState();
-  }, [syncFullscreenState]);
-
-  useEffect(() => {
-    const onFsChange = () => syncFullscreenState();
-    document.addEventListener("fullscreenchange", onFsChange);
-    document.addEventListener("webkitfullscreenchange", onFsChange);
-    window.addEventListener("orientationchange", onFsChange);
-    window.addEventListener("resize", onFsChange);
-    return () => {
-      document.removeEventListener("fullscreenchange", onFsChange);
-      document.removeEventListener("webkitfullscreenchange", onFsChange);
-      window.removeEventListener("orientationchange", onFsChange);
-      window.removeEventListener("resize", onFsChange);
-    };
-  }, [syncFullscreenState]);
-
-  const enterMobileFullscreen = useCallback(async () => {
-    const target = fullscreenTargetRef.current;
-    if (!target) return false;
-
-    try {
-      await requestElementFullscreen(target);
-      try {
-        const orientation = screen.orientation as unknown as ScreenOrientationWithLock;
-        await orientation.lock?.(ORIENTATION_LANDSCAPE);
-      } catch {
-        /* iOS/Safari 可能不支持 orientation lock，保持全屏横屏沉浸布局 */
-      }
-      syncFullscreenState();
-      return true;
-    } catch {
-      toast.error("当前浏览器不支持自动全屏，请手动横屏观看");
-      return false;
-    }
-  }, [syncFullscreenState]);
-
-  const exitMobileFullscreen = useCallback(async () => {
-    try {
-      await exitDocumentFullscreen();
-    } finally {
-      try {
-        const orientation = screen.orientation as unknown as ScreenOrientationWithLock;
-        await orientation.unlock?.();
-      } catch {
-        /* 忽略 */
-      }
-      syncFullscreenState();
-    }
-  }, [syncFullscreenState]);
-
-  const toggleMobileFullscreen = useCallback(async () => {
-    const root = fullscreenTargetRef.current;
-    const active = getCurrentFullscreenElement();
-    if (root && active === root) {
-      await exitMobileFullscreen();
-    } else {
-      await enterMobileFullscreen();
-    }
-  }, [enterMobileFullscreen, exitMobileFullscreen]);
-
-  /** iframe 内工具按钮通过 postMessage 请求外层真实全屏（保留作兜底；主路径为 iframe 直接调 parent root） */
-  useEffect(() => {
-    if (!showMobileShareShell) return;
-
-    const handleMessage = (event: MessageEvent) => {
-      if (event.origin !== window.location.origin) return;
-      if (event.source !== lccIframeRef.current?.contentWindow) return;
-      if (event.data?.type !== "sj-mobile-share-fullscreen-toggle") return;
-      void toggleMobileFullscreen();
-    };
-
-    window.addEventListener("message", handleMessage);
-    return () => window.removeEventListener("message", handleMessage);
-  }, [showMobileShareShell, toggleMobileFullscreen]);
 
   useEffect(() => {
     if (!idValid) {
@@ -259,6 +129,7 @@ export default function ModelShareViewerPage({ modelId }: { modelId: string }) {
       }
       setShowFullscreenButton(false);
     } catch {
+      // 手机端不展示全屏降级按钮；桌面才提示手动全屏
       if (!showMobileShareShell) {
         setShowFullscreenButton(true);
       }
@@ -267,24 +138,22 @@ export default function ModelShareViewerPage({ modelId }: { modelId: string }) {
     }
   }, [showMobileShareShell]);
 
-  /** 桌面分享页保留 mount 后自动全屏；手机端改由用户点击工具菜单全屏 */
   useEffect(() => {
     if (!detail || detail.processingStatus !== "ready") return;
     if (!mobileMounted) return;
     if (attemptedAutoFullscreen) return;
-    if (showMobileShareShell) return;
 
     const timer = setTimeout(() => {
       void tryAutoFullscreen();
     }, 500);
 
     return () => clearTimeout(timer);
-  }, [detail, mobileMounted, tryAutoFullscreen, attemptedAutoFullscreen, showMobileShareShell]);
+  }, [detail, mobileMounted, tryAutoFullscreen, attemptedAutoFullscreen]);
 
   useEffect(() => {
     if (!attemptedAutoFullscreen || showFullscreenButton) return;
     const handleFsChange = () => {
-      if (!getCurrentFullscreenElement()) {
+      if (!document.fullscreenElement) {
         try {
           const orientation = screen.orientation as unknown as ScreenOrientationWithLock;
           orientation.unlock?.();
@@ -292,15 +161,10 @@ export default function ModelShareViewerPage({ modelId }: { modelId: string }) {
           /* 忽略 */
         }
       }
-      syncFullscreenState();
     };
     document.addEventListener("fullscreenchange", handleFsChange);
-    document.addEventListener("webkitfullscreenchange", handleFsChange);
-    return () => {
-      document.removeEventListener("fullscreenchange", handleFsChange);
-      document.removeEventListener("webkitfullscreenchange", handleFsChange);
-    };
-  }, [attemptedAutoFullscreen, showFullscreenButton, syncFullscreenState]);
+    return () => document.removeEventListener("fullscreenchange", handleFsChange);
+  }, [attemptedAutoFullscreen, showFullscreenButton]);
 
   const handleManualFullscreen = useCallback(async () => {
     const el = fullscreenTargetRef.current;
@@ -315,11 +179,10 @@ export default function ModelShareViewerPage({ modelId }: { modelId: string }) {
         // orientation lock 失败静默处理
       }
       setShowFullscreenButton(false);
-      syncFullscreenState();
     } catch {
       setShowFullscreenButton(true);
     }
-  }, [syncFullscreenState]);
+  }, []);
 
   const handleLccIframeLoad = useCallback(() => {
     lccIframeRef.current?.focus({ preventScroll: true });
@@ -407,7 +270,7 @@ export default function ModelShareViewerPage({ modelId }: { modelId: string }) {
             ref={lccIframeRef}
             key={lccIframeKey}
             src={lccIframeSrc}
-            className="absolute inset-0 block h-full w-full border-0 bg-black"
+            className="block h-full w-full border-0 bg-black"
             allow="fullscreen"
             allowFullScreen
             title={detail.title}
@@ -457,6 +320,7 @@ export default function ModelShareViewerPage({ modelId }: { modelId: string }) {
     );
   }
 
+  // 手机分享壳：无外层顶栏，iframe 铺满整个横屏舞台；桌面保留原顶栏与全屏
   const mobileShareShellContent = (
     <div
       ref={viewerContainerRef}
@@ -509,26 +373,34 @@ export default function ModelShareViewerPage({ modelId }: { modelId: string }) {
   const desktopShareShellRootClass =
     "relative flex h-full w-full max-h-[100dvh] max-w-[100dvw] flex-col overflow-hidden bg-black landscape:max-h-dvh landscape:max-w-dvw";
 
-  const mobileShareRootClass = isViewerFullscreen
-    ? "fixed inset-0 z-[9999] h-dvh w-screen overflow-hidden bg-black"
-    : "fixed inset-0 z-50 h-dvh w-screen overflow-hidden bg-black";
+  const mobileShareShellRootClass = "h-full w-full overflow-hidden bg-black";
+
+  if (showMobileShareShell && useForcedLandscapeStage) {
+    return (
+      <MobileForcedLandscapeStage>
+        <div
+          id="model-share-viewer-fullscreen-root"
+          ref={fullscreenTargetRef}
+          className={mobileShareShellRootClass}
+          data-share-mobile-forced-landscape="true"
+        >
+          {mobileShareShellContent}
+        </div>
+      </MobileForcedLandscapeStage>
+    );
+  }
 
   if (showMobileShareShell) {
     return (
-      <>
-        {shouldShowPortraitBlocker ? <MobilePortraitBlocker /> : null}
-        {shouldShowMobileViewer ? (
-          <div
-            id="model-share-viewer-fullscreen-root"
-            ref={fullscreenTargetRef}
-            className={mobileShareRootClass}
-            data-share-mobile-shell="true"
-            data-share-mobile-fullscreen={isViewerFullscreen ? "true" : "false"}
-          >
-            {mobileShareShellContent}
-          </div>
-        ) : null}
-      </>
+      <div
+        id="model-share-viewer-fullscreen-root"
+        ref={fullscreenTargetRef}
+        className={`fixed inset-0 z-50 ${mobileShareShellRootClass}`}
+        style={{ width: "100dvw", height: "100dvh" }}
+        data-share-mobile-shell="true"
+      >
+        {mobileShareShellContent}
+      </div>
     );
   }
 
