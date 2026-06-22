@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 
 type ModelLoadingStatus = "loading" | "error" | "info";
 
@@ -71,9 +71,14 @@ const PIXEL_GLYPHS: Record<string, string[]> = {
   "%": ["1001", "0001", "0010", "0100", "1001"],
 };
 
-const RUNNER_SIZE = 26;
-const RUNNER_PADDING = 8;
 const RUNNER_FRAME_MS = 140;
+
+/** 将进度规范到 0–100，供进度条与像素小人共用 */
+function toSafeProgressPercent(progress?: number, fallbackProgress = 0, hasRealProgress = false): number {
+  const normalized = hasRealProgress ? clampProgress(progress) : fallbackProgress;
+  const percent = Math.round(normalized * 100);
+  return Math.max(0, Math.min(100, percent));
+}
 
 function clampProgress(progress?: number) {
   if (!Number.isFinite(progress)) return 0;
@@ -140,19 +145,10 @@ export function ModelLoadingOverlay({
 }: ModelLoadingOverlayProps) {
   const [fallbackProgress, setFallbackProgress] = useState(0);
   const [runnerFrameIndex, setRunnerFrameIndex] = useState(0);
-  const progressWrapRef = useRef<HTMLDivElement | null>(null);
-  const [progressBarWidth, setProgressBarWidth] = useState(520);
   const hasRealProgress = Number.isFinite(progress);
-  const normalizedProgress = clampProgress(progress);
-  const effectiveProgress = hasRealProgress ? normalizedProgress : fallbackProgress;
-  const progressPercent = Math.round(effectiveProgress * 100);
-  const fillPercent = progressPercent === 0 ? 0 : Math.max(progressPercent, 6);
-  const runnerOffset = useMemo(() => {
-    const minX = RUNNER_PADDING;
-    const maxX = Math.max(progressBarWidth - RUNNER_SIZE - RUNNER_PADDING, minX);
-    const rawX = progressBarWidth * effectiveProgress - RUNNER_SIZE / 2;
-    return Math.min(Math.max(rawX, minX), maxX);
-  }, [effectiveProgress, progressBarWidth]);
+  /** 进度条与像素小人共用同一进度值（0–100） */
+  const safeProgress = toSafeProgressPercent(progress, fallbackProgress, hasRealProgress);
+  const progressPercent = safeProgress;
 
   useEffect(() => {
     if (hasRealProgress) {
@@ -165,7 +161,8 @@ export function ModelLoadingOverlay({
       return;
     }
 
-    // 无真实进度时使用缓慢推进的假进度，保证 iframe 等统一 Loading 也有动效。
+    // 纯视觉 fallback：无真实进度时缓慢推进进度条，保证各种场景下 Loading 有动效。
+    // 此 fallback 仅用于进度数字显示，永不驱动 overlay 隐藏（隐藏由父组件 visible prop 控制）。
     const timer = window.setInterval(() => {
       setFallbackProgress((value) => {
         const nextValue = value + (value < 0.6 ? 0.08 : value < 0.84 ? 0.04 : 0.015);
@@ -182,28 +179,13 @@ export function ModelLoadingOverlay({
       return;
     }
 
+    // 仅驱动腿部帧切换；横向位置由 safeProgress 控制，不做独立位移动画
     const timer = window.setInterval(() => {
       setRunnerFrameIndex((value) => (value + 1) % RUNNER_FRAMES.length);
     }, RUNNER_FRAME_MS);
 
     return () => window.clearInterval(timer);
   }, [status, visible]);
-
-  useEffect(() => {
-    const element = progressWrapRef.current;
-    if (!element) return;
-
-    const updateWidth = () => {
-      setProgressBarWidth(element.getBoundingClientRect().width);
-    };
-
-    updateWidth();
-
-    const observer = new ResizeObserver(() => updateWidth());
-    observer.observe(element);
-
-    return () => observer.disconnect();
-  }, []);
 
   return (
     <div
@@ -228,23 +210,29 @@ export function ModelLoadingOverlay({
 
         <div className="relative flex w-full items-start justify-center gap-[10px]">
           <div
-            ref={progressWrapRef}
             className="relative w-[520px] max-w-[70vw] pb-8"
+            style={{ "--loading-progress": `${safeProgress}%` } as React.CSSProperties}
           >
             <div className="relative overflow-hidden rounded-[8px] border-[3px] border-white bg-black p-[3px]">
               <div className="relative h-[18px] overflow-hidden rounded-[4px] bg-black">
                 <div
-                  className="h-full bg-white transition-[width] duration-300"
-                  style={{ width: `${fillPercent}%` }}
+                  className="h-full bg-white transition-[width] duration-300 ease-linear"
+                  style={{ width: "var(--loading-progress)" }}
                 />
               </div>
             </div>
 
-            <div
-              className="pointer-events-none absolute left-0 top-[32px] z-[1] transition-[left] duration-300"
-              style={{ left: `${runnerOffset}px` }}
-            >
-              <PixelRunner frame={RUNNER_FRAMES[runnerFrameIndex] ?? RUNNER_FRAMES[0]} />
+            {/* 像素小人横向位置与进度条共用 --loading-progress；仅保留腿部帧动画 */}
+            <div className="pointer-events-none absolute left-0 top-[32px] z-[1] h-7 w-full overflow-visible">
+              <div
+                className="absolute top-0 transition-[left] duration-300 ease-linear"
+                style={{
+                  left: "var(--loading-progress)",
+                  transform: "translateX(-50%)",
+                }}
+              >
+                <PixelRunner frame={RUNNER_FRAMES[runnerFrameIndex] ?? RUNNER_FRAMES[0]} />
+              </div>
             </div>
           </div>
 
