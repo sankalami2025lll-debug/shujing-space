@@ -104,7 +104,13 @@ export function MobileLccViewerChrome({
             onClick={() => handleModeChange("orbit")}
           />
           <ChromeButton
-            label={isFullscreen ? "退出全屏" : "全屏"}
+            label={
+              !fullscreenSupported
+                ? "全屏不可用"
+                : isFullscreen
+                  ? "退出全屏"
+                  : "全屏"
+            }
             disabled={!fullscreenSupported}
             onClick={handleToggleFullscreen}
           />

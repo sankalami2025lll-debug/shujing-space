@@ -86,6 +86,16 @@ type FullscreenDocument = Document & {
 
 const ORIENTATION_LANDSCAPE = "landscape";
 
+/** 全屏请求后等待 viewport 稳定再判定是否真正沉浸式 */
+const EFFECTIVE_FULLSCREEN_DELAY_MS = 300;
+
+/** 沉浸式全屏不可用时的统一提示（微信 / iOS WebView 等） */
+const IMMERSIVE_FULLSCREEN_TOAST = "当前浏览器不支持沉浸式全屏，请用系统浏览器打开";
+
+/** viewport 相对 screen 的沉浸式阈值（横屏舞台允许宽高互换） */
+const EFFECTIVE_FS_MAX_RATIO = 0.92;
+const EFFECTIVE_FS_MIN_RATIO = 0.82;
+
 /** 全屏目标上下文：mobile share 优先使用父页面横屏舞台 root */
 interface FullscreenTargetContext {
   element: HTMLElement | null;
@@ -138,11 +148,6 @@ function getDocumentFullscreenElement(doc: Document): Element | null {
   return doc.fullscreenElement ?? d.webkitFullscreenElement ?? null;
 }
 
-/** 读取 iframe 内 document 的当前全屏元素（兼容 webkit 前缀） */
-function getCurrentFullscreenElement(): Element | null {
-  return getDocumentFullscreenElement(document);
-}
-
 /** 对指定元素发起真实全屏请求 */
 async function requestElementFullscreen(element: HTMLElement): Promise<void> {
   const el = element as FullscreenElement;
@@ -189,6 +194,76 @@ async function tryUnlockOrientation(isParent: boolean): Promise<void> {
   }
 }
 
+/** 读取全屏判定用的 window（mobile share 用父页面 viewport） */
+function getFullscreenViewportWindow(isParent: boolean): Window {
+  return isParent ? window.parent : window;
+}
+
+/**
+ * 检测是否真正沉浸式全屏：viewport 需接近 screen 尺寸。
+ * 微信 / WebView 可能出现 fullscreenElement 存在但顶部栏仍占位。
+ */
+function checkEffectiveFullscreen(isParent: boolean): boolean {
+  const win = getFullscreenViewportWindow(isParent);
+  const viewportWidth = win.innerWidth;
+  const viewportHeight = win.innerHeight;
+  const screenWidth = win.screen.width;
+  const screenHeight = win.screen.height;
+
+  const maxViewport = Math.max(viewportWidth, viewportHeight);
+  const minViewport = Math.min(viewportWidth, viewportHeight);
+  const maxScreen = Math.max(screenWidth, screenHeight);
+  const minScreen = Math.min(screenWidth, screenHeight);
+
+  return (
+    maxViewport >= maxScreen * EFFECTIVE_FS_MAX_RATIO &&
+    minViewport >= minScreen * EFFECTIVE_FS_MIN_RATIO
+  );
+}
+
+/** 指定目标是否处于 DOM 全屏（仅 fullscreenElement 判断） */
+function isDomFullscreenActive(ctx: FullscreenTargetContext): boolean {
+  if (!ctx.element) return false;
+  return getDocumentFullscreenElement(ctx.doc) === ctx.element;
+}
+
+/**
+ * 是否处于“有效”全屏：DOM 全屏 + mobile share 父页面须通过 viewport 二次确认。
+ */
+function isEffectiveViewerFullscreen(ctx: FullscreenTargetContext): boolean {
+  if (!isDomFullscreenActive(ctx)) return false;
+  if (ctx.isParent) {
+    return checkEffectiveFullscreen(true);
+  }
+  return true;
+}
+
+/** 退出父页面与 iframe 内可能残留的全屏状态 */
+async function exitAllFullscreenDocs(ctx: FullscreenTargetContext): Promise<void> {
+  try {
+    if (getDocumentFullscreenElement(ctx.doc)) {
+      await exitDocumentFullscreen(ctx.doc);
+    }
+  } catch {
+    /* 忽略 */
+  }
+  if (ctx.isParent) {
+    try {
+      if (getDocumentFullscreenElement(document)) {
+        await exitDocumentFullscreen(document);
+      }
+    } catch {
+      /* 忽略 */
+    }
+  }
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
+}
+
 /* ---------- 页面组件 ---------- */
 
 export default function LccViewerIframePage() {
@@ -227,36 +302,69 @@ export default function LccViewerIframePage() {
   const [saveLaunchViewPending, setSaveLaunchViewPending] = useState(false);
   /** mobile=1 首次 ready 后是否已应用默认 walk（避免用户切 orbit 后被 effect 打回） */
   const hasAppliedMobileDefaultModeRef = useRef(false);
-  /** 手机工具菜单：viewer 根容器是否处于浏览器真实全屏 */
+  /** 手机工具菜单：是否处于真正沉浸式全屏（非仅 fullscreenElement） */
   const [isViewerFullscreen, setIsViewerFullscreen] = useState(false);
   /** 手机工具菜单：当前 iframe 环境是否支持 Fullscreen API */
   const [fullscreenSupported, setFullscreenSupported] = useState(false);
+  /** 全屏有效性延迟复核定时器（避免 fullscreenchange 过早误判） */
+  const fullscreenVerifyTimerRef = useRef<number | null>(null);
 
   /* ---- 自动聚焦 viewer 容器（确保 iframe / 独立页面获得键盘焦点，WASD 可用） ---- */
   const viewerContainerRef = useRef<HTMLDivElement | null>(null);
 
-  /** 同步 viewer 全屏状态：mobile share 读父页面 root，否则读 iframe 内容器 */
-  const syncFullscreenState = useCallback(() => {
-    if (isMobileShareViewer) {
-      try {
-        const parentRoot = getParentShareFullscreenRoot();
-        if (parentRoot) {
-          const parentFs = getDocumentFullscreenElement(window.parent.document);
-          setIsViewerFullscreen(parentFs === parentRoot);
-          return;
-        }
-      } catch {
-        /* 父页面不可访问时 fallback iframe 内判断 */
+  /** 清理无效全屏：退出 DOM 全屏并复位按钮状态 */
+  const cleanupIneffectiveFullscreen = useCallback(
+    async (ctx: FullscreenTargetContext, showToast: boolean) => {
+      await exitAllFullscreenDocs(ctx);
+      await tryUnlockOrientation(ctx.isParent);
+      setIsViewerFullscreen(false);
+      if (showToast) {
+        toast.error(IMMERSIVE_FULLSCREEN_TOAST);
       }
-    }
+    },
+    [],
+  );
 
-    const element = viewerContainerRef.current;
-    if (!element) {
+  /** 同步 viewer 全屏状态：mobile share 须 DOM 全屏 + viewport 有效，避免微信误判 */
+  const syncFullscreenState = useCallback(() => {
+    const ctx = resolveFullscreenTarget(isMobileShareViewer, viewerContainerRef.current);
+
+    if (!ctx.element || !isDomFullscreenActive(ctx)) {
       setIsViewerFullscreen(false);
       return;
     }
-    setIsViewerFullscreen(getCurrentFullscreenElement() === element);
-  }, [isMobileShareViewer]);
+
+    if (ctx.isParent) {
+      if (isEffectiveViewerFullscreen(ctx)) {
+        setIsViewerFullscreen(true);
+        return;
+      }
+
+      // DOM 全屏已触发但 viewport 未扩展：先显示「全屏」，延迟复核
+      setIsViewerFullscreen(false);
+
+      if (fullscreenVerifyTimerRef.current !== null) {
+        window.clearTimeout(fullscreenVerifyTimerRef.current);
+      }
+      fullscreenVerifyTimerRef.current = window.setTimeout(() => {
+        fullscreenVerifyTimerRef.current = null;
+        const freshCtx = resolveFullscreenTarget(isMobileShareViewer, viewerContainerRef.current);
+        if (!isDomFullscreenActive(freshCtx)) {
+          setIsViewerFullscreen(false);
+          return;
+        }
+        if (isEffectiveViewerFullscreen(freshCtx)) {
+          setIsViewerFullscreen(true);
+          return;
+        }
+        // 被动检测到假全屏：静默退出，不 toast（仅用户点击失败时提示）
+        void cleanupIneffectiveFullscreen(freshCtx, false);
+      }, EFFECTIVE_FULLSCREEN_DELAY_MS);
+      return;
+    }
+
+    setIsViewerFullscreen(true);
+  }, [cleanupIneffectiveFullscreen, isMobileShareViewer]);
 
   useEffect(() => {
     if (isMobileShareViewer) {
@@ -296,6 +404,10 @@ export default function LccViewerIframePage() {
         parentDoc.removeEventListener("fullscreenchange", handleFsChange);
         parentDoc.removeEventListener("webkitfullscreenchange", handleFsChange);
       }
+      if (fullscreenVerifyTimerRef.current !== null) {
+        window.clearTimeout(fullscreenVerifyTimerRef.current);
+        fullscreenVerifyTimerRef.current = null;
+      }
     };
   }, [syncFullscreenState, isMobileShareViewer]);
   useEffect(() => {
@@ -332,12 +444,10 @@ export default function LccViewerIframePage() {
     viewerHandleRef.current?.setMoveSpeedMultiplier?.(1);
   }, []);
 
-  /* ---- 全屏（手机工具菜单：mobile share 对父页面横屏舞台 root 发起真实 Fullscreen API） ---- */
+  /* ---- 全屏（mobile share：父页面横屏舞台 root + 沉浸式有效性二次确认） ---- */
   const handleFullscreen = useCallback(async () => {
-    const { element, doc, isParent } = resolveFullscreenTarget(
-      isMobileShareViewer,
-      viewerContainerRef.current,
-    );
+    const ctx = resolveFullscreenTarget(isMobileShareViewer, viewerContainerRef.current);
+    const { element, isParent } = ctx;
 
     if (!element || !isFullscreenApiSupported(element)) {
       toast.error("当前环境不支持全屏");
@@ -345,19 +455,40 @@ export default function LccViewerIframePage() {
     }
 
     try {
-      const activeElement = getDocumentFullscreenElement(doc);
-      if (activeElement === element) {
-        await exitDocumentFullscreen(doc);
-        await tryUnlockOrientation(isParent);
+      if (isViewerFullscreen || isDomFullscreenActive(ctx)) {
+        if (isViewerFullscreen) {
+          await exitAllFullscreenDocs(ctx);
+          await tryUnlockOrientation(isParent);
+          setIsViewerFullscreen(false);
+        } else if (isDomFullscreenActive(ctx)) {
+          // DOM 假全屏残留：静默清理，按钮保持「全屏」
+          await cleanupIneffectiveFullscreen(ctx, false);
+        }
         return;
       }
 
       await requestElementFullscreen(element);
       await tryLockLandscape(isParent);
+      await delay(EFFECTIVE_FULLSCREEN_DELAY_MS);
+
+      const freshCtx = resolveFullscreenTarget(isMobileShareViewer, viewerContainerRef.current);
+      if (!isDomFullscreenActive(freshCtx)) {
+        setIsViewerFullscreen(false);
+        toast.error("当前环境不支持全屏");
+        return;
+      }
+
+      if (freshCtx.isParent && !checkEffectiveFullscreen(true)) {
+        await cleanupIneffectiveFullscreen(freshCtx, true);
+        return;
+      }
+
+      setIsViewerFullscreen(true);
     } catch {
-      toast.error("当前环境不支持全屏");
+      setIsViewerFullscreen(false);
+      toast.error(IMMERSIVE_FULLSCREEN_TOAST);
     }
-  }, [isMobileShareViewer]);
+  }, [cleanupIneffectiveFullscreen, isMobileShareViewer, isViewerFullscreen]);
 
   /* ---- 重置视角 ---- */
   const handleResetView = useCallback(() => {
@@ -568,10 +699,10 @@ export default function LccViewerIframePage() {
           isMobileShareViewer,
           viewerContainerRef.current,
         );
-        const activeFs = getDocumentFullscreenElement(doc);
-        if (element && activeFs === element) {
-          exitDocumentFullscreen(doc)
+        if (isViewerFullscreen && element) {
+          exitAllFullscreenDocs({ element, doc, isParent })
             .then(() => tryUnlockOrientation(isParent))
+            .then(() => setIsViewerFullscreen(false))
             .catch(() => {});
           return;
         }
@@ -635,7 +766,7 @@ export default function LccViewerIframePage() {
       document.removeEventListener("visibilitychange", handleVisibilityChange);
       clearMovementState();
     };
-  }, [clearMovementState, controlMode, handleResetView, isHelpOpen, isMobileShareViewer]);
+  }, [clearMovementState, controlMode, handleResetView, isHelpOpen, isMobileShareViewer, isViewerFullscreen]);
 
   /* ---- 关闭帮助时清除移动状态 ---- */
   useEffect(() => {
