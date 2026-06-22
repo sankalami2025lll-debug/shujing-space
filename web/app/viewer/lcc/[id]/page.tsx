@@ -92,9 +92,27 @@ function isFullscreenApiSupported(element?: HTMLElement | null): boolean {
 }
 
 /** 读取当前全屏元素（兼容 webkit 前缀） */
-function getCurrentFullscreenElement(): Element | null {
-  const doc = document as Document & { webkitFullscreenElement?: Element | null };
-  return document.fullscreenElement ?? doc.webkitFullscreenElement ?? null;
+function getCurrentFullscreenElement(doc: Document = document): Element | null {
+  const d = doc as Document & { webkitFullscreenElement?: Element | null };
+  return doc.fullscreenElement ?? d.webkitFullscreenElement ?? null;
+}
+
+/** 退出指定 document 的全屏 */
+async function exitDocumentFullscreen(doc: Document = document): Promise<void> {
+  const d = doc as Document & { webkitFullscreenElement?: Element | null; webkitExitFullscreen?: () => Promise<void> };
+  if (doc.fullscreenElement) {
+    await doc.exitFullscreen();
+    return;
+  }
+  if (d.webkitFullscreenElement) {
+    await d.webkitExitFullscreen?.();
+  }
+}
+
+/** 手机分享 iframe：读取外层分享页沉浸根节点 */
+function getParentShareFullscreenRoot(): HTMLElement | null {
+  if (typeof window === "undefined" || window.parent === window) return null;
+  return window.parent.document.getElementById("model-share-viewer-fullscreen-root");
 }
 
 /** 对指定元素发起真实全屏请求 */
@@ -155,29 +173,55 @@ export default function LccViewerIframePage() {
   /* ---- 自动聚焦 viewer 容器（确保 iframe / 独立页面获得键盘焦点，WASD 可用） ---- */
   const viewerContainerRef = useRef<HTMLDivElement | null>(null);
 
-  /** 同步 viewer 根容器的真实全屏状态（Esc / 系统手势退出后更新按钮文案） */
+  /** 同步 viewer / 外层分享根节点的真实全屏状态 */
   const syncFullscreenState = useCallback(() => {
+    if (isMobileShareViewer) {
+      const parentRoot = getParentShareFullscreenRoot();
+      if (!parentRoot || typeof window === "undefined" || window.parent === window) {
+        setIsViewerFullscreen(false);
+        return;
+      }
+      const parentFs = getCurrentFullscreenElement(window.parent.document);
+      setIsViewerFullscreen(parentFs === parentRoot);
+      return;
+    }
+
     const element = viewerContainerRef.current;
     if (!element) {
       setIsViewerFullscreen(false);
       return;
     }
     setIsViewerFullscreen(getCurrentFullscreenElement() === element);
-  }, []);
+  }, [isMobileShareViewer]);
 
   useEffect(() => {
-    setFullscreenSupported(isFullscreenApiSupported());
+    if (isMobileShareViewer) {
+      const parentRoot = getParentShareFullscreenRoot();
+      setFullscreenSupported(isFullscreenApiSupported(parentRoot));
+    } else {
+      setFullscreenSupported(isFullscreenApiSupported());
+    }
     syncFullscreenState();
-  }, [syncFullscreenState]);
+  }, [isMobileShareViewer, syncFullscreenState]);
 
   useEffect(() => {
-    document.addEventListener("fullscreenchange", syncFullscreenState);
-    document.addEventListener("webkitfullscreenchange", syncFullscreenState);
+    const targetDoc = isMobileShareViewer && typeof window !== "undefined" && window.parent !== window
+      ? window.parent.document
+      : document;
+
+    const onFsChange = () => syncFullscreenState();
+    targetDoc.addEventListener("fullscreenchange", onFsChange);
+    targetDoc.addEventListener("webkitfullscreenchange", onFsChange);
+    window.addEventListener("orientationchange", onFsChange);
+    window.addEventListener("resize", onFsChange);
+
     return () => {
-      document.removeEventListener("fullscreenchange", syncFullscreenState);
-      document.removeEventListener("webkitfullscreenchange", syncFullscreenState);
+      targetDoc.removeEventListener("fullscreenchange", onFsChange);
+      targetDoc.removeEventListener("webkitfullscreenchange", onFsChange);
+      window.removeEventListener("orientationchange", onFsChange);
+      window.removeEventListener("resize", onFsChange);
     };
-  }, [syncFullscreenState]);
+  }, [isMobileShareViewer, syncFullscreenState]);
   useEffect(() => {
     if (detailLoading || !detail) return;
     const container = viewerContainerRef.current;
@@ -212,15 +256,56 @@ export default function LccViewerIframePage() {
     viewerHandleRef.current?.setMoveSpeedMultiplier?.(1);
   }, []);
 
-  /* ---- 全屏（手机工具菜单：真实 Fullscreen API，由用户点击触发） ---- */
+  /* ---- 全屏：手机分享走外层分享根节点；其它场景走 iframe 内 viewer 根容器 ---- */
   const handleFullscreen = useCallback(async () => {
+    if (isMobileShareViewer) {
+      if (typeof window === "undefined" || window.parent === window) return;
+
+      const parentDoc = window.parent.document;
+      const parentRoot = getParentShareFullscreenRoot();
+      if (!parentRoot || !fullscreenSupported) return;
+
+      try {
+        const parentFs = getCurrentFullscreenElement(parentDoc);
+        if (parentFs === parentRoot) {
+          await exitDocumentFullscreen(parentDoc);
+          try {
+            const orientation = window.parent.screen.orientation as unknown as ScreenOrientationWithLock;
+            await orientation.unlock?.();
+          } catch {
+            /* 忽略 */
+          }
+          return;
+        }
+
+        await requestElementFullscreen(parentRoot);
+
+        try {
+          const orientation = window.parent.screen.orientation as unknown as ScreenOrientationWithLock;
+          await orientation.lock?.(ORIENTATION_LANDSCAPE);
+        } catch {
+          /* orientation lock 失败静默，全屏态仍保持横屏沉浸布局 */
+        }
+      } catch {
+        try {
+          window.parent.postMessage(
+            { type: "sj-mobile-share-fullscreen-toggle" },
+            window.location.origin,
+          );
+        } catch {
+          toast.error("当前浏览器不支持自动全屏，请手动横屏观看");
+        }
+      }
+      return;
+    }
+
     const element = viewerContainerRef.current;
     if (!element || !fullscreenSupported) return;
 
     try {
       const activeElement = getCurrentFullscreenElement();
       if (activeElement === element) {
-        await document.exitFullscreen();
+        await exitDocumentFullscreen();
         try {
           const orientation = screen.orientation as unknown as ScreenOrientationWithLock;
           await orientation.unlock?.();
@@ -241,7 +326,7 @@ export default function LccViewerIframePage() {
     } catch {
       toast.error("当前环境不支持全屏");
     }
-  }, [fullscreenSupported]);
+  }, [fullscreenSupported, isMobileShareViewer]);
 
   /* ---- 重置视角 ---- */
   const handleResetView = useCallback(() => {
