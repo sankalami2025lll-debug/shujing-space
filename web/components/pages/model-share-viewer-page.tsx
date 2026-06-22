@@ -20,9 +20,22 @@ import type { ModelDetail } from "@/lib/types";
 const ORIENTATION_LANDSCAPE = "landscape" as const;
 
 /** 手机竖屏且无法系统横屏时：整页横屏舞台（100dvh×100dvw 旋转 90°），子内容需 h-full w-full 铺满 */
-function MobileForcedLandscapeStage({ children }: { children: ReactNode }) {
+function MobileForcedLandscapeStage({
+  children,
+  id,
+  rootRef,
+}: {
+  children: ReactNode;
+  /** 全屏 API 目标：须包住黑底 fixed 舞台 + 旋转层 + iframe */
+  id?: string;
+  rootRef?: React.Ref<HTMLDivElement>;
+}) {
   return (
-    <div className="fixed inset-0 z-50 overflow-hidden bg-black">
+    <div
+      id={id}
+      ref={rootRef}
+      className="fixed inset-0 z-50 overflow-hidden bg-black"
+    >
       <div
         className="absolute left-1/2 top-1/2 overflow-hidden bg-black"
         style={{
@@ -377,10 +390,11 @@ export default function ModelShareViewerPage({ modelId }: { modelId: string }) {
 
   if (showMobileShareShell && useForcedLandscapeStage) {
     return (
-      <MobileForcedLandscapeStage>
+      <MobileForcedLandscapeStage
+        id="model-share-viewer-fullscreen-root"
+        rootRef={fullscreenTargetRef}
+      >
         <div
-          id="model-share-viewer-fullscreen-root"
-          ref={fullscreenTargetRef}
           className={mobileShareShellRootClass}
           data-share-mobile-forced-landscape="true"
         >
