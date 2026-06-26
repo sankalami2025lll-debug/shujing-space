@@ -153,7 +153,7 @@ export default function ModelShareViewerPage({ modelId }: { modelId: string }) {
 
   useEffect(() => {
     if (!detail || detail.processingStatus !== "ready") return;
-    if (!mobileMounted) return;
+    if (!showMobileShareShell) return;
     if (attemptedAutoFullscreen) return;
 
     const timer = setTimeout(() => {
@@ -161,7 +161,7 @@ export default function ModelShareViewerPage({ modelId }: { modelId: string }) {
     }, 500);
 
     return () => clearTimeout(timer);
-  }, [detail, mobileMounted, tryAutoFullscreen, attemptedAutoFullscreen]);
+  }, [detail, showMobileShareShell, tryAutoFullscreen, attemptedAutoFullscreen]);
 
   useEffect(() => {
     if (!attemptedAutoFullscreen || showFullscreenButton) return;
@@ -368,18 +368,6 @@ export default function ModelShareViewerPage({ modelId }: { modelId: string }) {
       <div ref={viewerContainerRef} className="relative min-h-0 flex-1 overflow-hidden landscape:h-full">
         {renderViewer()}
       </div>
-
-      {showFullscreenButton && (
-        <div className="pointer-events-none absolute inset-x-0 bottom-0 z-40 flex flex-col items-center gap-3 bg-gradient-to-t from-black/80 via-black/40 to-transparent pb-10 pt-20">
-          <button
-            type="button"
-            onClick={handleManualFullscreen}
-            className="pointer-events-auto rounded-2xl border border-cyan-400/30 bg-cyan-950/60 px-8 py-3 text-[15px] font-medium text-cyan-200 backdrop-blur-md transition-all hover:border-cyan-300/50 hover:bg-cyan-900/70 active:scale-95"
-          >
-            进入全屏观看
-          </button>
-        </div>
-      )}
     </>
   );
 
