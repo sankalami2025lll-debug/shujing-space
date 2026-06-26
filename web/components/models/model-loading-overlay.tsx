@@ -165,7 +165,7 @@ export function ModelLoadingOverlay({
       <div className="flex w-full max-w-[min(96vw,1100px)] flex-col items-center">
         <div className="flex w-full items-center justify-center overflow-visible">
           <img
-            src="/brand/model-loading-logo-tight.png"
+            src="/brand/model-loading-logo-tight-v2.png"
             alt="数境空间"
             width={616}
             height={490}
