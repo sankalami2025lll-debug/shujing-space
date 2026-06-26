@@ -286,9 +286,9 @@ export default function LccViewerIframePage() {
   const isEmbeddedMobilePreview = isEmbeddedPreview && isMobilePreview;
   /** 手机分享 iframe：外层 model-share-viewer-page 已负责 Loading，内层不再展示避免双层闪烁 */
   const isMobileShareViewer = isMobileViewer && isShareContext;
-  /** 嵌入 iframe 时使用 h-full，独立页/分享页仍用 h-screen */
+  /** embed iframe 内 html/body 高度链可能为 0，需直接使用 iframe viewport 兜底。 */
   const viewerShellClass = isEmbeddedPreview
-    ? "h-full w-full"
+    ? "h-[100dvh] min-h-[100vh] w-[100dvw]"
     : "h-screen w-screen";
 
   /* ---- 模型数据状态 ---- */
