@@ -6,7 +6,6 @@
  * 主要功能：各场景共用同一视觉框架；仅负责视觉展示，不控制 Loading 显隐时机
  */
 
-import Image from "next/image";
 import { useEffect, useState, type CSSProperties } from "react";
 
 type ModelLoadingStatus = "loading" | "error" | "info";
@@ -164,19 +163,21 @@ export function ModelLoadingOverlay({
     >
       {/* 统一居中框架：Logo、进度条、百分比、小人组成紧凑品牌 Loading。 */}
       <div className="flex w-full max-w-[min(96vw,1100px)] flex-col items-center">
-        <div className="mb-0.5 flex w-full max-w-[min(92vw,640px)] items-center justify-center overflow-visible sm:max-w-[900px] lg:max-w-[1000px]">
-          <Image
-            src="/brand/model-loading-logo.png"
-            alt="数境空间 DIGIREALM SPACE"
-            width={1536}
-            height={1024}
-            sizes="(max-width: 640px) 92vw, (max-width: 1024px) 900px, 1000px"
-            className="h-auto w-full object-contain [image-rendering:pixelated]"
-            priority
+        <div className="flex w-full items-center justify-center overflow-visible">
+          <img
+            src="/brand/model-loading-logo-tight.png"
+            alt="数境空间"
+            width={616}
+            height={490}
+            className="block h-auto w-[min(92vw,680px)] object-contain [image-rendering:pixelated] md:w-[min(78vw,1000px)]"
+            draggable={false}
           />
         </div>
 
-        <div className="flex w-full flex-col items-center" aria-label={`模型加载进度 ${progressPercent}%`}>
+        <div
+          className="mt-[2px] flex w-full flex-col items-center"
+          aria-label={`模型加载进度 ${progressPercent}%`}
+        >
           <div className="relative mx-auto w-[min(78vw,340px)] sm:w-[500px] lg:w-[520px]">
             <div
               className="relative h-[18px] w-full overflow-visible"
