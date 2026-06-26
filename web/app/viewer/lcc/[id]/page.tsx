@@ -277,10 +277,19 @@ export default function LccViewerIframePage() {
 
   // 分享页 iframe query：context=share / readonly=1 / mobile=1（mobile 预留给第 2 步触控层）
   const isShareContext = searchParams.get("context") === "share";
+  const isDetailContext = searchParams.get("context") === "detail";
   const isReadonly = searchParams.get("readonly") === "1";
   const isMobileViewer = searchParams.get("mobile") === "1";
+  /** 官网详情页手机竖屏内嵌预览（embed=1，非分享页 mobile=1） */
+  const isEmbeddedPreview = searchParams.get("embed") === "1";
+  const isMobilePreview = searchParams.get("mobilePreview") === "1";
+  const isEmbeddedMobilePreview = isEmbeddedPreview && isMobilePreview;
   /** 手机分享 iframe：外层 model-share-viewer-page 已负责 Loading，内层不再展示避免双层闪烁 */
   const isMobileShareViewer = isMobileViewer && isShareContext;
+  /** 嵌入 iframe 时使用 h-full，独立页/分享页仍用 h-screen */
+  const viewerShellClass = isEmbeddedPreview
+    ? "h-full w-full"
+    : "h-screen w-screen";
 
   /* ---- 模型数据状态 ---- */
   const [detail, setDetail] = useState<ModelDetail | null>(null);
@@ -290,8 +299,10 @@ export default function LccViewerIframePage() {
   /* ---- Viewer 状态 ---- */
   // viewerHandleRef：LccViewer 暴露的操作接口
   const viewerHandleRef = useRef<ModelViewerHandle | null>(null);
-  // controlMode：观察（orbit）或漫游（walk）模式
-  const [controlMode, setControlMode] = useState<ModelViewerControlMode>("walk");
+  // controlMode：观察（orbit）或漫游（walk）模式；详情页竖屏 embed 默认 orbit
+  const [controlMode, setControlMode] = useState<ModelViewerControlMode>(() =>
+    isEmbeddedMobilePreview ? "orbit" : "walk",
+  );
   // movementInput：漫游模式下的移动方向状态
   const [movementInput, setMovementInput] = useState<ModelViewerMovementInput>(EMPTY_MOVEMENT_INPUT);
   // moveSpeedMultiplier：Shift 加速倍率
@@ -302,6 +313,8 @@ export default function LccViewerIframePage() {
   const [saveLaunchViewPending, setSaveLaunchViewPending] = useState(false);
   /** mobile=1 首次 ready 后是否已应用默认 walk（避免用户切 orbit 后被 effect 打回） */
   const hasAppliedMobileDefaultModeRef = useRef(false);
+  /** 详情 embed 竖屏预览：首次 ready 后默认 orbit */
+  const hasAppliedEmbeddedOrbitRef = useRef(false);
   /** 手机工具菜单：是否处于真正沉浸式全屏（非仅 fullscreenElement） */
   const [isViewerFullscreen, setIsViewerFullscreen] = useState(false);
   /** 手机工具菜单：当前 iframe 环境是否支持 Fullscreen API */
@@ -776,26 +789,38 @@ export default function LccViewerIframePage() {
   /* ---- 模型切换时重置状态 ---- */
   useEffect(() => {
     hasAppliedMobileDefaultModeRef.current = false;
+    hasAppliedEmbeddedOrbitRef.current = false;
     clearMovementState();
     setIsHelpOpen(false);
-    setControlMode("walk");
-  }, [clearMovementState, detail?.id]);
+    setControlMode(isEmbeddedMobilePreview ? "orbit" : "walk");
+  }, [clearMovementState, detail?.id, isEmbeddedMobilePreview]);
+
+  /* ---- 详情页 embed 竖屏预览：首次 ready 后默认枢轴 orbit ---- */
+  useEffect(() => {
+    if (!isEmbeddedMobilePreview || !detail || processingBlocked) return;
+    if (hasAppliedEmbeddedOrbitRef.current) return;
+
+    hasAppliedEmbeddedOrbitRef.current = true;
+    setControlMode("orbit");
+    viewerHandleRef.current?.setControlMode?.("orbit");
+    clearMovementState();
+  }, [isEmbeddedMobilePreview, detail, processingBlocked, clearMovementState]);
 
   /* ---- 手机分享 iframe：首次 ready 后默认第一人称 walk（不覆盖用户后续手动切换） ---- */
   useEffect(() => {
-    if (!isMobileViewer || !detail || processingBlocked) return;
+    if (!isMobileViewer || isEmbeddedPreview || !detail || processingBlocked) return;
     if (hasAppliedMobileDefaultModeRef.current) return;
 
     hasAppliedMobileDefaultModeRef.current = true;
     setControlMode("walk");
     viewerHandleRef.current?.setControlMode?.("walk");
     clearMovementState();
-  }, [isMobileViewer, detail, processingBlocked, clearMovementState]);
+  }, [isMobileViewer, isEmbeddedPreview, detail, processingBlocked, clearMovementState]);
 
   /* ---- 渲染：Loading ---- */
   if (detailLoading) {
     return (
-      <div className="relative h-screen w-screen overflow-hidden bg-[#0a0a0a]">
+      <div className={`relative overflow-hidden bg-[#0a0a0a] ${viewerShellClass}`}>
         <ModelLoadingOverlay visible showText={false} />
       </div>
     );
@@ -804,7 +829,9 @@ export default function LccViewerIframePage() {
   /* ---- 渲染：Error ---- */
   if (detailError || !detail) {
     return (
-      <div className="h-screen w-screen flex flex-col items-center justify-center gap-3 text-gray-500 bg-[#0a0a0a]">
+      <div
+        className={`flex flex-col items-center justify-center gap-3 text-gray-500 bg-[#0a0a0a] ${viewerShellClass}`}
+      >
         <AlertTriangle className="w-10 h-10 opacity-30" />
         <p className="text-[15px]">{detailError ?? "模型不存在或暂未公开"}</p>
       </div>
@@ -816,7 +843,9 @@ export default function LccViewerIframePage() {
     <div
       ref={viewerContainerRef}
       tabIndex={0}
-      className="h-screen w-screen relative bg-[#0d0d0d] overflow-hidden outline-none"
+      className={`${viewerShellClass} relative bg-[#0d0d0d] overflow-hidden outline-none`}
+      data-lcc-viewer-context={isDetailContext ? "detail" : isShareContext ? "share" : "standalone"}
+      data-lcc-viewer-embed={isEmbeddedPreview ? "true" : "false"}
     >
       {/* LCC Viewer 全屏渲染 */}
       <LccViewer
@@ -834,26 +863,27 @@ export default function LccViewerIframePage() {
         suppressLoadingOverlay={isMobileShareViewer}
       />
 
-      {/* 帮助面板：mobile=1 使用触屏专用帮助；桌面沿用 ModelViewerHelp */}
-      {isMobileViewer ? (
-        <MobileLccHelpOverlay
-          open={isHelpOpen}
-          onClose={handleCloseMobileHelp}
-          controlMode={controlMode}
-        />
-      ) : (
-        <ModelViewerHelp
-          open={isHelpOpen}
-          onClose={() => {
-            clearMovementState();
-            setIsHelpOpen(false);
-          }}
-          controlMode={controlMode}
-        />
-      )}
+      {/* 帮助面板：分享 mobile=1 用触屏帮助；embed 预览不展示工具栏/帮助 */}
+      {!isEmbeddedMobilePreview &&
+        (isMobileViewer ? (
+          <MobileLccHelpOverlay
+            open={isHelpOpen}
+            onClose={handleCloseMobileHelp}
+            controlMode={controlMode}
+          />
+        ) : (
+          <ModelViewerHelp
+            open={isHelpOpen}
+            onClose={() => {
+              clearMovementState();
+              setIsHelpOpen(false);
+            }}
+            controlMode={controlMode}
+          />
+        ))}
 
       {/* 手机分享：常驻 chrome（模式切换 / 真实全屏 / 重置 / 帮助） */}
-      {isMobileViewer && !processingBlocked && !isHelpOpen && (
+      {isMobileViewer && !isEmbeddedPreview && !processingBlocked && !isHelpOpen && (
         <MobileLccViewerChrome
           controlMode={controlMode}
           onControlModeChange={handleMobileControlModeChange}
@@ -865,8 +895,9 @@ export default function LccViewerIframePage() {
         />
       )}
 
-      {/* 手机 walk 专属触控层：orbit 下不渲染，避免透明层挡住 OrbitControls */}
+      {/* 手机 walk 专属触控层：仅分享页 mobile=1 */}
       {isMobileViewer &&
+        !isEmbeddedPreview &&
         controlMode === "walk" &&
         !isHelpOpen &&
         !processingBlocked && (
@@ -877,8 +908,8 @@ export default function LccViewerIframePage() {
           />
         )}
 
-      {/* 桌面 / 非手机分享：左下角工具栏（与摇杆位置冲突，mobile 时不展示） */}
-      {!isMobileViewer && (
+      {/* 桌面 / 独立页工具栏；embed 竖屏预览隐藏 */}
+      {!isMobileViewer && !isEmbeddedMobilePreview && (
         <div className="pointer-events-none absolute bottom-4 left-4 z-20">
           <div className="pointer-events-auto">
             <ModelViewerToolbar

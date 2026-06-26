@@ -2,14 +2,13 @@
 
 /**
  * 页面名称：模型详情页 ModelDetailPage
- * 页面用途：官网模型详情 /models/[id]；桌面内嵌 viewer，手机端预览 + 跳转横屏分享页
- * 主要功能：模型浏览、收藏、分享、编辑/删除；手机端「进入横屏浏览」→ /models/[id]/view
+ * 页面用途：官网模型详情 /models/[id]；桌面内嵌 viewer；手机竖屏 embed 预览 + 横屏分享入口
+ * 主要功能：模型浏览、收藏、分享；手机 embed iframe（枢轴预览）+「进入横屏浏览」→ /models/[id]/view
  * 对应文档：页面功能注释文档/06_模型详情页_ModelDetail.md
  */
 
 import { useState, useEffect, useCallback, useRef, useMemo, type MouseEvent } from "react";
 import Link from "next/link";
-import Image from "next/image";
 import { useRouter } from "next/navigation";
 import {
   Share2,
@@ -69,6 +68,17 @@ function processingStatusText(status: ModelDetail["processingStatus"]) {
 
 interface ModelDetailPageProps {
   modelId: string;
+}
+
+/** 手机详情页竖屏内嵌 LCC iframe query（非分享页 mobile=1） */
+function buildLccDetailEmbedIframeSrc(modelId: number): string {
+  const params = new URLSearchParams({
+    context: "detail",
+    embed: "1",
+    readonly: "1",
+    mobilePreview: "1",
+  });
+  return `/viewer/lcc/${modelId}?${params.toString()}`;
 }
 
 function RightPanelSkeleton() {
@@ -259,8 +269,14 @@ export default function ModelDetailPage({ modelId }: ModelDetailPageProps) {
   });
   const showLccOuterOverlay = isLcc && !lccIframeModelLoaded && !lccIframeViewerErrored;
   const lccExpectedPath = detail?.id ? `/viewer/lcc/${detail.id}` : null;
-  const lccIframeKey = useMemo(
-    () => `${detail?.id ?? "pending"}-${detail?.viewerUrl || ""}`,
+  const lccDesktopIframeSrc = detail?.id ? `/viewer/lcc/${detail.id}` : null;
+  const lccMobileEmbedIframeSrc = detail?.id ? buildLccDetailEmbedIframeSrc(detail.id) : null;
+  const lccIframeKeyDesktop = useMemo(
+    () => `${detail?.id ?? "pending"}-desktop-${detail?.viewerUrl || ""}`,
+    [detail?.id, detail?.viewerUrl],
+  );
+  const lccIframeKeyMobile = useMemo(
+    () => `${detail?.id ?? "pending"}-mobile-embed-${detail?.viewerUrl || ""}`,
     [detail?.id, detail?.viewerUrl],
   );
 
@@ -507,60 +523,67 @@ export default function ModelDetailPage({ modelId }: ModelDetailPageProps) {
                 </div>
               </div>
 
-              {/* 手机端：预览卡片 + 进入横屏浏览（不内嵌 iframe，避免矮条 viewer 与黑边） */}
-              <div className="px-4 py-4 lg:hidden">
-                <div className="overflow-hidden rounded-xl border border-white/10 bg-[#101010]">
-                  <div className="relative aspect-[16/9] min-h-[220px] w-full overflow-hidden bg-black">
-                    {detail.coverUrl ? (
-                      <Image
-                        src={detail.coverUrl}
-                        alt={detail.title}
-                        fill
-                        sizes="(max-width: 1024px) 100vw, 520px"
-                        className="object-cover"
-                        priority
-                      />
-                    ) : (
-                      <div className="flex h-full min-h-[220px] items-center justify-center bg-[radial-gradient(circle_at_center,rgba(45,212,191,0.12),transparent_55%),#050505]">
-                        <Image
-                          src="/brand/model-loading-logo.png"
-                          alt=""
-                          width={240}
-                          height={160}
-                          className="h-auto w-[42%] max-w-[180px] opacity-80 [image-rendering:pixelated]"
-                        />
-                      </div>
-                    )}
-                    <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/75 via-black/15 to-transparent" />
-                    <div className="absolute left-3 top-3">
-                      <span
-                        className={`rounded-full border px-2 py-0.5 text-[11px] ${typeTagColor[detail.type] || "border-white/10 bg-white/10 text-white/60"}`}
-                      >
-                        {detail.type}
-                      </span>
+              {/* 手机端：竖屏内嵌模型预览（embed 模式）+ 进入横屏浏览增强入口 */}
+              <div className="space-y-3 px-4 py-3 lg:hidden">
+                <div className="relative h-[52dvh] min-h-[320px] max-h-[520px] w-full overflow-hidden rounded-xl border border-white/10 bg-black">
+                  {processingBlocked ? (
+                    <div className="flex h-full flex-col items-center justify-center gap-2 px-4 text-center">
+                      <p className="text-[14px] font-medium text-cyan-100">
+                        {detail.processingStatus === "failed" ? "解析失败" : "后台解析中"}
+                      </p>
+                      <p className="text-[12px] text-gray-500">{processingHint}</p>
                     </div>
-                  </div>
-                  <div className="space-y-3 p-4">
-                    <p className="text-[16px] font-medium leading-snug text-white">{detail.title}</p>
-                    <p className="text-[12px] leading-relaxed text-gray-500">
-                      手机端将以横屏方式打开模型，支持第一人称、枢轴、重置与帮助。
-                    </p>
-                    {processingBlocked ? (
-                      <div className="rounded-lg border border-cyan-500/20 bg-cyan-500/8 px-3 py-2.5 text-[12px] text-cyan-100/90">
-                        {processingHint || "模型尚未就绪，暂无法进入横屏浏览。"}
-                      </div>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={handleEnterLandscapeView}
-                        className="flex w-full items-center justify-center gap-2 rounded-xl border border-cyan-400/35 bg-cyan-950/50 px-4 py-3 text-[14px] font-medium text-cyan-50 transition-all hover:border-cyan-300/50 hover:bg-cyan-900/55 active:scale-[0.99]"
+                  ) : isLcc && lccMobileEmbedIframeSrc ? (
+                    <div
+                      className="relative h-full w-full"
+                      data-lcc-detail-mobile-embed="true"
+                      data-lcc-detail-model-loaded={lccIframeModelLoaded ? "true" : "false"}
+                      data-lcc-detail-show-overlay={showLccOuterOverlay ? "true" : "false"}
+                    >
+                      <iframe
+                        ref={lccIframeRef}
+                        key={lccIframeKeyMobile}
+                        src={lccMobileEmbedIframeSrc}
+                        className="h-full w-full border-0"
+                        allow="fullscreen"
+                        title={detail.title}
+                        tabIndex={0}
+                        onLoad={handleLccIframeLoad}
+                      />
+                      <div
+                        data-lcc-outer-overlay="true"
+                        className={
+                          showLccOuterOverlay
+                            ? "absolute inset-0 z-20 opacity-100 pointer-events-auto transition-opacity duration-300"
+                            : "absolute inset-0 z-20 opacity-0 pointer-events-none transition-opacity duration-300"
+                        }
                       >
-                        <Maximize2 className="h-4 w-4" />
-                        进入横屏浏览
-                      </button>
-                    )}
-                  </div>
+                        <ModelLoadingOverlay visible showText={false} />
+                      </div>
+                    </div>
+                  ) : viewerReady ? (
+                    <ModelViewerShell
+                      key={`${detail.id}-mobile-${viewerMountSeed}`}
+                      model={detail}
+                      onLaunchViewSaved={handleLaunchViewSaved}
+                    />
+                  ) : (
+                    <ModelLoadingOverlay visible showText={false} />
+                  )}
                 </div>
+                <p className="text-center text-[11px] leading-relaxed text-gray-500">
+                  竖屏可枢轴预览；完整第一人称与摇杆操作请进入横屏浏览。
+                </p>
+                {!processingBlocked && (
+                  <button
+                    type="button"
+                    onClick={handleEnterLandscapeView}
+                    className="flex w-full items-center justify-center gap-2 rounded-xl border border-cyan-400/35 bg-cyan-950/50 px-4 py-3 text-[14px] font-medium text-cyan-50 transition-all hover:border-cyan-300/50 hover:bg-cyan-900/55 active:scale-[0.99]"
+                  >
+                    <Maximize2 className="h-4 w-4" />
+                    进入横屏浏览
+                  </button>
+                )}
               </div>
 
               {/* 桌面端：内嵌 LCC iframe / ModelViewerShell（lg 及以上） */}
@@ -576,8 +599,8 @@ export default function ModelDetailPage({ modelId }: ModelDetailPageProps) {
                   >
                     <iframe
                       ref={lccIframeRef}
-                      key={lccIframeKey}
-                      src={`/viewer/lcc/${detail.id}`}
+                      key={lccIframeKeyDesktop}
+                      src={lccDesktopIframeSrc ?? undefined}
                       className="h-full w-full border-0"
                       allow="fullscreen"
                       title={detail.title}
