@@ -2,8 +2,8 @@
 
 /**
  * 组件名称：ModelLoadingOverlay
- * 组件用途：统一品牌模型 Loading（Logo 静态居中 + 进度条轨道 + 像素游标 + 百分比）
- * 主要功能：各场景共用同一视觉框架；进度条与小型像素游标共用轨道坐标系
+ * 组件用途：统一品牌模型 Loading（大 Logo 静态居中 + 稳定进度条 + 百分比）
+ * 主要功能：各场景共用同一视觉框架；仅负责视觉展示，不控制 Loading 显隐时机
  */
 
 import Image from "next/image";
@@ -20,66 +20,7 @@ interface ModelLoadingOverlayProps {
   visible?: boolean;
 }
 
-const RUNNER_FRAMES = [
-  [
-    "00110000",
-    "01111000",
-    "00110000",
-    "01111000",
-    "11110000",
-    "00111000",
-    "01101100",
-    "11000110",
-  ],
-  [
-    "00110000",
-    "01111000",
-    "00110000",
-    "00111000",
-    "01111000",
-    "00110000",
-    "01111000",
-    "11001100",
-  ],
-  [
-    "00110000",
-    "01111000",
-    "00110000",
-    "01111000",
-    "00111100",
-    "00111000",
-    "01101100",
-    "01100011",
-  ],
-  [
-    "00110000",
-    "01111000",
-    "00110000",
-    "00111100",
-    "01111000",
-    "00110000",
-    "01111000",
-    "00110011",
-  ],
-];
-
-const PIXEL_GLYPHS: Record<string, string[]> = {
-  "0": ["111", "101", "101", "101", "111"],
-  "1": ["010", "110", "010", "010", "111"],
-  "2": ["111", "001", "111", "100", "111"],
-  "3": ["111", "001", "111", "001", "111"],
-  "4": ["101", "101", "111", "001", "001"],
-  "5": ["111", "100", "111", "001", "111"],
-  "6": ["111", "100", "111", "101", "111"],
-  "7": ["111", "001", "001", "010", "010"],
-  "8": ["111", "101", "111", "101", "111"],
-  "9": ["111", "101", "111", "001", "111"],
-  "%": ["1001", "0001", "0010", "0100", "1001"],
-};
-
-const RUNNER_FRAME_MS = 140;
-
-/** 将进度规范到 0–100，供进度条与像素游标共用 */
+/** 将进度规范到 0–100，供进度条与百分比共用 */
 function toSafeProgressPercent(progress?: number, fallbackProgress = 0, hasRealProgress = false): number {
   const normalized = hasRealProgress ? clampProgress(progress) : fallbackProgress;
   const percent = Math.round(normalized * 100);
@@ -93,55 +34,6 @@ function clampProgress(progress?: number) {
   return progress ?? 0;
 }
 
-/** 小型像素游标（跟随进度条，非大 Logo） */
-function PixelRunner({ frame }: { frame: string[] }) {
-  return (
-    <div
-      aria-hidden="true"
-      className="grid h-5 w-5 grid-cols-8 gap-px [image-rendering:pixelated]"
-    >
-      {frame.flatMap((row, rowIndex) =>
-        row.split("").map((pixel, columnIndex) => (
-          <span
-            key={`${rowIndex}-${columnIndex}`}
-            className={pixel === "1" ? "h-[2px] w-[2px] bg-white" : "h-[2px] w-[2px] bg-transparent"}
-          />
-        )),
-      )}
-    </div>
-  );
-}
-
-function PixelPercent({ value }: { value: string }) {
-  return (
-    <div aria-hidden="true" className="flex items-start gap-1 [image-rendering:pixelated]">
-      {value.split("").map((char, charIndex) => {
-        const glyph = PIXEL_GLYPHS[char];
-        if (!glyph) return null;
-
-        return (
-          <div
-            key={`${char}-${charIndex}`}
-            className="grid gap-0.5"
-            style={{ gridTemplateColumns: `repeat(${glyph[0]?.length ?? 0}, minmax(0, 1fr))` }}
-          >
-            {glyph.flatMap((row, rowIndex) =>
-              row.split("").map((pixel, columnIndex) => (
-                <span
-                  key={`${charIndex}-${rowIndex}-${columnIndex}`}
-                  className={
-                    pixel === "1" ? "h-[3px] w-[3px] bg-white" : "h-[3px] w-[3px] bg-transparent"
-                  }
-                />
-              )),
-            )}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
 export function ModelLoadingOverlay({
   status = "loading",
   progress,
@@ -151,9 +43,8 @@ export function ModelLoadingOverlay({
   visible = true,
 }: ModelLoadingOverlayProps) {
   const [fallbackProgress, setFallbackProgress] = useState(0);
-  const [runnerFrameIndex, setRunnerFrameIndex] = useState(0);
   const hasRealProgress = Number.isFinite(progress);
-  /** 进度条与像素游标共用同一进度值（0–100） */
+  /** 进度条与百分比共用同一进度值（0–100） */
   const safeProgress = toSafeProgressPercent(progress, fallbackProgress, hasRealProgress);
   const progressPercent = safeProgress;
 
@@ -178,65 +69,45 @@ export function ModelLoadingOverlay({
     return () => window.clearInterval(timer);
   }, [hasRealProgress, status, visible]);
 
-  useEffect(() => {
-    if (!visible || status !== "loading") {
-      setRunnerFrameIndex(0);
-      return;
-    }
-
-    const timer = window.setInterval(() => {
-      setRunnerFrameIndex((value) => (value + 1) % RUNNER_FRAMES.length);
-    }, RUNNER_FRAME_MS);
-
-    return () => window.clearInterval(timer);
-  }, [status, visible]);
-
   return (
     <div
       role={status === "error" ? "alert" : "status"}
       aria-live="polite"
-      className={`absolute inset-0 z-10 flex items-center justify-center overflow-hidden bg-black px-4 py-8 transition-opacity duration-300 sm:px-6 ${
+      className={`absolute inset-0 z-10 flex items-center justify-center overflow-hidden bg-black px-5 py-8 transition-opacity duration-300 sm:px-8 ${
         visible ? "opacity-100" : "pointer-events-none opacity-0"
       }`}
     >
-      {/* 统一居中框架：Logo 静态 / 进度条轨道 / 游标 / 百分比 */}
-      <div className="flex w-full max-w-[min(72vw,320px)] flex-col items-center gap-5 sm:max-w-[360px] lg:max-w-[420px]">
-        <div className="flex w-full max-w-[min(56vw,200px)] items-center justify-center sm:max-w-[240px] lg:max-w-[280px]">
+      {/* 统一居中框架：大 Logo 静态居中，进度条和百分比保持独立稳定。 */}
+      <div className="flex w-full max-w-[min(80vw,360px)] flex-col items-center sm:max-w-[480px] lg:max-w-[520px]">
+        <div className="mb-7 flex w-full max-w-[min(76vw,340px)] items-center justify-center overflow-visible sm:mb-8 sm:max-w-[430px] lg:max-w-[480px]">
           <Image
             src="/brand/model-loading-logo.png"
             alt="数境空间 DIGIREALM SPACE"
             width={1536}
             height={1024}
-            sizes="(max-width: 640px) 200px, 280px"
+            sizes="(max-width: 640px) 340px, (max-width: 1024px) 430px, 480px"
             className="h-auto w-full object-contain [image-rendering:pixelated]"
             priority
           />
         </div>
 
-        <div className="w-full">
+        <div className="w-full" aria-label={`模型加载进度 ${progressPercent}%`}>
           <div
-            className="relative h-[18px] w-full overflow-visible"
+            className="h-[28px] w-full overflow-hidden rounded-[8px] border-[3px] border-white bg-black p-[3px] shadow-[0_0_24px_rgba(255,255,255,0.08)]"
             style={{ "--loading-progress": `${safeProgress}%` } as React.CSSProperties}
           >
-            <div className="absolute inset-0 overflow-hidden rounded-[6px] border-[3px] border-white bg-black p-[2px]">
-              <div className="relative h-full overflow-hidden rounded-[3px] bg-black">
-                <div
-                  className="h-full bg-white transition-[width] duration-300 ease-linear"
-                  style={{ width: "var(--loading-progress)" }}
-                />
-              </div>
-            </div>
-
-            <div
-              className="pointer-events-none absolute left-[var(--loading-progress)] top-[calc(100%+8px)] z-[1] -translate-x-1/2 transition-[left] duration-300 ease-linear"
-              aria-hidden="true"
-            >
-              <PixelRunner frame={RUNNER_FRAMES[runnerFrameIndex] ?? RUNNER_FRAMES[0]} />
+            <div className="h-full overflow-hidden rounded-[4px] bg-black">
+              <div
+                className="h-full bg-white transition-[width] duration-300 ease-linear"
+                style={{ width: "var(--loading-progress)" }}
+              />
             </div>
           </div>
 
-          <div className="mt-7 flex w-full justify-center">
-            <PixelPercent value={`${progressPercent}%`} />
+          <div className="mt-4 flex w-full justify-center">
+            <span className="font-mono text-[13px] font-semibold leading-none tracking-normal text-white/85 tabular-nums sm:text-[14px]">
+              {progressPercent}%
+            </span>
           </div>
         </div>
 

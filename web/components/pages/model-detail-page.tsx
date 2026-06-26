@@ -134,16 +134,21 @@ export default function ModelDetailPage({ modelId }: ModelDetailPageProps) {
   const [deletePending, setDeletePending] = useState(false);
   const [showTraining, setShowTraining] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
+  const [isDesktopLayout, setIsDesktopLayout] = useState<boolean | null>(null);
   const viewedRef = useRef<number | null>(null);
 
   const modelViewerAreaRef = useRef<HTMLDivElement | null>(null);
   const viewerHostRef = useRef<HTMLDivElement | null>(null);
   const [viewerReady, setViewerReady] = useState(false);
   const [viewerMountSeed, setViewerMountSeed] = useState(0);
-  const [lccIframeModelLoaded, setLccIframeModelLoaded] = useState(false);
-  const [lccIframeViewerErrored, setLccIframeViewerErrored] = useState(false);
-  const lccIframeRef = useRef<HTMLIFrameElement | null>(null);
-  const lccIframeVisibilityPollRef = useRef<number | null>(null);
+  const [desktopLccIframeModelLoaded, setDesktopLccIframeModelLoaded] = useState(false);
+  const [desktopLccIframeViewerErrored, setDesktopLccIframeViewerErrored] = useState(false);
+  const [mobileLccIframeModelLoaded, setMobileLccIframeModelLoaded] = useState(false);
+  const [mobileLccIframeViewerErrored, setMobileLccIframeViewerErrored] = useState(false);
+  const desktopLccIframeRef = useRef<HTMLIFrameElement | null>(null);
+  const mobileLccIframeRef = useRef<HTMLIFrameElement | null>(null);
+  const desktopLccIframeVisibilityPollRef = useRef<number | null>(null);
+  const mobileLccIframeVisibilityPollRef = useRef<number | null>(null);
 
   const requireAuth = useCallback(() => {
     toast.error("请先登录后再操作");
@@ -203,6 +208,16 @@ export default function ModelDetailPage({ modelId }: ModelDetailPageProps) {
   }, [detail, idValid, numericId]);
 
   useEffect(() => {
+    const desktopQuery = window.matchMedia("(min-width: 1024px)");
+    const updateLayout = () => setIsDesktopLayout(desktopQuery.matches);
+
+    updateLayout();
+    desktopQuery.addEventListener("change", updateLayout);
+
+    return () => desktopQuery.removeEventListener("change", updateLayout);
+  }, []);
+
+  useEffect(() => {
     setViewerReady(false);
 
     let disposed = false;
@@ -253,7 +268,7 @@ export default function ModelDetailPage({ modelId }: ModelDetailPageProps) {
       disposed = true;
       setViewerReady(false);
     };
-  }, [detail?.id, detail?.viewerUrl, detail?.fileFormat]);
+  }, [detail?.id, detail?.viewerUrl, detail?.fileFormat, isDesktopLayout]);
 
   useEffect(() => {
     if (!detail) return;
@@ -267,7 +282,10 @@ export default function ModelDetailPage({ modelId }: ModelDetailPageProps) {
     fileFormat: detail?.fileFormat ?? "",
     viewerUrl: detail?.viewerUrl ?? "",
   });
-  const showLccOuterOverlay = isLcc && !lccIframeModelLoaded && !lccIframeViewerErrored;
+  const showDesktopLccOuterOverlay =
+    isLcc && !desktopLccIframeModelLoaded && !desktopLccIframeViewerErrored;
+  const showMobileLccOuterOverlay =
+    isLcc && !mobileLccIframeModelLoaded && !mobileLccIframeViewerErrored;
   const lccExpectedPath = detail?.id ? `/viewer/lcc/${detail.id}` : null;
   const lccDesktopIframeSrc = detail?.id ? `/viewer/lcc/${detail.id}` : null;
   const lccMobileEmbedIframeSrc = detail?.id ? buildLccDetailEmbedIframeSrc(detail.id) : null;
@@ -308,77 +326,80 @@ export default function ModelDetailPage({ modelId }: ModelDetailPageProps) {
     }
   }, []);
 
-  useEffect(() => {
-    if (!detail || !isLcc) return;
-
-    if (lccIframeVisibilityPollRef.current !== null) {
-      window.clearInterval(lccIframeVisibilityPollRef.current);
-      lccIframeVisibilityPollRef.current = null;
+  const clearLccIframePoll = useCallback((pollRef: { current: number | null }) => {
+    if (pollRef.current !== null) {
+      window.clearInterval(pollRef.current);
+      pollRef.current = null;
     }
-    setLccIframeModelLoaded(false);
-    setLccIframeViewerErrored(false);
+  }, []);
+
+  useEffect(() => {
+    clearLccIframePoll(desktopLccIframeVisibilityPollRef);
+    clearLccIframePoll(mobileLccIframeVisibilityPollRef);
+    setDesktopLccIframeModelLoaded(false);
+    setDesktopLccIframeViewerErrored(false);
+    setMobileLccIframeModelLoaded(false);
+    setMobileLccIframeViewerErrored(false);
 
     return () => {
-      if (lccIframeVisibilityPollRef.current !== null) {
-        window.clearInterval(lccIframeVisibilityPollRef.current);
-        lccIframeVisibilityPollRef.current = null;
-      }
+      clearLccIframePoll(desktopLccIframeVisibilityPollRef);
+      clearLccIframePoll(mobileLccIframeVisibilityPollRef);
     };
-  }, [detail, isLcc]);
+  }, [clearLccIframePoll, detail?.id, detail?.viewerUrl, isDesktopLayout, isLcc]);
 
-  const handleLccIframeLoad = useCallback(() => {
-    // iframe 加载完成后自动聚焦，使其接收键盘事件（WASD 漫游）
-    lccIframeRef.current?.focus({ preventScroll: true });
-    setTimeout(() => lccIframeRef.current?.focus({ preventScroll: true }), 600);
+  const handleLccIframeLoad = useCallback(
+    (target: "desktop" | "mobile") => {
+      if (!lccExpectedPath) return;
 
-    if (lccIframeVisibilityPollRef.current !== null) {
-      window.clearInterval(lccIframeVisibilityPollRef.current);
-      lccIframeVisibilityPollRef.current = null;
-    }
-    setLccIframeModelLoaded(false);
-    setLccIframeViewerErrored(false);
+      const iframeRef = target === "mobile" ? mobileLccIframeRef : desktopLccIframeRef;
+      const pollRef =
+        target === "mobile" ? mobileLccIframeVisibilityPollRef : desktopLccIframeVisibilityPollRef;
+      const setModelLoaded =
+        target === "mobile" ? setMobileLccIframeModelLoaded : setDesktopLccIframeModelLoaded;
+      const setViewerErrored =
+        target === "mobile" ? setMobileLccIframeViewerErrored : setDesktopLccIframeViewerErrored;
 
-    const pollStartedAt = Date.now();
+      // iframe 加载完成后自动聚焦；手机详情页和桌面详情页分别聚焦自己的 iframe。
+      iframeRef.current?.focus({ preventScroll: true });
+      setTimeout(() => iframeRef.current?.focus({ preventScroll: true }), 600);
 
-    const pollIframeModelLoaded = () => {
-      const frame = lccIframeRef.current;
-      const iframeDoc = frame?.contentDocument;
-      const childLocation = iframeDoc?.location?.pathname ?? null;
-      if (!iframeDoc || childLocation !== lccExpectedPath) return;
+      clearLccIframePoll(pollRef);
+      setModelLoaded(false);
+      setViewerErrored(false);
 
-      const childRoot = iframeDoc.querySelector("[data-lcc-viewer-status]");
-      const childViewerStatus = childRoot?.getAttribute("data-lcc-viewer-status");
-      const childFirstFrame = childRoot?.getAttribute("data-lcc-first-frame") === "true";
-      if (childViewerStatus === "error") {
-        setLccIframeViewerErrored(true);
-        if (lccIframeVisibilityPollRef.current !== null) {
-          window.clearInterval(lccIframeVisibilityPollRef.current);
-          lccIframeVisibilityPollRef.current = null;
+      const pollStartedAt = Date.now();
+
+      const pollIframeModelLoaded = () => {
+        const frame = iframeRef.current;
+        const iframeDoc = frame?.contentDocument;
+        const childLocation = iframeDoc?.location?.pathname ?? null;
+        if (!iframeDoc || childLocation !== lccExpectedPath) return;
+
+        const childRoot = iframeDoc.querySelector("[data-lcc-viewer-status]");
+        const childViewerStatus = childRoot?.getAttribute("data-lcc-viewer-status");
+        const childFirstFrame = childRoot?.getAttribute("data-lcc-first-frame") === "true";
+        if (childViewerStatus === "error") {
+          setViewerErrored(true);
+          clearLccIframePoll(pollRef);
+          return;
         }
-        return;
-      }
-      if (!childRoot || !childFirstFrame) {
-        if (Date.now() - pollStartedAt > 30000) {
-          setLccIframeModelLoaded(true);
-          if (lccIframeVisibilityPollRef.current !== null) {
-            window.clearInterval(lccIframeVisibilityPollRef.current);
-            lccIframeVisibilityPollRef.current = null;
+        if (!childRoot || !childFirstFrame) {
+          if (Date.now() - pollStartedAt > 30000) {
+            setModelLoaded(true);
+            clearLccIframePoll(pollRef);
           }
+          return;
         }
-        return;
-      }
 
-      setLccIframeModelLoaded(true);
-      if (lccIframeVisibilityPollRef.current !== null) {
-        window.clearInterval(lccIframeVisibilityPollRef.current);
-        lccIframeVisibilityPollRef.current = null;
-      }
-    };
+        setModelLoaded(true);
+        clearLccIframePoll(pollRef);
+      };
 
-    lccIframeVisibilityPollRef.current = window.setInterval(() => {
       pollIframeModelLoaded();
-    }, 250);
-  }, [lccExpectedPath]);
+      pollRef.current = window.setInterval(pollIframeModelLoaded, 250);
+    },
+    [clearLccIframePoll, lccExpectedPath],
+  );
 
   useEffect(() => {
     if (!confirmOpen) return;
@@ -523,37 +544,36 @@ export default function ModelDetailPage({ modelId }: ModelDetailPageProps) {
                 </div>
               </div>
 
-              {/* 手机端：竖屏内嵌模型预览（embed 模式）+ 进入横屏浏览增强入口 */}
-              <div className="space-y-3 px-4 py-3 lg:hidden">
-                <div className="relative h-[52dvh] min-h-[320px] max-h-[520px] w-full overflow-hidden rounded-xl border border-white/10 bg-black">
-                  {processingBlocked ? (
-                    <div className="flex h-full flex-col items-center justify-center gap-2 px-4 text-center">
-                      <p className="text-[14px] font-medium text-cyan-100">
-                        {detail.processingStatus === "failed" ? "解析失败" : "后台解析中"}
-                      </p>
-                      <p className="text-[12px] text-gray-500">{processingHint}</p>
-                    </div>
-                  ) : isLcc && lccMobileEmbedIframeSrc ? (
+              {isDesktopLayout === null ? (
+                <div className="relative min-h-[320px] flex-1 overflow-hidden lg:h-full lg:min-h-0">
+                  <ModelLoadingOverlay visible showText={false} />
+                </div>
+              ) : isDesktopLayout ? (
+                /* 桌面端：内嵌 LCC iframe / ModelViewerShell */
+                <div
+                  ref={viewerHostRef}
+                  className="relative min-h-0 flex-1 overflow-hidden lg:h-full"
+                >
+                  {isLcc ? (
                     <div
                       className="relative h-full w-full"
-                      data-lcc-detail-mobile-embed="true"
-                      data-lcc-detail-model-loaded={lccIframeModelLoaded ? "true" : "false"}
-                      data-lcc-detail-show-overlay={showLccOuterOverlay ? "true" : "false"}
+                      data-lcc-detail-model-loaded={desktopLccIframeModelLoaded ? "true" : "false"}
+                      data-lcc-detail-show-overlay={showDesktopLccOuterOverlay ? "true" : "false"}
                     >
                       <iframe
-                        ref={lccIframeRef}
-                        key={lccIframeKeyMobile}
-                        src={lccMobileEmbedIframeSrc}
+                        ref={desktopLccIframeRef}
+                        key={lccIframeKeyDesktop}
+                        src={lccDesktopIframeSrc ?? undefined}
                         className="h-full w-full border-0"
                         allow="fullscreen"
                         title={detail.title}
                         tabIndex={0}
-                        onLoad={handleLccIframeLoad}
+                        onLoad={() => handleLccIframeLoad("desktop")}
                       />
                       <div
                         data-lcc-outer-overlay="true"
                         className={
-                          showLccOuterOverlay
+                          showDesktopLccOuterOverlay
                             ? "absolute inset-0 z-20 opacity-100 pointer-events-auto transition-opacity duration-300"
                             : "absolute inset-0 z-20 opacity-0 pointer-events-none transition-opacity duration-300"
                         }
@@ -563,7 +583,7 @@ export default function ModelDetailPage({ modelId }: ModelDetailPageProps) {
                     </div>
                   ) : viewerReady ? (
                     <ModelViewerShell
-                      key={`${detail.id}-mobile-${viewerMountSeed}`}
+                      key={`${detail.id}-${viewerMountSeed}`}
                       model={detail}
                       onLaunchViewSaved={handleLaunchViewSaved}
                     />
@@ -571,63 +591,70 @@ export default function ModelDetailPage({ modelId }: ModelDetailPageProps) {
                     <ModelLoadingOverlay visible showText={false} />
                   )}
                 </div>
-                <p className="text-center text-[11px] leading-relaxed text-gray-500">
-                  竖屏可枢轴预览；完整第一人称与摇杆操作请进入横屏浏览。
-                </p>
-                {!processingBlocked && (
-                  <button
-                    type="button"
-                    onClick={handleEnterLandscapeView}
-                    className="flex w-full items-center justify-center gap-2 rounded-xl border border-cyan-400/35 bg-cyan-950/50 px-4 py-3 text-[14px] font-medium text-cyan-50 transition-all hover:border-cyan-300/50 hover:bg-cyan-900/55 active:scale-[0.99]"
-                  >
-                    <Maximize2 className="h-4 w-4" />
-                    进入横屏浏览
-                  </button>
-                )}
-              </div>
-
-              {/* 桌面端：内嵌 LCC iframe / ModelViewerShell（lg 及以上） */}
-              <div
-                ref={viewerHostRef}
-                className="relative hidden min-h-0 flex-1 overflow-hidden lg:block lg:h-full"
-              >
-                {isLcc ? (
-                  <div
-                    className="relative h-full w-full"
-                    data-lcc-detail-model-loaded={lccIframeModelLoaded ? "true" : "false"}
-                    data-lcc-detail-show-overlay={showLccOuterOverlay ? "true" : "false"}
-                  >
-                    <iframe
-                      ref={lccIframeRef}
-                      key={lccIframeKeyDesktop}
-                      src={lccDesktopIframeSrc ?? undefined}
-                      className="h-full w-full border-0"
-                      allow="fullscreen"
-                      title={detail.title}
-                      tabIndex={0}
-                      onLoad={handleLccIframeLoad}
-                    />
-                    <div
-                      data-lcc-outer-overlay="true"
-                      className={
-                        showLccOuterOverlay
-                          ? "absolute inset-0 z-20 opacity-100 pointer-events-auto transition-opacity duration-300"
-                          : "absolute inset-0 z-20 opacity-0 pointer-events-none transition-opacity duration-300"
-                      }
-                    >
+              ) : (
+                /* 手机端：竖屏内嵌模型预览（embed 模式）+ 进入横屏浏览增强入口 */
+                <div className="space-y-3 px-4 py-3">
+                  <div className="relative h-[52dvh] min-h-[320px] max-h-[520px] w-full overflow-hidden rounded-xl border border-white/10 bg-black">
+                    {processingBlocked ? (
+                      <div className="flex h-full flex-col items-center justify-center gap-2 px-4 text-center">
+                        <p className="text-[14px] font-medium text-cyan-100">
+                          {detail.processingStatus === "failed" ? "解析失败" : "后台解析中"}
+                        </p>
+                        <p className="text-[12px] text-gray-500">{processingHint}</p>
+                      </div>
+                    ) : isLcc && lccMobileEmbedIframeSrc ? (
+                      <div
+                        className="relative h-full w-full"
+                        data-lcc-detail-mobile-embed="true"
+                        data-lcc-detail-model-loaded={mobileLccIframeModelLoaded ? "true" : "false"}
+                        data-lcc-detail-show-overlay={showMobileLccOuterOverlay ? "true" : "false"}
+                      >
+                        <iframe
+                          ref={mobileLccIframeRef}
+                          key={lccIframeKeyMobile}
+                          src={lccMobileEmbedIframeSrc}
+                          className="h-full w-full border-0"
+                          allow="fullscreen"
+                          title={detail.title}
+                          tabIndex={0}
+                          onLoad={() => handleLccIframeLoad("mobile")}
+                        />
+                        <div
+                          data-lcc-outer-overlay="true"
+                          className={
+                            showMobileLccOuterOverlay
+                              ? "absolute inset-0 z-20 opacity-100 pointer-events-auto transition-opacity duration-300"
+                              : "absolute inset-0 z-20 opacity-0 pointer-events-none transition-opacity duration-300"
+                          }
+                        >
+                          <ModelLoadingOverlay visible showText={false} />
+                        </div>
+                      </div>
+                    ) : viewerReady ? (
+                      <ModelViewerShell
+                        key={`${detail.id}-mobile-${viewerMountSeed}`}
+                        model={detail}
+                        onLaunchViewSaved={handleLaunchViewSaved}
+                      />
+                    ) : (
                       <ModelLoadingOverlay visible showText={false} />
-                    </div>
+                    )}
                   </div>
-                ) : viewerReady ? (
-                  <ModelViewerShell
-                    key={`${detail.id}-${viewerMountSeed}`}
-                    model={detail}
-                    onLaunchViewSaved={handleLaunchViewSaved}
-                  />
-                ) : (
-                  <ModelLoadingOverlay visible showText={false} />
-                )}
-              </div>
+                  <p className="text-center text-[11px] leading-relaxed text-gray-500">
+                    竖屏可枢轴预览；完整第一人称与摇杆操作请进入横屏浏览。
+                  </p>
+                  {!processingBlocked && (
+                    <button
+                      type="button"
+                      onClick={handleEnterLandscapeView}
+                      className="flex w-full items-center justify-center gap-2 rounded-xl border border-cyan-400/35 bg-cyan-950/50 px-4 py-3 text-[14px] font-medium text-cyan-50 transition-all hover:border-cyan-300/50 hover:bg-cyan-900/55 active:scale-[0.99]"
+                    >
+                      <Maximize2 className="h-4 w-4" />
+                      进入横屏浏览
+                    </button>
+                  )}
+                </div>
+              )}
             </>
           ) : (
             <div className="relative flex min-h-[260px] items-center justify-center lg:min-h-[400px] lg:flex-1">
