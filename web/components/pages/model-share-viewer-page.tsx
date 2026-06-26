@@ -365,14 +365,14 @@ export default function ModelShareViewerPage({ modelId }: { modelId: string }) {
         </button>
       </div>
 
-      <div ref={viewerContainerRef} className="relative min-h-0 flex-1 overflow-hidden landscape:h-full">
+      <div ref={viewerContainerRef} className="relative min-h-0 flex-1 overflow-hidden bg-black">
         {renderViewer()}
       </div>
     </>
   );
 
   const desktopShareShellRootClass =
-    "relative flex h-full w-full max-h-[100dvh] max-w-[100dvw] flex-col overflow-hidden bg-black landscape:max-h-dvh landscape:max-w-dvw";
+    "flex h-[100dvh] w-[100dvw] flex-col overflow-hidden bg-black";
 
   const mobileShareShellRootClass = "h-full w-full overflow-hidden bg-black";
 
@@ -410,7 +410,7 @@ export default function ModelShareViewerPage({ modelId }: { modelId: string }) {
     <div
       id="model-share-viewer-fullscreen-root"
       ref={fullscreenTargetRef}
-      className={`fixed inset-0 z-50 ${desktopShareShellRootClass}`}
+      className={`fixed inset-0 z-[9999] ${desktopShareShellRootClass}`}
       data-share-mobile-shell="false"
     >
       {desktopShareShellContent}
