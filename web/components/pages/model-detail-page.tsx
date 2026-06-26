@@ -299,7 +299,7 @@ export default function ModelDetailPage({ modelId }: ModelDetailPageProps) {
   );
 
   const handleViewerFullscreen = useCallback(async () => {
-    const viewerArea = modelViewerAreaRef.current;
+    const viewerArea = viewerHostRef.current;
     if (!viewerArea) return;
 
     try {

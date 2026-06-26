@@ -73,10 +73,12 @@ function processingStatusText(status: ModelDetail["processingStatus"]) {
 }
 
 export function ModelViewerShell({ model, onLaunchViewSaved }: ModelViewerShellProps) {
-  const viewerViewportRef = useRef<HTMLDivElement | null>(null);
+  const shellRootRef = useRef<HTMLDivElement | null>(null);
+  const viewerFullscreenTargetRef = useRef<HTMLDivElement | null>(null);
   const viewerHandleRef = useRef<ModelViewerHandle | null>(null);
   const [viewerResetSeed, setViewerResetSeed] = useState(0);
   const [isHelpOpen, setIsHelpOpen] = useState(false);
+  const [isExternalFullscreen, setIsExternalFullscreen] = useState(false);
   const [movementInput, setMovementInput] = useState<ModelViewerMovementInput>(EMPTY_MOVEMENT_INPUT);
   const [moveSpeedMultiplier, setMoveSpeedMultiplier] = useState(1);
   const [saveLaunchViewPending, setSaveLaunchViewPending] = useState(false);
@@ -100,7 +102,7 @@ export function ModelViewerShell({ model, onLaunchViewSaved }: ModelViewerShellP
   }, []);
 
   const handleFullscreen = () => {
-    const element = viewerViewportRef.current;
+    const element = viewerFullscreenTargetRef.current;
     if (!element) return;
 
     if (document.fullscreenElement === element) {
@@ -358,6 +360,27 @@ export function ModelViewerShell({ model, onLaunchViewSaved }: ModelViewerShellP
     viewerHandleRef.current?.setControlMode?.(controlMode);
   }, [controlMode]);
 
+  useEffect(() => {
+    const syncExternalFullscreen = () => {
+      const fullscreenElement = document.fullscreenElement;
+      const shellRoot = shellRootRef.current;
+      const viewerTarget = viewerFullscreenTargetRef.current;
+
+      setIsExternalFullscreen(
+        Boolean(
+          fullscreenElement &&
+          shellRoot &&
+          fullscreenElement !== viewerTarget &&
+          fullscreenElement.contains(shellRoot),
+        ),
+      );
+    };
+
+    syncExternalFullscreen();
+    document.addEventListener("fullscreenchange", syncExternalFullscreen);
+    return () => document.removeEventListener("fullscreenchange", syncExternalFullscreen);
+  }, []);
+
   const renderViewer = () => {
     switch (viewerKind) {
       case "lcc":
@@ -409,18 +432,26 @@ export function ModelViewerShell({ model, onLaunchViewSaved }: ModelViewerShellP
   };
 
   return (
-    <div className="flex h-full flex-col bg-[#0d0d0d]">
-      <div ref={viewerViewportRef} className="relative min-h-[360px] flex-1 overflow-hidden lg:min-h-[520px]">
-        {renderViewer()}
+    <div ref={shellRootRef} className="flex h-full flex-col bg-[#0d0d0d]">
+      <div className="relative min-h-[360px] flex-1 overflow-hidden lg:min-h-[520px]">
+        <div ref={viewerFullscreenTargetRef} className="h-full w-full bg-[#0d0d0d]">
+          {renderViewer()}
+        </div>
         <ModelViewerHelp
-          open={isLccViewer && isHelpOpen}
+          open={isLccViewer && isHelpOpen && !isExternalFullscreen}
           onClose={() => {
             clearMovementState();
             setIsHelpOpen(false);
           }}
           controlMode={controlMode}
         />
-        <div className="pointer-events-none absolute bottom-4 left-4 z-20">
+        <div
+          className={
+            isExternalFullscreen
+              ? "hidden"
+              : "pointer-events-none absolute bottom-4 left-4 z-20"
+          }
+        >
           <div className="pointer-events-auto">
             <ModelViewerToolbar
               capabilities={viewerCapabilities}

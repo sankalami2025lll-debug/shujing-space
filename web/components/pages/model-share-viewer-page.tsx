@@ -93,6 +93,14 @@ export default function ModelShareViewerPage({ modelId }: { modelId: string }) {
   const lccIframeKey = `${detail?.id ?? "pending"}-${detail?.viewerUrl || ""}-${lccIframeSrc ?? ""}`;
   const showLccOuterOverlay = isLcc && !lccIframeModelLoaded && !lccIframeViewerErrored;
 
+  const getFullscreenTarget = useCallback(() => {
+    if (showMobileShareShell) {
+      return fullscreenTargetRef.current;
+    }
+
+    return viewerContainerRef.current;
+  }, [showMobileShareShell]);
+
   useEffect(() => {
     if (!idValid) {
       setDetailLoading(false);
@@ -129,7 +137,7 @@ export default function ModelShareViewerPage({ modelId }: { modelId: string }) {
   }, [idValid, numericId]);
 
   const tryAutoFullscreen = useCallback(async () => {
-    const el = fullscreenTargetRef.current;
+    const el = getFullscreenTarget();
     if (!el) return;
 
     try {
@@ -149,7 +157,7 @@ export default function ModelShareViewerPage({ modelId }: { modelId: string }) {
     } finally {
       setAttemptedAutoFullscreen(true);
     }
-  }, [showMobileShareShell]);
+  }, [getFullscreenTarget, showMobileShareShell]);
 
   useEffect(() => {
     if (!detail || detail.processingStatus !== "ready") return;
@@ -180,7 +188,7 @@ export default function ModelShareViewerPage({ modelId }: { modelId: string }) {
   }, [attemptedAutoFullscreen, showFullscreenButton]);
 
   const handleManualFullscreen = useCallback(async () => {
-    const el = fullscreenTargetRef.current;
+    const el = getFullscreenTarget();
     if (!el) return;
 
     try {
@@ -195,7 +203,7 @@ export default function ModelShareViewerPage({ modelId }: { modelId: string }) {
     } catch {
       setShowFullscreenButton(true);
     }
-  }, []);
+  }, [getFullscreenTarget]);
 
   const handleLccIframeLoad = useCallback(() => {
     lccIframeRef.current?.focus({ preventScroll: true });
