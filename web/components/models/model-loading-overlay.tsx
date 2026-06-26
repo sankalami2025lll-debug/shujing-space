@@ -169,7 +169,7 @@ export function ModelLoadingOverlay({
             alt="数境空间"
             width={616}
             height={490}
-            className="block h-auto w-[min(92vw,680px)] object-contain [image-rendering:pixelated] md:w-[min(78vw,1000px)]"
+            className="block h-auto w-[clamp(140px,28vw,190px)] object-contain [image-rendering:pixelated] md:w-[clamp(180px,16vw,260px)]"
             draggable={false}
           />
         </div>
