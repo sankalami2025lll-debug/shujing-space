@@ -510,17 +510,17 @@ export default function ModelDetailPage({ modelId }: ModelDetailPageProps) {
   }, [detail, router]);
 
   return (
-    <div className="min-h-[100dvh] bg-[#0a0a0a] text-white lg:h-[calc(100dvh-72px)] lg:overflow-hidden">
-      <div className="flex flex-col lg:h-full lg:min-h-0 lg:flex-row">
+    <div className="min-h-[calc(100dvh-64px)] bg-[#0a0a0a] text-white md:min-h-[calc(100dvh-72px)] lg:h-[calc(100dvh-72px)] lg:min-h-0 lg:overflow-hidden">
+      <div className="flex flex-col lg:h-full lg:min-h-0 lg:flex-row lg:overflow-hidden">
         {/* 左侧 Viewer / 手机预览区 */}
         <div
           ref={modelViewerAreaRef}
           id="model-viewer-area"
-          className="relative flex flex-col bg-[#0d0d0d] border-b border-white/10 lg:h-full lg:min-h-0 lg:flex-1 lg:border-b-0 lg:border-r"
+          className="relative flex flex-col bg-[#0d0d0d] border-b border-white/10 lg:h-full lg:min-h-0 lg:flex-1 lg:overflow-hidden lg:border-b-0 lg:border-r"
         >
           {detailExists ? (
             <>
-              <div className="flex items-center justify-between px-4 h-12 flex-shrink-0 border-b border-white/[0.06] bg-[#0d0d0d] z-10">
+              <div className="flex h-12 shrink-0 items-center justify-between border-b border-white/[0.06] bg-[#0d0d0d] px-4 z-10">
                 <Link
                   href="/models"
                   className="flex items-center gap-2 text-[13px] text-gray-400 hover:text-white transition-colors"
@@ -679,7 +679,7 @@ export default function ModelDetailPage({ modelId }: ModelDetailPageProps) {
         {/* 右侧信息栏 — 始终渲染，不随 viewer 状态变化 */}
         <div
           id="model-info-panel"
-          className="w-full flex-shrink-0 lg:h-full lg:min-h-0 lg:w-80 lg:flex-shrink-0 lg:overflow-y-auto"
+          className="w-full flex-shrink-0 lg:h-full lg:min-h-0 lg:w-80 lg:flex-shrink-0 lg:overflow-y-auto lg:overscroll-contain"
         >
           {detailLoading || !detail ? (
             <RightPanelSkeleton />
