@@ -163,21 +163,21 @@ export function ModelLoadingOverlay({
       }`}
     >
       {/* 统一居中框架：Logo、进度条、百分比、小人组成紧凑品牌 Loading。 */}
-      <div className="flex w-full max-w-[min(96vw,640px)] flex-col items-center">
-        <div className="mb-2.5 flex w-full max-w-[min(78vw,320px)] items-center justify-center overflow-visible sm:max-w-[480px] lg:max-w-[560px]">
+      <div className="flex w-full max-w-[min(96vw,1100px)] flex-col items-center">
+        <div className="mb-0.5 flex w-full max-w-[min(92vw,640px)] items-center justify-center overflow-visible sm:max-w-[900px] lg:max-w-[1000px]">
           <Image
             src="/brand/model-loading-logo.png"
             alt="数境空间 DIGIREALM SPACE"
             width={1536}
             height={1024}
-            sizes="(max-width: 640px) 320px, (max-width: 1024px) 480px, 560px"
+            sizes="(max-width: 640px) 92vw, (max-width: 1024px) 900px, 1000px"
             className="h-auto w-full object-contain [image-rendering:pixelated]"
             priority
           />
         </div>
 
         <div className="flex w-full flex-col items-center" aria-label={`模型加载进度 ${progressPercent}%`}>
-          <div className="grid w-[min(90vw,560px)] max-w-full grid-cols-[minmax(0,1fr)_3.5ch] items-start gap-2.5 sm:w-[540px] sm:gap-3 lg:w-[560px]">
+          <div className="relative mx-auto w-[min(78vw,340px)] sm:w-[500px] lg:w-[520px]">
             <div
               className="relative h-[18px] w-full overflow-visible"
               style={
@@ -196,6 +196,10 @@ export function ModelLoadingOverlay({
                 </div>
               </div>
 
+              <span className="pointer-events-none absolute right-2 top-1/2 z-[2] flex -translate-y-1/2 items-center justify-end font-mono text-[10px] font-semibold leading-none tracking-normal text-white tabular-nums mix-blend-difference sm:hidden">
+                {progressPercent}%
+              </span>
+
               <div
                 className="pointer-events-none absolute left-[var(--runner-progress)] top-full z-[1] mt-2 -translate-x-1/2 transition-[left] duration-300 ease-linear"
                 aria-hidden="true"
@@ -204,7 +208,7 @@ export function ModelLoadingOverlay({
               </div>
             </div>
 
-            <span className="flex h-[18px] min-w-[3.5ch] items-center justify-end font-mono text-[13px] font-semibold leading-none tracking-normal text-white/88 tabular-nums sm:text-[14px]">
+            <span className="absolute left-full top-1/2 ml-3 hidden h-[18px] -translate-y-1/2 items-center justify-start font-mono text-[13px] font-semibold leading-none tracking-normal text-white/88 tabular-nums sm:flex sm:text-[14px]">
               {progressPercent}%
             </span>
           </div>
