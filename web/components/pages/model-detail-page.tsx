@@ -1,7 +1,15 @@
 "use client";
 
+/**
+ * 页面名称：模型详情页 ModelDetailPage
+ * 页面用途：官网模型详情 /models/[id]；桌面内嵌 viewer，手机端预览 + 跳转横屏分享页
+ * 主要功能：模型浏览、收藏、分享、编辑/删除；手机端「进入横屏浏览」→ /models/[id]/view
+ * 对应文档：页面功能注释文档/06_模型详情页_ModelDetail.md
+ */
+
 import { useState, useEffect, useCallback, useRef, useMemo, type MouseEvent } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import { useRouter } from "next/navigation";
 import {
   Share2,
@@ -15,6 +23,7 @@ import {
   Trash2,
   Edit,
   X,
+  Maximize2,
 } from "lucide-react";
 import { toast } from "sonner";
 import { ModelLoadingOverlay } from "@/components/models/model-loading-overlay";
@@ -457,14 +466,20 @@ export default function ModelDetailPage({ modelId }: ModelDetailPageProps) {
     void handleShare();
   };
 
+  /** 手机端横屏沉浸式浏览入口（复用已封板的 /models/[id]/view 分享页） */
+  const handleEnterLandscapeView = useCallback(() => {
+    if (!detail) return;
+    router.push(`/models/${detail.id}/view`);
+  }, [detail, router]);
+
   return (
     <div className="min-h-[100dvh] bg-[#0a0a0a] text-white lg:h-[calc(100dvh-72px)] lg:overflow-hidden">
       <div className="flex flex-col lg:h-full lg:min-h-0 lg:flex-row">
-        {/* 左侧 Viewer */}
+        {/* 左侧 Viewer / 手机预览区 */}
         <div
           ref={modelViewerAreaRef}
           id="model-viewer-area"
-          className="relative flex flex-1 flex-col bg-[#0d0d0d] border-b border-white/10 lg:h-full lg:min-h-0 lg:border-b-0 lg:border-r"
+          className="relative flex flex-col bg-[#0d0d0d] border-b border-white/10 lg:h-full lg:min-h-0 lg:flex-1 lg:border-b-0 lg:border-r"
         >
           {detailExists ? (
             <>
@@ -480,19 +495,78 @@ export default function ModelDetailPage({ modelId }: ModelDetailPageProps) {
                   {shareToast && (
                     <span className="text-[12px] text-cyan-400 mr-1">链接已复制</span>
                   )}
+                  {/* 全屏：仅桌面内嵌 viewer 使用；手机预览区跳转 /view */}
                   <button
                     type="button"
                     onClick={handleViewerFullscreen}
                     title="全屏"
-                    className="w-8 h-8 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center hover:bg-white/10 hover:border-white/20 transition-all"
+                    className="hidden h-8 w-8 items-center justify-center rounded-lg border border-white/10 bg-white/5 transition-all hover:border-white/20 hover:bg-white/10 lg:flex"
                   >
                     <Expand className="w-4 h-4 text-gray-400" />
                   </button>
                 </div>
               </div>
+
+              {/* 手机端：预览卡片 + 进入横屏浏览（不内嵌 iframe，避免矮条 viewer 与黑边） */}
+              <div className="px-4 py-4 lg:hidden">
+                <div className="overflow-hidden rounded-xl border border-white/10 bg-[#101010]">
+                  <div className="relative aspect-[16/9] min-h-[220px] w-full overflow-hidden bg-black">
+                    {detail.coverUrl ? (
+                      <Image
+                        src={detail.coverUrl}
+                        alt={detail.title}
+                        fill
+                        sizes="(max-width: 1024px) 100vw, 520px"
+                        className="object-cover"
+                        priority
+                      />
+                    ) : (
+                      <div className="flex h-full min-h-[220px] items-center justify-center bg-[radial-gradient(circle_at_center,rgba(45,212,191,0.12),transparent_55%),#050505]">
+                        <Image
+                          src="/brand/model-loading-logo.png"
+                          alt=""
+                          width={240}
+                          height={160}
+                          className="h-auto w-[42%] max-w-[180px] opacity-80 [image-rendering:pixelated]"
+                        />
+                      </div>
+                    )}
+                    <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/75 via-black/15 to-transparent" />
+                    <div className="absolute left-3 top-3">
+                      <span
+                        className={`rounded-full border px-2 py-0.5 text-[11px] ${typeTagColor[detail.type] || "border-white/10 bg-white/10 text-white/60"}`}
+                      >
+                        {detail.type}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="space-y-3 p-4">
+                    <p className="text-[16px] font-medium leading-snug text-white">{detail.title}</p>
+                    <p className="text-[12px] leading-relaxed text-gray-500">
+                      手机端将以横屏方式打开模型，支持第一人称、枢轴、重置与帮助。
+                    </p>
+                    {processingBlocked ? (
+                      <div className="rounded-lg border border-cyan-500/20 bg-cyan-500/8 px-3 py-2.5 text-[12px] text-cyan-100/90">
+                        {processingHint || "模型尚未就绪，暂无法进入横屏浏览。"}
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={handleEnterLandscapeView}
+                        className="flex w-full items-center justify-center gap-2 rounded-xl border border-cyan-400/35 bg-cyan-950/50 px-4 py-3 text-[14px] font-medium text-cyan-50 transition-all hover:border-cyan-300/50 hover:bg-cyan-900/55 active:scale-[0.99]"
+                      >
+                        <Maximize2 className="h-4 w-4" />
+                        进入横屏浏览
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* 桌面端：内嵌 LCC iframe / ModelViewerShell（lg 及以上） */}
               <div
                 ref={viewerHostRef}
-                className="relative h-[58dvh] min-h-[400px] max-h-[70dvh] flex-1 overflow-hidden lg:h-full lg:min-h-0 lg:max-h-none"
+                className="relative hidden min-h-0 flex-1 overflow-hidden lg:block lg:h-full"
               >
                 {isLcc ? (
                   <div
@@ -533,7 +607,7 @@ export default function ModelDetailPage({ modelId }: ModelDetailPageProps) {
               </div>
             </>
           ) : (
-            <div className="relative flex h-full min-h-[400px] lg:min-h-0 flex-1 items-center justify-center">
+            <div className="relative flex min-h-[260px] items-center justify-center lg:min-h-[400px] lg:flex-1">
               {detailLoading ? (
                 <ModelLoadingOverlay visible showText={false} />
               ) : (

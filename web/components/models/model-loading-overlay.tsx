@@ -209,29 +209,28 @@ export function ModelLoadingOverlay({
         </div>
 
         <div className="relative flex w-full items-start justify-center gap-[10px]">
-          <div
-            className="relative w-[520px] max-w-[70vw] pb-8"
-            style={{ "--loading-progress": `${safeProgress}%` } as React.CSSProperties}
-          >
-            <div className="relative overflow-hidden rounded-[8px] border-[3px] border-white bg-black p-[3px]">
-              <div className="relative h-[18px] overflow-hidden rounded-[4px] bg-black">
-                <div
-                  className="h-full bg-white transition-[width] duration-300 ease-linear"
-                  style={{ width: "var(--loading-progress)" }}
-                />
-              </div>
-            </div>
-
-            {/* 像素小人横向位置与进度条共用 --loading-progress；仅保留腿部帧动画 */}
-            <div className="pointer-events-none absolute left-0 top-[32px] z-[1] h-7 w-full overflow-visible">
+          <div className="relative w-[520px] max-w-[70vw]">
+            {/* 外框装饰；轨道坐标系在内层 h-[18px] relative 容器 */}
+            <div className="rounded-[8px] border-[3px] border-white bg-black p-[3px] pb-9">
               <div
-                className="absolute top-0 transition-[left] duration-300 ease-linear"
-                style={{
-                  left: "var(--loading-progress)",
-                  transform: "translateX(-50%)",
-                }}
+                className="relative h-[18px] w-full overflow-visible"
+                style={{ "--loading-progress": `${safeProgress}%` } as React.CSSProperties}
               >
-                <PixelRunner frame={RUNNER_FRAMES[runnerFrameIndex] ?? RUNNER_FRAMES[0]} />
+                {/* 填充层：单独 overflow-hidden 裁切圆角，不影响小人 */}
+                <div className="absolute inset-0 overflow-hidden rounded-[4px] bg-black">
+                  <div
+                    className="h-full bg-white transition-[width] duration-300 ease-linear"
+                    style={{ width: "var(--loading-progress)" }}
+                  />
+                </div>
+
+                {/* 像素小人：与 fill 同属轨道 wrapper，left 对齐填充末端 */}
+                <div
+                  className="pointer-events-none absolute left-[var(--loading-progress)] top-full z-[1] mt-2 -translate-x-1/2 transition-[left] duration-300 ease-linear"
+                  aria-hidden="true"
+                >
+                  <PixelRunner frame={RUNNER_FRAMES[runnerFrameIndex] ?? RUNNER_FRAMES[0]} />
+                </div>
               </div>
             </div>
           </div>
