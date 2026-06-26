@@ -169,7 +169,7 @@ export function ModelLoadingOverlay({
             alt="数境空间"
             width={616}
             height={490}
-            className="block h-auto w-[clamp(140px,28vw,190px)] object-contain [image-rendering:pixelated] md:w-[clamp(180px,16vw,260px)]"
+            className="block h-auto w-[150px] sm:w-[170px] md:w-[200px] lg:w-[220px] xl:w-[240px] object-contain [image-rendering:pixelated]"
             draggable={false}
           />
         </div>
@@ -178,7 +178,7 @@ export function ModelLoadingOverlay({
           className="mt-[2px] flex w-full flex-col items-center"
           aria-label={`模型加载进度 ${progressPercent}%`}
         >
-          <div className="relative mx-auto w-[min(78vw,340px)] sm:w-[500px] lg:w-[520px]">
+          <div className="relative mx-auto w-[260px] sm:w-[300px] md:w-[360px] lg:w-[420px] xl:w-[460px]">
             <div
               className="relative h-[18px] w-full overflow-visible"
               style={
