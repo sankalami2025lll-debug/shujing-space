@@ -1,6 +1,6 @@
 # 数境空间官网 阶段开发检查点
 
-> 更新日期：2026-06-21（手机分享 UX 修正 + 横屏舞台铺满 + Loading 双层闪烁修复）
+> 更新日期：2026-06-26（模型浏览器 Loading、分享页与全屏体验回归修复）
 > 范围：仅记录已实际落地的改动与事实，供后续 Agent 续接。
 > 索引：LCC Web SDK 接入记录详见 `docs/lcc-web-sdk-integration.md`
 > 索引：模型浏览器统一架构详见 `docs/model-viewer-architecture.md`
@@ -44,6 +44,191 @@
 > 补记：2026-06-21 已完成手机分享 **Step 7（第一人称 / 枢轴模式切换）**：新增 `mobile-lcc-viewer-chrome.tsx`（第一人称 / 枢轴 / 重置 / 帮助）；orbit 下隐藏 `MobileLccGameControls`，canvas 由 OrbitControls 触屏接管；重置移至 chrome；`hasAppliedMobileDefaultModeRef` 防 ready effect 打回 walk。`cd web && pnpm build` 通过。
 > 补记：**手机端模型分享链接横屏游戏化查看器第一版封板**（Commit `ba7c895` `feat: add mobile landscape share viewer`）：walk/orbit 触控 + 手机帮助 + 桌面隔离。详见下方专节及 `docs/model-viewer-architecture.md` §十二·续一～续八。
 > 补记：2026-06-21 **手机分享直开横屏 + UX 修正**：① 删除竖屏阻断页，手机打开 `/models/{id}/view` 直接进入横屏 viewer（竖屏用 `MobileForcedLandscapeStage` CSS 旋转，不提示用户旋转）；② 手机外层去掉顶栏/返回/标题/全屏/「第一人称」徽章，iframe 100% 铺满舞台；③ chrome 改为右上角默认收起「工具」按钮；④ 固定左下摇杆改为左半屏动态隐形摇杆；⑤ 触控区改为左 50% 移动 / 右 50% 视角（消除原 50%+60% 重叠）；⑥ 手机分享 iframe 内 `suppressLoadingOverlay` 避免与外层 Loading 双层交接闪烁。`cd web && pnpm build` 通过。详见 `docs/model-viewer-architecture.md` §十二·续八。
+
+## 2026-06-26 模型浏览器 Loading、分享页与全屏体验修复记录
+
+本节记录以下已完成并推送的回归修复提交：
+
+- `cb8333a fix: use versioned cropped loading logo`
+- `468689c fix: finalize loading visuals and docker pnpm pin`
+- `36e6efd fix: prevent desktop share fullscreen gate`
+- `ec045e3 fix: make desktop share viewer fill viewport`
+- `16863c7 fix: make desktop fullscreen viewer clean`
+
+### 1. Loading Logo 与进度条最终规则
+
+Loading 使用裁剪后的英文路径资源：
+
+```txt
+/brand/model-loading-logo-tight-v2.png
+```
+
+最终 Logo class：
+
+```tsx
+className="block h-auto w-[150px] sm:w-[170px] md:w-[200px] lg:w-[220px] xl:w-[240px] object-contain [image-rendering:pixelated]"
+```
+
+最终进度条 class：
+
+```tsx
+className="relative mx-auto w-[260px] sm:w-[300px] md:w-[360px] lg:w-[420px] xl:w-[460px]"
+```
+
+设计结论：
+
+- Logo 等比例缩放，不能拉伸。
+- 进度条应明显比 Logo 长。
+- Logo 与进度条保持紧凑距离。
+- 继续使用统一品牌 Loading，不恢复旧的大尺寸 Logo。
+
+### 2. Docker web 构建 pnpm 固定规则
+
+服务器曾出现的问题：
+
+```txt
+Docker build web 阶段 Corepack 访问 https://registry.npmjs.org/pnpm/latest 超时，导致 web 镜像无法构建，线上仍跑旧版本。
+```
+
+最终规则：
+
+- `web/Dockerfile` 不再使用 `RUN corepack enable`。
+- 固定安装 `pnpm@11.9.0`。
+- registry 使用 `https://registry.npmmirror.com`。
+
+Dockerfile 中应出现 3 处：
+
+```dockerfile
+RUN npm config set registry https://registry.npmmirror.com && npm install -g pnpm@11.9.0
+```
+
+维护说明：后续不要轻易恢复 `corepack enable`。否则服务器网络访问 npmjs 超时时，生产构建可能再次失败。
+
+### 3. 桌面端分享页不再走手机全屏阻断
+
+修复目标：
+
+- `/models/{id}/view` 在桌面端必须直接显示模型 viewer。
+- 桌面端不能显示“进入全屏观看”阻断按钮。
+- 桌面端不能自动 `requestFullscreen`。
+- 桌面端 iframe 不带 `mobile=1`。
+
+最终逻辑：
+
+- `showMobileShareShell=true`：手机分享壳，iframe 带 `mobile=1`。
+- `showMobileShareShell=false`：桌面分享壳，iframe 不带 `mobile=1`。
+- 自动全屏只允许在 `showMobileShareShell=true` 时触发。
+
+桌面端已删除底部“进入全屏观看” overlay。顶部小全屏图标按钮保留为用户可选功能。
+
+### 4. 桌面分享页根容器全屏铺满规则
+
+历史问题：桌面分享页曾因 root class 同时存在 `fixed` 与 `relative/h-full/max-h` 限制，导致官网顶部导航露出，viewer 没有真正铺满视口。
+
+最终规则：
+
+```tsx
+const desktopShareShellRootClass =
+  "flex h-[100dvh] w-[100dvw] flex-col overflow-hidden bg-black";
+```
+
+桌面 root：
+
+```tsx
+className={`fixed inset-0 z-[9999] ${desktopShareShellRootClass}`}
+```
+
+viewer 区域：
+
+```tsx
+className="relative min-h-0 flex-1 overflow-hidden bg-black"
+```
+
+维护说明：
+
+- 桌面分享页 root 不要再加入 `relative`。
+- 不要让官网 Header/Nav 出现在分享页之上。
+
+### 5. 桌面端全屏纯净模式规则
+
+修复范围：
+
+- `/models/{id}`：模型详情页全屏。
+- `/models/{id}/view`：模型分享页桌面全屏。
+
+最终产品规则：
+
+- 桌面端点击全屏后，只显示模型 viewer。
+- 不显示官网 Header。
+- 不显示详情侧栏。
+- 不显示返回社区栏。
+- 不显示外层全屏按钮。
+- 浏览器原生“按 Esc 退出全屏”提示无法关闭，不属于应用 UI。
+
+实现规则：
+
+```txt
+不要对整个页面壳 requestFullscreen。
+要对纯 viewer 容器 requestFullscreen。
+```
+
+详情页：
+
+```txt
+全屏目标从 modelViewerAreaRef 改为 viewerHostRef。
+```
+
+分享页：
+
+```txt
+桌面全屏目标使用 viewerContainerRef.current。
+手机分享页仍使用 fullscreenTargetRef.current。
+```
+
+ModelViewerShell：
+
+```txt
+内部全屏按钮请求 viewerFullscreenTargetRef。
+外层容器进入全屏时，Shell 工具栏和帮助层隐藏。
+```
+
+### 6. 手机端分享页保护规则
+
+手机端分享页保持现状，不受本轮桌面修复影响。必须保留：
+
+- `mobile=1`
+- 横屏沉浸式舞台
+- 动态隐形摇杆
+- 右侧触控转头
+- 双指缩放/平移
+- 右上工具菜单
+- 全屏有效性检测
+- 微信/不支持全屏降级逻辑
+
+禁止：不要为了桌面端纯净全屏，改动手机端 mobile share 控制逻辑。
+
+### 7. 验收入口
+
+验收 URL 示例：
+
+```txt
+桌面详情页：
+/models/35?t=detail-fullscreen-clean
+
+桌面分享页：
+/models/35/view?t=share-fullscreen-clean
+
+手机分享页：
+/models/35/view?t=mobile-share-keep
+```
+
+验收标准：
+
+- 桌面详情页全屏：只显示 viewer。
+- 桌面分享页全屏：只显示 viewer，不显示返回社区和外层按钮。
+- 手机分享页：横屏、摇杆、工具菜单、全屏降级正常。
+- Loading：Logo 等比例，进度条明显比 Logo 长。
+- Docker：web build 不再出现 corepack / pnpm latest 超时。
 
 ## 🚩 最终检查点（重开新对话前，先读本节）
 
