@@ -2,7 +2,7 @@
 
 /**
  * 组件名称：ModelLoadingOverlay
- * 组件用途：统一品牌模型 Loading（Logo + 进度条 + 百分比 + 原地像素小人）
+ * 组件用途：统一品牌模型 Loading（Logo + 进度条 + 百分比 + 进度同步像素小人）
  * 主要功能：各场景共用同一视觉框架；仅负责视觉展示，不控制 Loading 显隐时机
  */
 
@@ -79,7 +79,11 @@ function clampProgress(progress?: number) {
   return progress ?? 0;
 }
 
-/** 原地跑动的像素小人：只切换帧，不跟随 progress 横向位移。 */
+function clampRunnerProgress(progressPercent: number): number {
+  return Math.max(2, Math.min(98, progressPercent));
+}
+
+/** 像素小人：横向位置跟随 progress，腿部只做帧切换。 */
 function PixelRunner({ frame }: { frame: string[] }) {
   return (
     <div
@@ -114,6 +118,7 @@ export function ModelLoadingOverlay({
   /** 进度条与百分比共用同一进度值（0–100） */
   const safeProgress = toSafeProgressPercent(progress, fallbackProgress, hasRealProgress);
   const progressPercent = safeProgress;
+  const runnerProgress = clampRunnerProgress(progressPercent);
 
   useEffect(() => {
     if (hasRealProgress) {
@@ -158,40 +163,50 @@ export function ModelLoadingOverlay({
       }`}
     >
       {/* 统一居中框架：Logo、进度条、百分比、小人组成紧凑品牌 Loading。 */}
-      <div className="flex w-full max-w-[min(94vw,560px)] flex-col items-center">
-        <div className="mb-3 flex w-full max-w-[min(62vw,240px)] items-center justify-center overflow-visible sm:mb-4 sm:max-w-[320px] lg:mb-5 lg:max-w-[340px]">
+      <div className="flex w-full max-w-[min(96vw,640px)] flex-col items-center">
+        <div className="mb-2.5 flex w-full max-w-[min(78vw,320px)] items-center justify-center overflow-visible sm:max-w-[480px] lg:max-w-[560px]">
           <Image
             src="/brand/model-loading-logo.png"
             alt="数境空间 DIGIREALM SPACE"
             width={1536}
             height={1024}
-            sizes="(max-width: 640px) 240px, (max-width: 1024px) 320px, 340px"
+            sizes="(max-width: 640px) 320px, (max-width: 1024px) 480px, 560px"
             className="h-auto w-full object-contain [image-rendering:pixelated]"
             priority
           />
         </div>
 
         <div className="flex w-full flex-col items-center" aria-label={`模型加载进度 ${progressPercent}%`}>
-          <div className="grid w-[min(88vw,540px)] max-w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-2.5 sm:w-[520px] sm:gap-3 lg:w-[560px]">
+          <div className="grid w-[min(90vw,560px)] max-w-full grid-cols-[minmax(0,1fr)_3.5ch] items-start gap-2.5 sm:w-[540px] sm:gap-3 lg:w-[560px]">
             <div
-              className="h-[18px] w-full overflow-hidden rounded-[6px] border-2 border-white bg-black p-[2px] shadow-[0_0_18px_rgba(255,255,255,0.08)]"
-              style={{ "--loading-progress": `${safeProgress}%` } as CSSProperties}
+              className="relative h-[18px] w-full overflow-visible"
+              style={
+                {
+                  "--loading-progress": `${safeProgress}%`,
+                  "--runner-progress": `${runnerProgress}%`,
+                } as CSSProperties
+              }
             >
-              <div className="h-full overflow-hidden rounded-[3px] bg-black">
-                <div
-                  className="h-full bg-white transition-[width] duration-300 ease-linear"
-                  style={{ width: "var(--loading-progress)" }}
-                />
+              <div className="absolute inset-0 overflow-hidden rounded-[6px] border-2 border-white bg-black p-[2px] shadow-[0_0_18px_rgba(255,255,255,0.08)]">
+                <div className="h-full overflow-hidden rounded-[3px] bg-black">
+                  <div
+                    className="h-full bg-white transition-[width] duration-300 ease-linear"
+                    style={{ width: "var(--loading-progress)" }}
+                  />
+                </div>
+              </div>
+
+              <div
+                className="pointer-events-none absolute left-[var(--runner-progress)] top-full z-[1] mt-2 -translate-x-1/2 transition-[left] duration-300 ease-linear"
+                aria-hidden="true"
+              >
+                <PixelRunner frame={RUNNER_FRAMES[runnerFrameIndex] ?? RUNNER_FRAMES[0]} />
               </div>
             </div>
 
-            <span className="min-w-[3.5ch] font-mono text-[13px] font-semibold leading-none tracking-normal text-white/88 tabular-nums sm:text-[14px]">
+            <span className="flex h-[18px] min-w-[3.5ch] items-center justify-end font-mono text-[13px] font-semibold leading-none tracking-normal text-white/88 tabular-nums sm:text-[14px]">
               {progressPercent}%
             </span>
-          </div>
-
-          <div className="mt-2.5 flex h-6 w-full items-center justify-center sm:mt-2">
-            <PixelRunner frame={RUNNER_FRAMES[runnerFrameIndex] ?? RUNNER_FRAMES[0]} />
           </div>
         </div>
 
