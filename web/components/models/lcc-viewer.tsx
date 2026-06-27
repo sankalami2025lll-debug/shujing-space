@@ -194,6 +194,11 @@ const ORBIT_DAMPING_FACTOR = 0.15;
 const ORBIT_ROTATE_SPEED = 0.50;
 const ORBIT_PAN_SPEED = 0.60;
 const ORBIT_ZOOM_SPEED = 0.50;
+const ORBIT_MIN_DISTANCE = 0.01;
+const ORBIT_CLOSE_CAMERA_NEAR = 0.01;
+const ORBIT_ZOOM_THROUGH_DISTANCE = 0.05;
+const ORBIT_ZOOM_THROUGH_STEP_MIN = 0.02;
+const ORBIT_ZOOM_THROUGH_STEP_FACTOR = 0.25;
 // 漫游模式：左键原地转头灵敏度与俯仰角限制
 const WALK_LOOK_SENSITIVITY = 0.002;
 /** 手机端转头相对桌面左键转头的灵敏度倍率 */
@@ -343,6 +348,54 @@ function syncOrbitTargetFromCamera(
   const distance = previousDistance > 0.5 ? previousDistance : 10;
   controls.target.copy(camera.position).add(forward.multiplyScalar(distance));
   controls.update();
+}
+
+function applyOrbitDistanceLimits(controls: OrbitControls, distance: number) {
+  controls.minDistance = ORBIT_MIN_DISTANCE;
+  controls.maxDistance = Math.max(distance * 8, 50);
+}
+
+function applyOrbitZoomThroughTarget(
+  camera: THREE.PerspectiveCamera,
+  controls: OrbitControls,
+  deltaY: number,
+) {
+  if (deltaY >= 0) {
+    return false;
+  }
+
+  const distance = camera.position.distanceTo(controls.target);
+  const minDistance =
+    Number.isFinite(controls.minDistance) && controls.minDistance > 0
+      ? controls.minDistance
+      : ORBIT_MIN_DISTANCE;
+  const isNearTarget =
+    distance <= minDistance * 1.5 || distance < ORBIT_ZOOM_THROUGH_DISTANCE;
+  if (!isNearTarget) {
+    return false;
+  }
+
+  const forward = new THREE.Vector3();
+  camera.getWorldDirection(forward);
+  if (forward.lengthSq() <= 0) {
+    return false;
+  }
+
+  forward.normalize();
+  const wheelScale = THREE.MathUtils.clamp(Math.abs(deltaY) / 100, 0.25, 3);
+  const step =
+    Math.max(distance * ORBIT_ZOOM_THROUGH_STEP_FACTOR, ORBIT_ZOOM_THROUGH_STEP_MIN) *
+    wheelScale;
+
+  camera.position.addScaledVector(forward, step);
+  controls.target.addScaledVector(forward, step);
+  if (camera.near > ORBIT_CLOSE_CAMERA_NEAR) {
+    camera.near = ORBIT_CLOSE_CAMERA_NEAR;
+    camera.updateProjectionMatrix();
+  }
+  camera.updateMatrixWorld(true);
+  controls.update();
+  return true;
 }
 
 function logLccDebug(_message: string, _payload?: unknown) {
@@ -806,8 +859,7 @@ function applyCameraSnapshot(
 
   controls.target.set(...snapshot.target);
   const distance = camera.position.distanceTo(controls.target);
-  controls.minDistance = Math.max(distance * 0.1, 0.5);
-  controls.maxDistance = Math.max(distance * 8, 50);
+  applyOrbitDistanceLimits(controls, distance);
 
   if (options?.updateControls === false) {
     return;
@@ -1444,8 +1496,7 @@ function applyLaunchViewSnapshotToCamera(
 
   controls.target.set(...snapshot.target);
   const distance = camera.position.distanceTo(controls.target);
-  controls.minDistance = Math.max(distance * 0.1, 0.5);
-  controls.maxDistance = Math.max(distance * 8, 50);
+  applyOrbitDistanceLimits(controls, distance);
 
   if (!options.updateControls) {
     return;
@@ -2972,7 +3023,7 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
         scene.background = new THREE.Color("#050b12");
         sceneRef.current = scene;
 
-        const camera = new THREE.PerspectiveCamera(60, width / height, 0.1, 20000);
+        const camera = new THREE.PerspectiveCamera(60, width / height, ORBIT_CLOSE_CAMERA_NEAR, 20000);
         camera.position.copy(OFFICIAL_CAMERA_POSITION);
         camera.up.copy(OFFICIAL_CAMERA_UP);
         camera.lookAt(OFFICIAL_CAMERA_TARGET);
@@ -3009,6 +3060,7 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
         controls.rotateSpeed = ORBIT_ROTATE_SPEED;
         controls.panSpeed = ORBIT_PAN_SPEED;
         controls.zoomSpeed = ORBIT_ZOOM_SPEED;
+        controls.minDistance = ORBIT_MIN_DISTANCE;
         controls.autoRotate = false;
         controls.screenSpacePanning = true;
         controls.target.copy(OFFICIAL_CAMERA_TARGET);
@@ -3195,6 +3247,32 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
           event.preventDefault();
         };
 
+        const handleOrbitZoomThrough = (event: WheelEvent) => {
+          if (
+            controlModeRef.current !== "orbit" ||
+            event.deltaY >= 0 ||
+            isHelpOpenRef.current ||
+            !canMoveRef.current
+          ) {
+            return;
+          }
+
+          const camera = cameraRef.current;
+          const controls = controlsRef.current;
+          if (!camera || !controls) {
+            return;
+          }
+
+          if (!applyOrbitZoomThroughTarget(camera, controls, event.deltaY)) {
+            return;
+          }
+
+          event.preventDefault();
+          event.stopImmediatePropagation();
+          event.stopPropagation();
+          syncViewerCamera();
+        };
+
         const handleWheel = (event: WheelEvent) => {
           if (
             isWalkMouseInteractionBlocked() ||
@@ -3226,6 +3304,10 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
         currentRenderer.domElement.addEventListener("pointerdown", handlePointerDown);
         currentRenderer.domElement.addEventListener("pointermove", handlePointerMove);
         currentRenderer.domElement.addEventListener("pointerleave", handlePointerLeave);
+        currentRenderer.domElement.addEventListener("wheel", handleOrbitZoomThrough, {
+          capture: true,
+          passive: false,
+        });
         currentRenderer.domElement.addEventListener("wheel", handleWheel, { passive: false });
         currentRenderer.domElement.addEventListener("contextmenu", handleContextMenu);
         window.addEventListener("pointerup", handlePointerUp);
@@ -3235,6 +3317,7 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
           currentRenderer.domElement.removeEventListener("pointerdown", handlePointerDown);
           currentRenderer.domElement.removeEventListener("pointermove", handlePointerMove);
           currentRenderer.domElement.removeEventListener("pointerleave", handlePointerLeave);
+          currentRenderer.domElement.removeEventListener("wheel", handleOrbitZoomThrough, true);
           currentRenderer.domElement.removeEventListener("wheel", handleWheel);
           currentRenderer.domElement.removeEventListener("contextmenu", handleContextMenu);
           window.removeEventListener("pointerup", handlePointerUp);
