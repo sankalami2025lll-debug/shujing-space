@@ -27,6 +27,7 @@ const LCC_ONLOADED_FALLBACK_MS = 5000;
 const LCC_FIRST_FRAME_CONTENT_FRAMES = 5;
 const LCC_FIRST_FRAME_DELAY_MS = 1000;
 const LCC_FIRST_FRAME_RESOURCE_IDLE_MS = 1500;
+const LCC_DETAIL_RESOURCE_IDLE_MS = 3000;
 const LCC_MODEL_PIXEL_SAMPLE_SIZE = 64;
 const LCC_BACKGROUND_RGB_THRESHOLD = 18;
 const LCC_MODEL_PIXEL_RATIO_THRESHOLD = 0.003;
@@ -1973,6 +1974,7 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
   const [loadingPhase, setLoadingPhase] = useState<LccLoadingPhase>("loading");
   const [visualProgress, setVisualProgress] = useState(0);
   const [overlayVisible, setOverlayVisible] = useState(true);
+  const [detailLoadingActive, setDetailLoadingActive] = useState(false);
   const overlayHideTimerRef = useRef<number | null>(null);
   const normalizedModelUrl = useMemo(() => modelUrl?.trim() ?? "", [modelUrl]);
   const normalizedViewerUrl = useMemo(() => viewerUrl?.trim() ?? "", [viewerUrl]);
@@ -2821,6 +2823,9 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
       firstFrameContentFramesRef.current = 0;
       firstFrameContentReadyAtRef.current = null;
       lccResourceCompletedCountRef.current = 0;
+      lccResourceActiveCountRef.current = 0;
+      lccResourceLastStartAtRef.current = null;
+      lccResourceLastEndAtRef.current = null;
       progressRef.current = 0;
       setViewerStatus("idle");
       setProgress(0);
@@ -2828,6 +2833,7 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
       setLoadingPhase("loading");
       setVisualProgress(0);
       setOverlayVisible(true);
+      setDetailLoadingActive(false);
       if (overlayHideTimerRef.current !== null) {
         window.clearTimeout(overlayHideTimerRef.current);
         overlayHideTimerRef.current = null;
@@ -2849,6 +2855,9 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
       firstFrameContentFramesRef.current = 0;
       firstFrameContentReadyAtRef.current = null;
       lccResourceCompletedCountRef.current = 0;
+      lccResourceActiveCountRef.current = 0;
+      lccResourceLastStartAtRef.current = null;
+      lccResourceLastEndAtRef.current = null;
       progressRef.current = 0;
       setViewerStatus("error");
       setProgress(0);
@@ -2856,6 +2865,7 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
       setLoadingPhase("loading");
       setVisualProgress(0);
       setOverlayVisible(true);
+      setDetailLoadingActive(false);
       if (overlayHideTimerRef.current !== null) {
         window.clearTimeout(overlayHideTimerRef.current);
         overlayHideTimerRef.current = null;
@@ -2885,6 +2895,9 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
       firstFrameContentFramesRef.current = 0;
       firstFrameContentReadyAtRef.current = null;
       lccResourceCompletedCountRef.current = 0;
+      lccResourceActiveCountRef.current = 0;
+      lccResourceLastStartAtRef.current = null;
+      lccResourceLastEndAtRef.current = null;
       progressRef.current = 0;
       setSdkLoadedState(false);
       // 每个新模型重置 bounds 上下文，防止跨模型污染
@@ -2898,6 +2911,7 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
       setLoadingPhase("loading");
       setVisualProgress(0);
       setOverlayVisible(true);
+      setDetailLoadingActive(false);
       if (overlayHideTimerRef.current !== null) {
         window.clearTimeout(overlayHideTimerRef.current);
         overlayHideTimerRef.current = null;
@@ -4071,7 +4085,19 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
                 lccResourceCompletedCountRef.current = completedCount;
                 if (lastStart !== null) lccResourceLastStartAtRef.current = lastStart;
                 if (lastEnd !== null) lccResourceLastEndAtRef.current = lastEnd;
+                const hasNewerResourceStart =
+                  lastStart !== null && (lastEnd === null || lastStart > lastEnd);
+                const isResourceRecentlyActive =
+                  lastEnd !== null && now - lastEnd < LCC_DETAIL_RESOURCE_IDLE_MS;
+                const nextDetailLoadingActive =
+                  firstFrameRenderedRef.current &&
+                  !isFailed &&
+                  (activeCount > 0 || hasNewerResourceStart || isResourceRecentlyActive);
+                setDetailLoadingActive((current) =>
+                  current === nextDetailLoadingActive ? current : nextDetailLoadingActive,
+                );
                 setDebugAttr("data-lcc-debug-lcc-resources", `active=${activeCount} completed=${completedCount}`);
+                setDebugAttr("data-lcc-detail-loading", nextDetailLoadingActive ? "true" : "false");
               } catch {
                 // Performance API 不可用时忽略
               }
@@ -4160,6 +4186,7 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
       ref={viewerRootRef}
       data-lcc-loaded={viewerStatus === "loaded" ? "true" : "false"}
       data-lcc-first-frame={firstFrameRenderedRef.current ? "true" : "false"}
+      data-lcc-detail-loading={detailLoadingActive ? "true" : "false"}
       data-lcc-viewer-status={viewerStatus}
       data-lcc-complete-reason={completeReasonRef.current ?? ""}
       data-lcc-sdk-loaded={sdkLoadedRef.current ? "true" : "false"}
@@ -4189,6 +4216,12 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
         progress={displayProgress}
         showText={false}
       />
+      {detailLoadingActive && !showOverlay && viewerStatus === "loaded" ? (
+        <div className="pointer-events-none absolute bottom-4 right-4 z-20 inline-flex items-center gap-2 rounded-full border border-cyan-300/20 bg-black/55 px-3 py-1.5 text-[12px] text-cyan-100/85 shadow-lg backdrop-blur-md">
+          <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-cyan-300 shadow-[0_0_10px_rgba(103,232,249,0.65)]" />
+          <span>模型细节加载中...</span>
+        </div>
+      ) : null}
     </div>
   );
 });

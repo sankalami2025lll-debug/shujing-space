@@ -2,19 +2,23 @@
 
 import {
   Camera,
-  Expand,
-  Home,
-  Info,
-  Layers3,
-  Map,
-  Maximize,
-  Move3D,
-  PenSquare,
-  RefreshCcw,
+  Focus,
+  Footprints,
+  HelpCircle,
+  MessageSquare,
+  Move,
+  MoveVertical,
+  Orbit,
+  PanelLeftClose,
+  Rotate3d,
   Ruler,
-  ScanSearch,
   Save,
+  ScatterChart,
+  Settings,
+  SplitSquareHorizontal,
   Wrench,
+  X,
+  type LucideIcon,
 } from "lucide-react";
 import { useMemo, useState } from "react";
 import type {
@@ -40,50 +44,253 @@ interface ModelViewerToolbarProps {
   canToggleControlMode?: boolean;
 }
 
-/** walk / orbit 对用户显示的中文名称（内部枚举值不变） */
+type ActiveToolbarMenu = "none" | "operation" | "settings";
+
+type ToolbarButtonConfig = {
+  key: string;
+  name: string;
+  icon: LucideIcon;
+  action?: () => void;
+  active?: boolean;
+  disabled?: boolean;
+  tooltip?: string;
+  rotate?: boolean;
+  tone?: "default" | "owner";
+};
+
+type ToolbarSettings = {
+  collision: boolean;
+  moveSpeed: number;
+  environment: "无" | "环境" | "天空球";
+  renderQuality: "性能" | "平衡" | "质量";
+  unitSystem: "公制" | "英制";
+  lengthUnit: "m" | "mm";
+};
+
 const CONTROL_MODE_UI_LABEL: Record<ModelViewerControlMode, string> = {
-  walk: "第一人称",
+  walk: "第一人称漫游",
   orbit: "枢轴模式",
 };
 
-function getControlModeToggleAriaLabel(mode: ModelViewerControlMode) {
-  return mode === "walk"
-    ? "当前：第一人称，点击切换枢轴模式"
-    : "当前：枢轴模式，点击切换第一人称";
+function getModeIcon(mode: ModelViewerControlMode) {
+  return mode === "walk" ? Footprints : Orbit;
 }
 
-function getControlModeToggleTitle(mode: ModelViewerControlMode) {
-  return mode === "walk"
-    ? "第一人称（WASD + 左键转头）"
-    : "枢轴模式（轨道旋转）";
+function getDisabledTooltip(name: string) {
+  return `${name}（即将开放）`;
 }
 
-const TOOL_ITEMS = [
-  { key: "reset", label: "回到初始视角", icon: Home, enabledBy: "resetView" },
-  { key: "saveLaunchView", label: "保存启动视图", icon: Save, enabledBy: "saveView" },
-  { key: "fullscreen", label: "全屏", icon: Expand, enabledBy: "fullscreen" },
-  { key: "screenshot", label: "截图", icon: Camera, enabledBy: "screenshot" },
-  { key: "orbit", label: "旋转 / 环绕", icon: Move3D, enabledBy: "orbit" },
-  { key: "pan", label: "平移", icon: Maximize, enabledBy: "pan" },
-  { key: "zoom", label: "缩放", icon: ScanSearch, enabledBy: "zoom" },
-  { key: "walk", label: "第一人称", icon: Map, enabledBy: "walk" },
-  { key: "measure", label: "测量", icon: Ruler, enabledBy: "measure" },
-  { key: "annotation", label: "标注", icon: PenSquare, enabledBy: "annotation" },
-  { key: "layer", label: "图层", icon: Layers3, enabledBy: "layer" },
-  { key: "info", label: "信息", icon: Info, enabledBy: "section" },
-] as const satisfies Array<{
-  key: string;
+function ToolbarTooltip({ label }: { label: string }) {
+  return (
+    <div className="pointer-events-none absolute bottom-full mb-2 whitespace-nowrap rounded border border-white/10 bg-black/80 px-2 py-1 text-[12px] text-white opacity-0 backdrop-blur-md transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
+      {label}
+    </div>
+  );
+}
+
+function ToolbarIconButton({ tool }: { tool: ToolbarButtonConfig }) {
+  const Icon = tool.icon;
+  const disabled = Boolean(tool.disabled);
+  const tooltip = tool.tooltip ?? tool.name;
+  const activeClass = tool.active
+    ? "bg-cyan-500/20 text-cyan-400"
+    : "text-white/80 hover:bg-white/10 hover:text-white";
+
+  return (
+    <button
+      type="button"
+      aria-label={tooltip}
+      title={tooltip}
+      disabled={disabled}
+      onClick={disabled ? undefined : tool.action}
+      className={`group relative flex h-9 w-9 items-center justify-center rounded-lg transition-all ${
+        disabled
+          ? "cursor-not-allowed bg-white/[0.02] text-gray-400/70"
+          : activeClass
+      }`}
+    >
+      <Icon className={`h-4 w-4 ${tool.rotate ? "rotate-90" : ""}`} />
+      <ToolbarTooltip label={tooltip} />
+    </button>
+  );
+}
+
+function SegmentedOption<T extends string>({
+  value,
+  current,
+  onSelect,
+}: {
+  value: T;
+  current: T;
+  onSelect: (value: T) => void;
+}) {
+  const active = value === current;
+
+  return (
+    <button
+      type="button"
+      onClick={() => onSelect(value)}
+      className={`flex-1 rounded-md py-1.5 text-[12px] transition-all ${
+        active
+          ? "bg-white/20 text-white shadow-sm"
+          : "text-gray-400 hover:text-gray-200"
+      }`}
+    >
+      {value}
+    </button>
+  );
+}
+
+function SettingsSegment<T extends string>({
+  label,
+  options,
+  value,
+  onSelect,
+}: {
   label: string;
-  icon: typeof RefreshCcw;
-  enabledBy: keyof ModelViewerCapabilities;
-}>;
+  options: readonly T[];
+  value: T;
+  onSelect: (value: T) => void;
+}) {
+  return (
+    <div className="mb-4">
+      <span className="mb-2 block text-[12px] text-gray-500">{label}</span>
+      <div className="flex rounded-lg border border-white/5 bg-black/50 p-1">
+        {options.map((option) => (
+          <SegmentedOption
+            key={option}
+            value={option}
+            current={value}
+            onSelect={onSelect}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ToolbarSettingsPanel({
+  settings,
+  onChange,
+  onClose,
+}: {
+  settings: ToolbarSettings;
+  onChange: (updater: (settings: ToolbarSettings) => ToolbarSettings) => void;
+  onClose: () => void;
+}) {
+  return (
+    <div className="absolute bottom-14 left-14 z-30 w-64 rounded-xl border border-white/10 bg-[#1a1a1a]/95 p-4 text-white shadow-2xl backdrop-blur-md">
+      <div className="mb-4 flex items-center justify-between">
+        <h3 className="text-[14px] font-medium">设置</h3>
+        <button
+          type="button"
+          aria-label="关闭设置"
+          title="关闭设置"
+          onClick={onClose}
+          className="rounded-md p-1 text-gray-400 transition-colors hover:bg-white/10 hover:text-white"
+        >
+          <X className="h-4 w-4" />
+        </button>
+      </div>
+
+      <div className="mb-4 flex items-center justify-between">
+        <span className="text-[13px] text-gray-300">碰撞开关</span>
+        <button
+          type="button"
+          aria-pressed={settings.collision}
+          onClick={() =>
+            onChange((current) => ({ ...current, collision: !current.collision }))
+          }
+          className={`relative h-4 w-8 rounded-full transition-colors ${
+            settings.collision ? "bg-cyan-500" : "bg-white/10"
+          }`}
+        >
+          <span
+            className={`absolute top-0.5 h-3 w-3 rounded-full bg-white transition-all ${
+              settings.collision ? "left-[18px]" : "left-0.5"
+            }`}
+          />
+        </button>
+      </div>
+
+      <div className="mb-4">
+        <div className="mb-2 flex items-center justify-between">
+          <span className="text-[12px] text-gray-500">漫游移动速度</span>
+          <span className="font-mono text-[12px] text-cyan-400">
+            {settings.moveSpeed.toFixed(1)}x
+          </span>
+        </div>
+        <input
+          type="range"
+          min="0.1"
+          max="5.0"
+          step="0.1"
+          value={settings.moveSpeed}
+          onChange={(event) =>
+            onChange((current) => ({
+              ...current,
+              moveSpeed: Number.parseFloat(event.target.value),
+            }))
+          }
+          className="h-1.5 w-full cursor-pointer appearance-none rounded-lg bg-black/50 accent-cyan-400"
+        />
+        <div className="mt-1 flex justify-between text-[10px] text-gray-600">
+          <span>极慢</span>
+          <span>极快</span>
+        </div>
+      </div>
+
+      <SettingsSegment
+        label="环境选项"
+        options={["无", "环境", "天空球"] as const}
+        value={settings.environment}
+        onSelect={(environment) =>
+          onChange((current) => ({ ...current, environment }))
+        }
+      />
+
+      <SettingsSegment
+        label="渲染选项"
+        options={["性能", "平衡", "质量"] as const}
+        value={settings.renderQuality}
+        onSelect={(renderQuality) =>
+          onChange((current) => ({ ...current, renderQuality }))
+        }
+      />
+
+      <div className="mb-2 flex gap-3">
+        <div className="flex-1">
+          <SettingsSegment
+            label="单位系统"
+            options={["公制", "英制"] as const}
+            value={settings.unitSystem}
+            onSelect={(unitSystem) =>
+              onChange((current) => ({ ...current, unitSystem }))
+            }
+          />
+        </div>
+        <div className="flex-1">
+          <SettingsSegment
+            label="长度"
+            options={["m", "mm"] as const}
+            value={settings.lengthUnit}
+            onSelect={(lengthUnit) =>
+              onChange((current) => ({ ...current, lengthUnit }))
+            }
+          />
+        </div>
+      </div>
+
+      <p className="border-t border-white/5 pt-3 text-[11px] text-gray-500">
+        部分设置功能即将开放
+      </p>
+    </div>
+  );
+}
 
 export function ModelViewerToolbar({
   capabilities,
   onResetView,
-  onFitView,
-  onToggleFullscreen,
-  onTakeScreenshot,
   onSaveLaunchView,
   showSaveLaunchView = true,
   onToggleHelp,
@@ -94,179 +301,203 @@ export function ModelViewerToolbar({
   onToggleControlMode,
   canToggleControlMode = false,
 }: ModelViewerToolbarProps) {
-  const [isExpanded, setIsExpanded] = useState(false);
-  const isLccToolbar = canToggleControlMode && typeof onToggleControlMode === "function";
-  const toolActions = useMemo(
-    () => ({
-      reset: onResetView,
-      fitView: onFitView,
-      saveLaunchView: onSaveLaunchView,
-      fullscreen: onToggleFullscreen,
-      screenshot: onTakeScreenshot,
-    }),
-    [onResetView, onFitView, onSaveLaunchView, onTakeScreenshot, onToggleFullscreen],
+  const [isToolbarOpen, setIsToolbarOpen] = useState(true);
+  const [activeMenu, setActiveMenu] = useState<ActiveToolbarMenu>("none");
+  const [settings, setSettings] = useState<ToolbarSettings>({
+    collision: true,
+    moveSpeed: 1,
+    environment: "环境",
+    renderQuality: "平衡",
+    unitSystem: "公制",
+    lengthUnit: "m",
+  });
+  const ModeIcon = getModeIcon(controlMode);
+
+  const canUseControlMode = canToggleControlMode && typeof onToggleControlMode === "function";
+  const canUseReset = capabilities.resetView && typeof onResetView === "function";
+  const canUseHelp = typeof onToggleHelp === "function";
+  const canUseSaveLaunchView =
+    showSaveLaunchView &&
+    capabilities.saveView &&
+    canShowSaveLaunchView &&
+    typeof onSaveLaunchView === "function" &&
+    !saveLaunchViewPending;
+  const canManageModel = showSaveLaunchView && canShowSaveLaunchView;
+
+  const handleToolbarToggle = () => {
+    setIsToolbarOpen((current) => {
+      const next = !current;
+      if (!next) {
+        setActiveMenu("none");
+      }
+      return next;
+    });
+  };
+
+  const handleSelectControlMode = (mode: ModelViewerControlMode) => {
+    setActiveMenu("none");
+    if (!canUseControlMode || mode === controlMode) {
+      return;
+    }
+    onToggleControlMode();
+  };
+
+  const guestTools = useMemo<ToolbarButtonConfig[]>(
+    () => [
+      {
+        key: "reset",
+        name: "初始视角",
+        icon: Focus,
+        action: onResetView,
+        disabled: !canUseReset,
+        tooltip: canUseReset ? "初始视角" : "初始视角（暂不可用）",
+      },
+      {
+        key: "operation",
+        name: "操作模式",
+        icon: ModeIcon,
+        action: () => setActiveMenu((current) => (current === "operation" ? "none" : "operation")),
+        active: true,
+        disabled: !canUseControlMode,
+        tooltip: canUseControlMode ? `操作模式：${CONTROL_MODE_UI_LABEL[controlMode]}` : "操作模式（暂不可用）",
+      },
+      { key: "point-cloud", name: "点云切换", icon: ScatterChart, disabled: true, tooltip: getDisabledTooltip("点云切换") },
+      { key: "annotation", name: "标注", icon: MessageSquare, disabled: true, tooltip: getDisabledTooltip("标注") },
+      { key: "screenshot", name: "拍照", icon: Camera, disabled: true, tooltip: getDisabledTooltip("拍照") },
+      { key: "measure", name: "测量", icon: Ruler, disabled: true, tooltip: getDisabledTooltip("测量") },
+      {
+        key: "section",
+        name: "高度剖切",
+        icon: SplitSquareHorizontal,
+        rotate: true,
+        disabled: true,
+        tooltip: getDisabledTooltip("高度剖切"),
+      },
+      {
+        key: "settings",
+        name: "设置",
+        icon: Settings,
+        action: () => setActiveMenu((current) => (current === "settings" ? "none" : "settings")),
+        active: activeMenu === "settings",
+        tooltip: "设置",
+      },
+      {
+        key: "help",
+        name: "帮助",
+        icon: HelpCircle,
+        action: onToggleHelp,
+        active: isHelpOpen,
+        disabled: !canUseHelp,
+        tooltip: canUseHelp ? (isHelpOpen ? "关闭帮助" : "帮助") : "帮助（暂不可用）",
+      },
+    ],
+    [
+      ModeIcon,
+      activeMenu,
+      canUseControlMode,
+      canUseHelp,
+      canUseReset,
+      controlMode,
+      isHelpOpen,
+      onResetView,
+      onToggleHelp,
+    ],
   );
-  const orderedTools = useMemo(() => {
-    const hiddenKeys = new Set<string>();
-    if (isLccToolbar) {
-      hiddenKeys.add("fullscreen");
-      hiddenKeys.add("zoom");
-    }
 
-    const preferredOrder = isLccToolbar
-      ? ["reset", "saveLaunchView", "screenshot"]
-      : [];
-    const preferredSet = new Set(preferredOrder);
-    const visibleItems = TOOL_ITEMS.filter(
-      (tool) => tool.key !== "walk" && !hiddenKeys.has(tool.key),
-    );
-
-    if (!isLccToolbar) {
-      return visibleItems;
-    }
-
-    return [
-      ...visibleItems.filter((tool) => preferredSet.has(tool.key)),
-      ...visibleItems.filter((tool) => !preferredSet.has(tool.key)),
-    ];
-  }, [isLccToolbar]);
+  const ownTools = useMemo<ToolbarButtonConfig[]>(
+    () => [
+      {
+        key: "save-launch-view",
+        name: "保存初始视角",
+        icon: Save,
+        action: onSaveLaunchView,
+        disabled: !canUseSaveLaunchView,
+        tooltip: saveLaunchViewPending
+          ? "正在保存初始视角"
+          : canUseSaveLaunchView
+            ? "保存初始视角"
+            : "保存视角暂不可用",
+        tone: "owner",
+      },
+      { key: "model-rotate", name: "模型旋转", icon: Rotate3d, disabled: true, tooltip: getDisabledTooltip("模型旋转"), tone: "owner" },
+      { key: "model-height", name: "模型高度", icon: MoveVertical, disabled: true, tooltip: getDisabledTooltip("模型高度"), tone: "owner" },
+      { key: "model-move", name: "模型平移", icon: Move, disabled: true, tooltip: getDisabledTooltip("模型平移"), tone: "owner" },
+    ],
+    [canUseSaveLaunchView, onSaveLaunchView, saveLaunchViewPending],
+  );
 
   return (
-    <div className="flex items-end gap-2">
+    <div className="relative flex items-center gap-2">
       <button
         type="button"
-        aria-label={isExpanded ? "收起工具栏" : "展开工具栏"}
-        aria-expanded={isExpanded}
-        title={isExpanded ? "收起工具栏" : "展开工具栏"}
-        onClick={() => setIsExpanded((value) => !value)}
-        className="inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-white/10 bg-[#0b1118]/85 text-white shadow-[0_12px_40px_rgba(0,0,0,0.35)] backdrop-blur-md transition-all hover:border-cyan-300/30 hover:bg-[#0f1722]/90"
+        aria-label={isToolbarOpen ? "收起工具栏" : "展开工具栏"}
+        aria-expanded={isToolbarOpen}
+        title={isToolbarOpen ? "收起工具栏（纯净模式）" : "展开工具栏"}
+        onClick={handleToolbarToggle}
+        className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl border border-white/10 bg-black/50 text-gray-300 shadow-lg backdrop-blur-md transition-all hover:bg-black/70 hover:text-white"
       >
-        <Wrench className="h-4 w-4 text-cyan-100" />
+        {isToolbarOpen ? <PanelLeftClose className="h-5 w-5" /> : <Wrench className="h-5 w-5" />}
       </button>
 
       <div
-        className={`flex items-center gap-2 overflow-hidden transition-all duration-200 ${
-          isExpanded
-            ? "pointer-events-auto max-w-[720px] translate-x-0 opacity-100"
-            : "pointer-events-none max-w-0 -translate-x-3 opacity-0"
+        className={`origin-left rounded-xl border border-white/10 bg-black/50 p-1.5 shadow-lg backdrop-blur-md transition-all duration-300 ${
+          isToolbarOpen
+            ? "pointer-events-auto translate-x-0 scale-100 opacity-100"
+            : "pointer-events-none absolute left-12 -translate-x-4 scale-95 opacity-0"
         }`}
       >
-        {isLccToolbar ? (
-          <button
-            type="button"
-            aria-label={getControlModeToggleAriaLabel(controlMode)}
-            title={getControlModeToggleTitle(controlMode)}
-            onClick={onToggleControlMode}
-            className={`inline-flex h-11 items-center gap-1.5 rounded-2xl border px-3 backdrop-blur-md transition-all ${
-              controlMode === "walk"
-                ? "border-cyan-300/40 bg-cyan-950/50 text-cyan-100 shadow-[0_10px_30px_rgba(0,0,0,0.28)]"
-                : "border-white/10 bg-[#0b1118]/85 text-gray-100 shadow-[0_10px_30px_rgba(0,0,0,0.28)] hover:border-cyan-300/30 hover:bg-[#0f1722]/90"
-            }`}
-          >
-            {controlMode === "walk" ? (
-              <Map className="h-4 w-4" />
-            ) : (
-              <Move3D className="h-4 w-4" />
-            )}
-            <span className="text-[11px]">{CONTROL_MODE_UI_LABEL[controlMode]}</span>
-          </button>
-        ) : null}
-        {orderedTools.map((tool) => {
-          if (tool.key === "saveLaunchView" && !showSaveLaunchView) {
-            return null;
-          }
-          const enabled =
-            tool.key === "saveLaunchView"
-              ? capabilities[tool.enabledBy] && canShowSaveLaunchView
-              : capabilities[tool.enabledBy];
-          const Icon = tool.icon;
-          const onClick = toolActions[tool.key as keyof typeof toolActions];
-          const actionable =
-            enabled &&
-            typeof onClick === "function" &&
-            !(tool.key === "saveLaunchView" && saveLaunchViewPending);
-          const title =
-            tool.key === "saveLaunchView" && saveLaunchViewPending
-              ? "正在保存启动视图"
-              : tool.key === "saveLaunchView" && !canShowSaveLaunchView
-                ? "保存启动视图（暂不可用）"
-              : actionable
-                ? tool.label
-                : `${tool.label}（暂未接入）`;
+        <div className="flex items-center gap-1.5">
+          {guestTools.map((tool) => (
+            <ToolbarIconButton key={tool.key} tool={tool} />
+          ))}
 
-          return (
-            <button
-              key={tool.key}
-              type="button"
-              aria-label={title}
-              title={title}
-              disabled={!actionable}
-              onClick={onClick}
-              className={`inline-flex h-11 w-11 items-center justify-center rounded-2xl border backdrop-blur-md transition-all ${
-                actionable
-                  ? "border-white/10 bg-[#0b1118]/85 text-gray-100 shadow-[0_10px_30px_rgba(0,0,0,0.28)] hover:border-cyan-300/30 hover:bg-[#0f1722]/90"
-                  : "cursor-not-allowed border-white/[0.08] bg-[#0b1118]/60 text-gray-500 opacity-70"
-              }`}
-            >
-              <Icon className="h-4 w-4" />
-            </button>
-          );
-        })}
-        {isLccToolbar ? (
-          <button
-            type="button"
-            aria-label={isHelpOpen ? "关闭帮助" : "打开帮助"}
-            title={isHelpOpen ? "关闭帮助" : "打开帮助"}
-            onClick={onToggleHelp}
-            className={`inline-flex h-11 w-11 items-center justify-center rounded-2xl border backdrop-blur-md transition-all ${
-              typeof onToggleHelp === "function"
-                ? isHelpOpen
-                  ? "border-cyan-300/40 bg-cyan-950/50 text-cyan-100 shadow-[0_10px_30px_rgba(0,0,0,0.28)]"
-                  : "border-white/10 bg-[#0b1118]/85 text-gray-100 shadow-[0_10px_30px_rgba(0,0,0,0.28)] hover:border-cyan-300/30 hover:bg-[#0f1722]/90"
-                : "cursor-not-allowed border-white/[0.08] bg-[#0b1118]/60 text-gray-500 opacity-70"
-            }`}
-            disabled={typeof onToggleHelp !== "function"}
-          >
-            <Info className={`h-4 w-4 ${isHelpOpen ? "text-cyan-200" : ""}`} />
-          </button>
-        ) : null}
-        {!isLccToolbar && canToggleControlMode && typeof onToggleControlMode === "function" ? (
-          <button
-            type="button"
-            aria-label={getControlModeToggleAriaLabel(controlMode)}
-            title={getControlModeToggleTitle(controlMode)}
-            onClick={onToggleControlMode}
-            className={`inline-flex h-11 items-center gap-1.5 rounded-2xl border px-3 backdrop-blur-md transition-all ${
-              controlMode === "walk"
-                ? "border-cyan-300/40 bg-cyan-950/50 text-cyan-100 shadow-[0_10px_30px_rgba(0,0,0,0.28)]"
-                : "border-white/10 bg-[#0b1118]/85 text-gray-100 shadow-[0_10px_30px_rgba(0,0,0,0.28)] hover:border-cyan-300/30 hover:bg-[#0f1722]/90"
-            }`}
-          >
-            {controlMode === "walk" ? (
-              <Map className="h-4 w-4" />
-            ) : (
-              <Move3D className="h-4 w-4" />
-            )}
-            <span className="text-[11px]">{CONTROL_MODE_UI_LABEL[controlMode]}</span>
-          </button>
-        ) : null}
-        {!isLccToolbar ? (
-          <button
-            type="button"
-            aria-label={isHelpOpen ? "关闭帮助" : "打开帮助"}
-            title={isHelpOpen ? "关闭帮助" : "打开帮助"}
-            onClick={onToggleHelp}
-            className={`inline-flex h-11 w-11 items-center justify-center rounded-2xl border backdrop-blur-md transition-all ${
-              typeof onToggleHelp === "function"
-                ? "border-white/10 bg-[#0b1118]/85 text-gray-100 shadow-[0_10px_30px_rgba(0,0,0,0.28)] hover:border-cyan-300/30 hover:bg-[#0f1722]/90"
-                : "cursor-not-allowed border-white/[0.08] bg-[#0b1118]/60 text-gray-500 opacity-70"
-            }`}
-            disabled={typeof onToggleHelp !== "function"}
-          >
-            <Info className={`h-4 w-4 ${isHelpOpen ? "text-cyan-200" : ""}`} />
-          </button>
-        ) : null}
+          {canManageModel ? (
+            <>
+              <div className="mx-1 h-5 w-[1px] bg-white/10" />
+              {ownTools.map((tool) => (
+                <ToolbarIconButton key={tool.key} tool={tool} />
+              ))}
+            </>
+          ) : null}
+        </div>
       </div>
+
+      {activeMenu === "operation" && isToolbarOpen ? (
+        <div className="absolute bottom-14 left-14 z-30 w-36 rounded-xl border border-white/10 bg-[#1a1a1a]/90 p-2 text-white shadow-2xl backdrop-blur-md">
+          <button
+            type="button"
+            onClick={() => handleSelectControlMode("walk")}
+            className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-[13px] transition-all ${
+              controlMode === "walk"
+                ? "bg-cyan-500/20 text-cyan-400"
+                : "text-gray-300 hover:bg-white/10"
+            }`}
+          >
+            <Footprints className="h-4 w-4" />
+            第一人称漫游
+          </button>
+          <button
+            type="button"
+            onClick={() => handleSelectControlMode("orbit")}
+            className={`mt-1 flex w-full items-center gap-2 rounded-lg px-3 py-2 text-[13px] transition-all ${
+              controlMode === "orbit"
+                ? "bg-cyan-500/20 text-cyan-400"
+                : "text-gray-300 hover:bg-white/10"
+            }`}
+          >
+            <Orbit className="h-4 w-4" />
+            枢轴模式
+          </button>
+        </div>
+      ) : null}
+
+      {activeMenu === "settings" && isToolbarOpen ? (
+        <ToolbarSettingsPanel
+          settings={settings}
+          onChange={setSettings}
+          onClose={() => setActiveMenu("none")}
+        />
+      ) : null}
     </div>
   );
 }
