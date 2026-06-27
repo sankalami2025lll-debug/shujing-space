@@ -80,6 +80,9 @@ interface LccBoundsLike {
 interface LccRuntimeInstance {
   getBounds?: () => LccBoundsLike | null;
   getMeta?: () => unknown;
+  togglePointsDisplayMode?: () => void;
+  hasEnvironment?: () => boolean;
+  useEnvironment?: (enabled: boolean) => void;
 }
 
 interface LccSdkGlobal {
@@ -2487,6 +2490,47 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
       fitView: () => {
         if (!fitCurrentView()) {
           logLccWarn("fitView 暂无可复用的已加载对象，当前版本跳过执行");
+        }
+      },
+      togglePointsDisplayMode: () => {
+        const runtimeInstance = getRuntimeInstance(lccInstanceRef.current);
+        if (!runtimeInstance || typeof runtimeInstance.togglePointsDisplayMode !== "function") {
+          return false;
+        }
+
+        try {
+          runtimeInstance.togglePointsDisplayMode();
+          return true;
+        } catch (error) {
+          logLccWarn("togglePointsDisplayMode 执行失败", error);
+          return false;
+        }
+      },
+      hasEnvironment: () => {
+        const runtimeInstance = getRuntimeInstance(lccInstanceRef.current);
+        if (!runtimeInstance || typeof runtimeInstance.hasEnvironment !== "function") {
+          return false;
+        }
+
+        try {
+          return Boolean(runtimeInstance.hasEnvironment());
+        } catch (error) {
+          logLccWarn("hasEnvironment 执行失败", error);
+          return false;
+        }
+      },
+      setEnvironmentEnabled: (enabled) => {
+        const runtimeInstance = getRuntimeInstance(lccInstanceRef.current);
+        if (!runtimeInstance || typeof runtimeInstance.useEnvironment !== "function") {
+          return false;
+        }
+
+        try {
+          runtimeInstance.useEnvironment(enabled);
+          return true;
+        } catch (error) {
+          logLccWarn("useEnvironment 执行失败", error);
+          return false;
         }
       },
       getCurrentView: () => {

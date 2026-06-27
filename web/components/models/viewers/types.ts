@@ -36,6 +36,9 @@ export type ModelViewerHandle = {
   fitView?: () => void;
   enterFullscreen?: () => void;
   takeScreenshot?: () => Promise<string | void> | string | void;
+  togglePointsDisplayMode?: () => boolean;
+  hasEnvironment?: () => boolean;
+  setEnvironmentEnabled?: (enabled: boolean) => boolean;
   getCurrentView?: () => ModelLaunchView | null;
   /** 保存启动视图：含 orbit/walk 区分、near/far 兜底与有效性校验 */
   getLaunchViewForSave?: () => LaunchViewSaveResult;

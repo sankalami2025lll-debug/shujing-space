@@ -517,6 +517,35 @@ export default function LccViewerIframePage() {
     viewerHandleRef.current?.resetView?.();
   }, []);
 
+  /* ---- 点云显示模式切换 ---- */
+  const handleTogglePointsDisplayMode = useCallback(() => {
+    const ok = viewerHandleRef.current?.togglePointsDisplayMode?.();
+
+    if (!ok) {
+      console.warn("[LCC Viewer] togglePointsDisplayMode is not supported by current model.");
+    }
+
+    return Boolean(ok);
+  }, []);
+
+  /* ---- 环境显示开关 ---- */
+  const handleSetEnvironmentEnabled = useCallback((enabled: boolean) => {
+    const viewerHandle = viewerHandleRef.current;
+
+    if (enabled && !viewerHandle?.hasEnvironment?.()) {
+      console.warn("[LCC Viewer] environment is not supported by current model.");
+      return false;
+    }
+
+    const ok = viewerHandle?.setEnvironmentEnabled?.(enabled) ?? false;
+
+    if (!ok && enabled) {
+      console.warn("[LCC Viewer] useEnvironment is not supported by current model.");
+    }
+
+    return Boolean(ok);
+  }, []);
+
   /* ---- 保存启动视图 ---- */
   const handleSaveLaunchView = useCallback(async () => {
     if (saveLaunchViewPending || !detail) return;
@@ -916,6 +945,10 @@ export default function LccViewerIframePage() {
               capabilities={viewerCapabilities}
               onResetView={handleResetView}
               onFitView={handleFitView}
+              onTogglePointsDisplayMode={handleTogglePointsDisplayMode}
+              canTogglePointsDisplayMode={!processingBlocked}
+              onSetEnvironmentEnabled={handleSetEnvironmentEnabled}
+              canUseEnvironment={!processingBlocked}
               onToggleFullscreen={handleFullscreen}
               onSaveLaunchView={handleSaveLaunchView}
               showSaveLaunchView={canShowSaveLaunchView}

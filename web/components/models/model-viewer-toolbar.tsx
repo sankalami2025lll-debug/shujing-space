@@ -33,6 +33,10 @@ interface ModelViewerToolbarProps {
   onToggleFullscreen?: () => void;
   onTakeScreenshot?: () => void;
   onSaveLaunchView?: () => void;
+  onTogglePointsDisplayMode?: () => boolean;
+  canTogglePointsDisplayMode?: boolean;
+  onSetEnvironmentEnabled?: (enabled: boolean) => boolean;
+  canUseEnvironment?: boolean;
   showSaveLaunchView?: boolean;
   onToggleHelp?: () => void;
   isHelpOpen?: boolean;
@@ -119,10 +123,14 @@ function SegmentedOption<T extends string>({
   value,
   current,
   onSelect,
+  disabled = false,
+  disabledTooltip,
 }: {
   value: T;
   current: T;
   onSelect: (value: T) => void;
+  disabled?: boolean;
+  disabledTooltip?: string;
 }) {
   const active = value === current;
 
@@ -130,8 +138,12 @@ function SegmentedOption<T extends string>({
     <button
       type="button"
       onClick={() => onSelect(value)}
+      disabled={disabled}
+      title={disabled ? disabledTooltip : value}
       className={`flex-1 rounded-md py-1.5 text-[12px] transition-all ${
-        active
+        disabled
+          ? "cursor-not-allowed bg-white/[0.02] text-gray-500"
+          : active
           ? "bg-white/20 text-white shadow-sm"
           : "text-gray-400 hover:text-gray-200"
       }`}
@@ -146,11 +158,15 @@ function SettingsSegment<T extends string>({
   options,
   value,
   onSelect,
+  disabledOptions = [],
+  disabledTooltip,
 }: {
   label: string;
   options: readonly T[];
   value: T;
   onSelect: (value: T) => void;
+  disabledOptions?: readonly T[];
+  disabledTooltip?: string;
 }) {
   return (
     <div className="mb-4">
@@ -162,6 +178,8 @@ function SettingsSegment<T extends string>({
             value={option}
             current={value}
             onSelect={onSelect}
+            disabled={disabledOptions.includes(option)}
+            disabledTooltip={disabledTooltip}
           />
         ))}
       </div>
@@ -173,11 +191,34 @@ function ToolbarSettingsPanel({
   settings,
   onChange,
   onClose,
+  onSetEnvironmentEnabled,
+  canUseEnvironment,
 }: {
   settings: ToolbarSettings;
   onChange: (updater: (settings: ToolbarSettings) => ToolbarSettings) => void;
   onClose: () => void;
+  onSetEnvironmentEnabled?: (enabled: boolean) => boolean;
+  canUseEnvironment: boolean;
 }) {
+  const handleSelectEnvironment = (environment: ToolbarSettings["environment"]) => {
+    if (environment === "天空球") {
+      onChange((current) => ({ ...current, environment }));
+      return;
+    }
+
+    if (environment === "环境") {
+      const applied = onSetEnvironmentEnabled?.(true) ?? false;
+      if (!applied) {
+        return;
+      }
+      onChange((current) => ({ ...current, environment }));
+      return;
+    }
+
+    onSetEnvironmentEnabled?.(false);
+    onChange((current) => ({ ...current, environment }));
+  };
+
   return (
     <div className="absolute bottom-14 left-14 z-30 w-64 rounded-xl border border-white/10 bg-[#1a1a1a]/95 p-4 text-white shadow-2xl backdrop-blur-md">
       <div className="mb-4 flex items-center justify-between">
@@ -244,9 +285,9 @@ function ToolbarSettingsPanel({
         label="环境选项"
         options={["无", "环境", "天空球"] as const}
         value={settings.environment}
-        onSelect={(environment) =>
-          onChange((current) => ({ ...current, environment }))
-        }
+        onSelect={handleSelectEnvironment}
+        disabledOptions={canUseEnvironment ? [] : (["环境"] as const)}
+        disabledTooltip="当前模型不支持环境"
       />
 
       <SettingsSegment
@@ -292,6 +333,10 @@ export function ModelViewerToolbar({
   capabilities,
   onResetView,
   onSaveLaunchView,
+  onTogglePointsDisplayMode,
+  canTogglePointsDisplayMode = false,
+  onSetEnvironmentEnabled,
+  canUseEnvironment = false,
   showSaveLaunchView = true,
   onToggleHelp,
   isHelpOpen = false,
@@ -306,7 +351,7 @@ export function ModelViewerToolbar({
   const [settings, setSettings] = useState<ToolbarSettings>({
     collision: true,
     moveSpeed: 1,
-    environment: "环境",
+    environment: "无",
     renderQuality: "平衡",
     unitSystem: "公制",
     lengthUnit: "m",
@@ -316,6 +361,10 @@ export function ModelViewerToolbar({
   const canUseControlMode = canToggleControlMode && typeof onToggleControlMode === "function";
   const canUseReset = capabilities.resetView && typeof onResetView === "function";
   const canUseHelp = typeof onToggleHelp === "function";
+  const canUsePointCloudToggle =
+    canTogglePointsDisplayMode && typeof onTogglePointsDisplayMode === "function";
+  const canUseEnvironmentToggle =
+    canUseEnvironment && typeof onSetEnvironmentEnabled === "function";
   const canUseSaveLaunchView =
     showSaveLaunchView &&
     capabilities.saveView &&
@@ -361,7 +410,14 @@ export function ModelViewerToolbar({
         disabled: !canUseControlMode,
         tooltip: canUseControlMode ? `操作模式：${CONTROL_MODE_UI_LABEL[controlMode]}` : "操作模式（暂不可用）",
       },
-      { key: "point-cloud", name: "点云切换", icon: ScatterChart, disabled: true, tooltip: getDisabledTooltip("点云切换") },
+      {
+        key: "point-cloud",
+        name: "点云切换",
+        icon: ScatterChart,
+        action: onTogglePointsDisplayMode,
+        disabled: !canUsePointCloudToggle,
+        tooltip: canUsePointCloudToggle ? "点云切换" : "当前模型不支持",
+      },
       { key: "annotation", name: "标注", icon: MessageSquare, disabled: true, tooltip: getDisabledTooltip("标注") },
       { key: "screenshot", name: "拍照", icon: Camera, disabled: true, tooltip: getDisabledTooltip("拍照") },
       { key: "measure", name: "测量", icon: Ruler, disabled: true, tooltip: getDisabledTooltip("测量") },
@@ -396,10 +452,12 @@ export function ModelViewerToolbar({
       activeMenu,
       canUseControlMode,
       canUseHelp,
+      canUsePointCloudToggle,
       canUseReset,
       controlMode,
       isHelpOpen,
       onResetView,
+      onTogglePointsDisplayMode,
       onToggleHelp,
     ],
   );
@@ -496,6 +554,8 @@ export function ModelViewerToolbar({
           settings={settings}
           onChange={setSettings}
           onClose={() => setActiveMenu("none")}
+          onSetEnvironmentEnabled={onSetEnvironmentEnabled}
+          canUseEnvironment={canUseEnvironmentToggle}
         />
       ) : null}
     </div>

@@ -153,6 +153,41 @@ export function ModelViewerShell({ model, onLaunchViewSaved }: ModelViewerShellP
     void viewerHandleRef.current?.takeScreenshot?.();
   };
 
+  const handleTogglePointsDisplayMode = useCallback(() => {
+    if (!isLccViewer || processingBlocked) {
+      toast.warning("当前模型不支持点云切换");
+      return false;
+    }
+
+    const succeeded = viewerHandleRef.current?.togglePointsDisplayMode?.() ?? false;
+    if (!succeeded) {
+      toast.warning("当前模型暂不支持点云切换");
+    }
+    return succeeded;
+  }, [isLccViewer, processingBlocked]);
+
+  const handleSetEnvironmentEnabled = useCallback(
+    (enabled: boolean) => {
+      if (!isLccViewer || processingBlocked) {
+        toast.warning("当前模型不支持环境");
+        return false;
+      }
+
+      const viewerHandle = viewerHandleRef.current;
+      if (enabled && !viewerHandle?.hasEnvironment?.()) {
+        toast.warning("当前模型不支持环境");
+        return false;
+      }
+
+      const succeeded = viewerHandle?.setEnvironmentEnabled?.(enabled) ?? false;
+      if (!succeeded && enabled) {
+        toast.warning("环境切换暂不可用");
+      }
+      return succeeded;
+    },
+    [isLccViewer, processingBlocked],
+  );
+
   const handleSaveLaunchView = useCallback(async () => {
     if (saveLaunchViewPending) {
       return;
@@ -460,6 +495,10 @@ export function ModelViewerShell({ model, onLaunchViewSaved }: ModelViewerShellP
               onToggleFullscreen={handleFullscreen}
               onTakeScreenshot={handleTakeScreenshot}
               onSaveLaunchView={handleSaveLaunchView}
+              onTogglePointsDisplayMode={isLccViewer ? handleTogglePointsDisplayMode : undefined}
+              canTogglePointsDisplayMode={isLccViewer && !processingBlocked}
+              onSetEnvironmentEnabled={isLccViewer ? handleSetEnvironmentEnabled : undefined}
+              canUseEnvironment={isLccViewer && !processingBlocked}
               onToggleHelp={isLccViewer ? handleToggleHelp : undefined}
               isHelpOpen={isHelpOpen}
               canShowSaveLaunchView={canShowSaveLaunchView}
