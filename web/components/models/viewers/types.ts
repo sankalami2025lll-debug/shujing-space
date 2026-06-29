@@ -31,6 +31,18 @@ export type ModelViewerPanByDelta = {
   source?: ModelViewerPanDeltaSource;
 };
 
+export type ModelViewerPoint = {
+  x: number;
+  y: number;
+  z: number;
+};
+
+export type ModelHeightClipOptions = {
+  enabled: boolean;
+  horizontalPercent: number;
+  verticalPercent: number;
+};
+
 export type ModelViewerHandle = {
   resetView?: () => void;
   fitView?: () => void;
@@ -39,6 +51,14 @@ export type ModelViewerHandle = {
   togglePointsDisplayMode?: () => boolean;
   hasEnvironment?: () => boolean;
   setEnvironmentEnabled?: (enabled: boolean) => boolean;
+  pickPoint?: (
+    clientX: number,
+    clientY: number,
+    nativeEvent?: MouseEvent | PointerEvent,
+  ) => Promise<ModelViewerPoint | null>;
+  setHeightClipPlane?: (options: ModelHeightClipOptions) => boolean;
+  clearHeightClipPlane?: () => boolean;
+  getViewerBounds?: () => unknown;
   getCurrentView?: () => ModelLaunchView | null;
   /** 保存启动视图：含 orbit/walk 区分、near/far 兜底与有效性校验 */
   getLaunchViewForSave?: () => LaunchViewSaveResult;
@@ -118,6 +138,8 @@ export const LCC_VIEWER_CAPABILITIES: ModelViewerCapabilities = {
   pan: true,
   orbit: true,
   walk: true,
+  measure: true,
+  section: true,
   fullscreen: true,
   saveView: true,
 };

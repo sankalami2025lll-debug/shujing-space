@@ -14,9 +14,21 @@
  * 说明：本页不渲染主站导航栏、模型详情信息面板；仅保留极简 loading/error 状态。
  */
 
-import { useEffect, useRef, useState, useCallback, useMemo } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  useCallback,
+  useMemo,
+  type MouseEvent as ReactMouseEvent,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import { LccViewer } from "@/components/models/lcc-viewer";
+import {
+  ModelMeasureOverlay,
+  type ModelMeasurePoint,
+} from "@/components/models/model-measure-overlay";
 import { ModelLoadingOverlay } from "@/components/models/model-loading-overlay";
 import { ModelViewerToolbar } from "@/components/models/model-viewer-toolbar";
 import { ModelViewerHelp } from "@/components/models/model-viewer-help";
@@ -33,6 +45,8 @@ import type {
   ModelViewerHandle,
   ModelViewerControlMode,
   ModelViewerMovementInput,
+  ModelViewerPoint,
+  ModelHeightClipOptions,
 } from "@/components/models/viewers/types";
 import { LCC_VIEWER_CAPABILITIES } from "@/components/models/viewers/types";
 
@@ -60,6 +74,10 @@ const EMPTY_MOVEMENT_INPUT: ModelViewerMovementInput = {
 /** 创建空移动输入的副本 */
 function cloneEmptyMovementInput(): ModelViewerMovementInput {
   return { ...EMPTY_MOVEMENT_INPUT };
+}
+
+function calculateMeasureDistance(a: ModelViewerPoint, b: ModelViewerPoint) {
+  return Math.sqrt((b.x - a.x) ** 2 + (b.y - a.y) ** 2 + (b.z - a.z) ** 2);
 }
 
 /** 判断当前聚焦元素是否为输入框/文本域/可编辑元素 */
@@ -95,6 +113,7 @@ const IMMERSIVE_FULLSCREEN_TOAST = "当前浏览器不支持沉浸式全屏，�
 /** viewport 相对 screen 的沉浸式阈值（横屏舞台允许宽高互换） */
 const EFFECTIVE_FS_MAX_RATIO = 0.92;
 const EFFECTIVE_FS_MIN_RATIO = 0.82;
+const LCC_VIEWER_STATUS_MESSAGE_TYPE = "SHUJING_LCC_VIEWER_STATUS";
 
 /** 全屏目标上下文：mobile share 优先使用父页面横屏舞台 root */
 interface FullscreenTargetContext {
@@ -311,6 +330,10 @@ export default function LccViewerIframePage() {
   const [isHelpOpen, setIsHelpOpen] = useState(false);
   // saveLaunchViewPending：保存启动视图 loading 态
   const [saveLaunchViewPending, setSaveLaunchViewPending] = useState(false);
+  // 测量模式：仅桌面工具栏触发，手机分享页不渲染入口
+  const [isMeasuring, setIsMeasuring] = useState(false);
+  const [measurePoints, setMeasurePoints] = useState<ModelMeasurePoint[]>([]);
+  const [measureDistance, setMeasureDistance] = useState<number | null>(null);
   /** mobile=1 首次 ready 后是否已应用默认 walk（避免用户切 orbit 后被 effect 打回） */
   const hasAppliedMobileDefaultModeRef = useRef(false);
   /** 详情 embed 竖屏预览：首次 ready 后默认 orbit */
@@ -437,6 +460,60 @@ export default function LccViewerIframePage() {
     return () => clearTimeout(timer);
   }, [detailLoading, detail]);
 
+  useEffect(() => {
+    if (!idValid || window.parent === window) return;
+
+    let terminalMessageCount = 0;
+    let lastSignature = "";
+
+    const sendViewerStatus = () => {
+      const childRoot = viewerContainerRef.current?.querySelector<HTMLElement>(
+        "[data-lcc-viewer-status]",
+      );
+      const viewerStatus =
+        childRoot?.getAttribute("data-lcc-viewer-status") ??
+        (detailError ? "error" : detailLoading ? "loading" : null);
+
+      if (!viewerStatus) return false;
+
+      const firstFrame = childRoot?.getAttribute("data-lcc-first-frame") === "true";
+      const loaded = childRoot?.getAttribute("data-lcc-loaded") === "true";
+      const message = {
+        type: LCC_VIEWER_STATUS_MESSAGE_TYPE,
+        modelId: numericId,
+        viewerType: "lcc",
+        context: isDetailContext ? "detail" : isShareContext ? "share" : "standalone",
+        viewerStatus,
+        loaded,
+        firstFrame,
+      };
+      const signature = JSON.stringify(message);
+      const isTerminalStatus = viewerStatus === "loaded" || viewerStatus === "error" || loaded || firstFrame;
+
+      if (signature !== lastSignature || isTerminalStatus) {
+        window.parent.postMessage(message, window.location.origin);
+        lastSignature = signature;
+      }
+
+      if (isTerminalStatus) {
+        terminalMessageCount += 1;
+        return terminalMessageCount >= 8;
+      }
+
+      terminalMessageCount = 0;
+      return false;
+    };
+
+    const timer = window.setInterval(() => {
+      if (sendViewerStatus()) {
+        window.clearInterval(timer);
+      }
+    }, 250);
+    sendViewerStatus();
+
+    return () => window.clearInterval(timer);
+  }, [detailError, detailLoading, idValid, isDetailContext, isShareContext, numericId]);
+
   /* ---- 派生状态 ---- */
   const processingBlocked = detail ? detail.processingStatus !== "ready" : true;
   // 仅 LCC viewer 具备的能力集
@@ -544,6 +621,168 @@ export default function LccViewerIframePage() {
     }
 
     return Boolean(ok);
+  }, []);
+
+  /* ---- 高度剖切 ---- */
+  const handleSetHeightClipPlane = useCallback(
+    (options: ModelHeightClipOptions) => {
+      if (processingBlocked) {
+        toast.warning("当前模型不支持高度剖切");
+        return false;
+      }
+
+      const ok = viewerHandleRef.current?.setHeightClipPlane?.(options) ?? false;
+
+      if (!ok) {
+        console.warn("[LCC Viewer] setClipBox is not supported by current model.");
+        toast.warning("当前模型不支持高度剖切");
+      }
+
+      return Boolean(ok);
+    },
+    [processingBlocked],
+  );
+
+  const handleClearHeightClipPlane = useCallback(() => {
+    if (processingBlocked) {
+      toast.warning("当前模型不支持高度剖切");
+      return false;
+    }
+
+    const ok = viewerHandleRef.current?.clearHeightClipPlane?.() ?? false;
+
+    if (!ok) {
+      console.warn("[LCC Viewer] clear setClipBox is not supported by current model.");
+      toast.warning("高度剖切重置暂不可用");
+    }
+
+    return Boolean(ok);
+  }, [processingBlocked]);
+
+  /* ---- 测量模式 ---- */
+  const handleClearMeasure = useCallback(() => {
+    setMeasurePoints([]);
+    setMeasureDistance(null);
+  }, []);
+
+  const handleToggleMeasure = useCallback(() => {
+    if (processingBlocked) {
+      toast.warning("当前模型不支持测量");
+      return;
+    }
+
+    setIsMeasuring((current) => {
+      const next = !current;
+      if (next) {
+        clearMovementState();
+        setIsHelpOpen(false);
+        setMeasurePoints([]);
+        setMeasureDistance(null);
+      }
+      return next;
+    });
+  }, [clearMovementState, processingBlocked]);
+
+  const handleMeasurePickAt = useCallback(
+    async (
+      clientX: number,
+      clientY: number,
+      nativeEvent: MouseEvent | PointerEvent,
+      measureArea: HTMLElement,
+    ) => {
+      if (!isMeasuring || processingBlocked) {
+        return;
+      }
+
+      const point = await viewerHandleRef.current?.pickPoint?.(clientX, clientY, nativeEvent);
+      if (!point) {
+        toast.warning("未拾取到模型点，请点击模型表面");
+        return;
+      }
+
+      const rect = measureArea.getBoundingClientRect();
+      const nextPoint: ModelMeasurePoint = {
+        world: point,
+        screen: {
+          x: clientX - rect.left,
+          y: clientY - rect.top,
+        },
+      };
+      const nextPoints = measurePoints.length >= 2 ? [nextPoint] : [...measurePoints, nextPoint];
+      setMeasurePoints(nextPoints);
+      setMeasureDistance(
+        nextPoints.length === 2
+          ? calculateMeasureDistance(nextPoints[0].world, nextPoints[1].world)
+          : null,
+      );
+    },
+    [isMeasuring, measurePoints, processingBlocked],
+  );
+
+  const handleMeasurePick = useCallback(
+    async (event: ReactMouseEvent<HTMLDivElement> | ReactPointerEvent<HTMLDivElement>) => {
+      event.preventDefault();
+      event.stopPropagation();
+      await handleMeasurePickAt(event.clientX, event.clientY, event.nativeEvent, event.currentTarget);
+    },
+    [handleMeasurePickAt],
+  );
+
+  useEffect(() => {
+    const measureArea = viewerContainerRef.current;
+    if (
+      !measureArea ||
+      !isMeasuring ||
+      processingBlocked ||
+      isHelpOpen ||
+      isMobileViewer ||
+      isEmbeddedMobilePreview
+    ) {
+      return;
+    }
+
+    let lastPointerPickAt = 0;
+    const shouldIgnoreTarget = (target: EventTarget | null) =>
+      target instanceof HTMLElement &&
+      Boolean(target.closest("button,a,input,textarea,select,[data-measure-panel='true']"));
+    const pickFromNativeEvent = (event: MouseEvent | PointerEvent) => {
+      if (shouldIgnoreTarget(event.target)) {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      void handleMeasurePickAt(event.clientX, event.clientY, event, measureArea);
+    };
+    const handlePointerDown = (event: PointerEvent) => {
+      lastPointerPickAt = Date.now();
+      pickFromNativeEvent(event);
+    };
+    const handleClick = (event: MouseEvent) => {
+      if (Date.now() - lastPointerPickAt < 350) {
+        return;
+      }
+      pickFromNativeEvent(event);
+    };
+
+    measureArea.addEventListener("pointerdown", handlePointerDown, true);
+    measureArea.addEventListener("click", handleClick, true);
+    return () => {
+      measureArea.removeEventListener("pointerdown", handlePointerDown, true);
+      measureArea.removeEventListener("click", handleClick, true);
+    };
+  }, [
+    handleMeasurePickAt,
+    isEmbeddedMobilePreview,
+    isHelpOpen,
+    isMeasuring,
+    isMobileViewer,
+    processingBlocked,
+  ]);
+
+  const handleExitMeasure = useCallback(() => {
+    setIsMeasuring(false);
+    setMeasurePoints([]);
+    setMeasureDistance(null);
   }, []);
 
   /* ---- 保存启动视图 ---- */
@@ -821,6 +1060,9 @@ export default function LccViewerIframePage() {
     hasAppliedEmbeddedOrbitRef.current = false;
     clearMovementState();
     setIsHelpOpen(false);
+    setIsMeasuring(false);
+    setMeasurePoints([]);
+    setMeasureDistance(null);
     setControlMode(isEmbeddedMobilePreview ? "orbit" : "walk");
   }, [clearMovementState, detail?.id, isEmbeddedMobilePreview]);
 
@@ -892,6 +1134,21 @@ export default function LccViewerIframePage() {
         suppressLoadingOverlay={isMobileShareViewer}
       />
 
+      <ModelMeasureOverlay
+        active={
+          !isMobileViewer &&
+          !isEmbeddedMobilePreview &&
+          isMeasuring &&
+          !processingBlocked &&
+          !isHelpOpen
+        }
+        points={measurePoints}
+        distance={measureDistance}
+        onPick={handleMeasurePick}
+        onClear={handleClearMeasure}
+        onExit={handleExitMeasure}
+      />
+
       {/* 帮助面板：分享 mobile=1 用触屏帮助；embed 预览不展示工具栏/帮助 */}
       {!isEmbeddedMobilePreview &&
         (isMobileViewer ? (
@@ -949,6 +1206,12 @@ export default function LccViewerIframePage() {
               canTogglePointsDisplayMode={!processingBlocked}
               onSetEnvironmentEnabled={handleSetEnvironmentEnabled}
               canUseEnvironment={!processingBlocked}
+              onToggleMeasure={handleToggleMeasure}
+              canMeasure={!processingBlocked}
+              isMeasuring={isMeasuring}
+              onSetHeightClipPlane={handleSetHeightClipPlane}
+              onClearHeightClipPlane={handleClearHeightClipPlane}
+              canUseHeightClipPlane={!processingBlocked}
               onToggleFullscreen={handleFullscreen}
               onSaveLaunchView={handleSaveLaunchView}
               showSaveLaunchView={canShowSaveLaunchView}

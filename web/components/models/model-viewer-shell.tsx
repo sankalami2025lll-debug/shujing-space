@@ -1,7 +1,19 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type MouseEvent as ReactMouseEvent,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
 import { toast } from "sonner";
+import {
+  ModelMeasureOverlay,
+  type ModelMeasurePoint,
+} from "@/components/models/model-measure-overlay";
 import { ModelViewerHelp } from "@/components/models/model-viewer-help";
 import { ModelViewerToolbar } from "@/components/models/model-viewer-toolbar";
 import { BimViewer } from "@/components/models/viewers/bim-viewer";
@@ -16,6 +28,8 @@ import {
   type ModelViewerControlMode,
   type ModelViewerMovementInput,
   type ModelViewerHandle,
+  type ModelViewerPoint,
+  type ModelHeightClipOptions,
 } from "@/components/models/viewers/types";
 import { ApiError, http } from "@/lib/http";
 import { getModelViewerKind } from "@/lib/model-viewer-kind";
@@ -43,6 +57,10 @@ const EMPTY_MOVEMENT_INPUT: ModelViewerMovementInput = {
 
 function cloneEmptyMovementInput(): ModelViewerMovementInput {
   return { ...EMPTY_MOVEMENT_INPUT };
+}
+
+function calculateMeasureDistance(a: ModelViewerPoint, b: ModelViewerPoint) {
+  return Math.sqrt((b.x - a.x) ** 2 + (b.y - a.y) ** 2 + (b.z - a.z) ** 2);
 }
 
 function isTypingElement(target: EventTarget | null) {
@@ -75,6 +93,7 @@ function processingStatusText(status: ModelDetail["processingStatus"]) {
 export function ModelViewerShell({ model, onLaunchViewSaved }: ModelViewerShellProps) {
   const shellRootRef = useRef<HTMLDivElement | null>(null);
   const viewerFullscreenTargetRef = useRef<HTMLDivElement | null>(null);
+  const viewerInteractionAreaRef = useRef<HTMLDivElement | null>(null);
   const viewerHandleRef = useRef<ModelViewerHandle | null>(null);
   const [viewerResetSeed, setViewerResetSeed] = useState(0);
   const [isHelpOpen, setIsHelpOpen] = useState(false);
@@ -82,6 +101,9 @@ export function ModelViewerShell({ model, onLaunchViewSaved }: ModelViewerShellP
   const [movementInput, setMovementInput] = useState<ModelViewerMovementInput>(EMPTY_MOVEMENT_INPUT);
   const [moveSpeedMultiplier, setMoveSpeedMultiplier] = useState(1);
   const [saveLaunchViewPending, setSaveLaunchViewPending] = useState(false);
+  const [isMeasuring, setIsMeasuring] = useState(false);
+  const [measurePoints, setMeasurePoints] = useState<ModelMeasurePoint[]>([]);
+  const [measureDistance, setMeasureDistance] = useState<number | null>(null);
   const viewerKind = getModelViewerKind(model);
   const [controlMode, setControlMode] = useState<ModelViewerControlMode>(
     viewerKind === "lcc" ? "walk" : "orbit",
@@ -188,6 +210,153 @@ export function ModelViewerShell({ model, onLaunchViewSaved }: ModelViewerShellP
     [isLccViewer, processingBlocked],
   );
 
+  const handleSetHeightClipPlane = useCallback(
+    (options: ModelHeightClipOptions) => {
+      if (!isLccViewer || processingBlocked) {
+        toast.warning("当前模型不支持高度剖切");
+        return false;
+      }
+
+      const succeeded = viewerHandleRef.current?.setHeightClipPlane?.(options) ?? false;
+      if (!succeeded) {
+        toast.warning("当前模型不支持高度剖切");
+      }
+      return succeeded;
+    },
+    [isLccViewer, processingBlocked],
+  );
+
+  const handleClearHeightClipPlane = useCallback(() => {
+    if (!isLccViewer || processingBlocked) {
+      toast.warning("当前模型不支持高度剖切");
+      return false;
+    }
+
+    const succeeded = viewerHandleRef.current?.clearHeightClipPlane?.() ?? false;
+    if (!succeeded) {
+      toast.warning("高度剖切重置暂不可用");
+    }
+    return succeeded;
+  }, [isLccViewer, processingBlocked]);
+
+  const handleClearMeasure = useCallback(() => {
+    setMeasurePoints([]);
+    setMeasureDistance(null);
+  }, []);
+
+  const handleToggleMeasure = useCallback(() => {
+    if (!isLccViewer || processingBlocked) {
+      toast.warning("当前模型不支持测量");
+      return;
+    }
+
+    setIsMeasuring((current) => {
+      const next = !current;
+      if (next) {
+        clearMovementState();
+        setIsHelpOpen(false);
+        setMeasurePoints([]);
+        setMeasureDistance(null);
+      }
+      return next;
+    });
+  }, [clearMovementState, isLccViewer, processingBlocked]);
+
+  const handleMeasurePickAt = useCallback(
+    async (
+      clientX: number,
+      clientY: number,
+      nativeEvent: MouseEvent | PointerEvent,
+      measureArea: HTMLElement,
+    ) => {
+      if (!isMeasuring || !isLccViewer || processingBlocked) {
+        return;
+      }
+
+      const point = await viewerHandleRef.current?.pickPoint?.(clientX, clientY, nativeEvent);
+      if (!point) {
+        toast.warning("未拾取到模型点，请点击模型表面");
+        return;
+      }
+
+      const rect = measureArea.getBoundingClientRect();
+      const nextPoint: ModelMeasurePoint = {
+        world: point,
+        screen: {
+          x: clientX - rect.left,
+          y: clientY - rect.top,
+        },
+      };
+      const nextPoints = measurePoints.length >= 2 ? [nextPoint] : [...measurePoints, nextPoint];
+      setMeasurePoints(nextPoints);
+      setMeasureDistance(
+        nextPoints.length === 2
+          ? calculateMeasureDistance(nextPoints[0].world, nextPoints[1].world)
+          : null,
+      );
+    },
+    [isLccViewer, isMeasuring, measurePoints, processingBlocked],
+  );
+
+  const handleMeasurePick = useCallback(
+    async (event: ReactMouseEvent<HTMLDivElement> | ReactPointerEvent<HTMLDivElement>) => {
+      event.preventDefault();
+      event.stopPropagation();
+      await handleMeasurePickAt(event.clientX, event.clientY, event.nativeEvent, event.currentTarget);
+    },
+    [handleMeasurePickAt],
+  );
+
+  useEffect(() => {
+    const measureArea = viewerInteractionAreaRef.current;
+    if (!measureArea || !isMeasuring || !isLccViewer || processingBlocked || isHelpOpen || isExternalFullscreen) {
+      return;
+    }
+
+    let lastPointerPickAt = 0;
+    const shouldIgnoreTarget = (target: EventTarget | null) =>
+      target instanceof HTMLElement &&
+      Boolean(target.closest("button,a,input,textarea,select,[data-measure-panel='true']"));
+    const pickFromNativeEvent = (event: MouseEvent | PointerEvent) => {
+      if (shouldIgnoreTarget(event.target)) {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      void handleMeasurePickAt(event.clientX, event.clientY, event, measureArea);
+    };
+    const handlePointerDown = (event: PointerEvent) => {
+      lastPointerPickAt = Date.now();
+      pickFromNativeEvent(event);
+    };
+    const handleClick = (event: MouseEvent) => {
+      if (Date.now() - lastPointerPickAt < 350) {
+        return;
+      }
+      pickFromNativeEvent(event);
+    };
+
+    measureArea.addEventListener("pointerdown", handlePointerDown, true);
+    measureArea.addEventListener("click", handleClick, true);
+    return () => {
+      measureArea.removeEventListener("pointerdown", handlePointerDown, true);
+      measureArea.removeEventListener("click", handleClick, true);
+    };
+  }, [
+    handleMeasurePickAt,
+    isExternalFullscreen,
+    isHelpOpen,
+    isLccViewer,
+    isMeasuring,
+    processingBlocked,
+  ]);
+
+  const handleExitMeasure = useCallback(() => {
+    setIsMeasuring(false);
+    setMeasurePoints([]);
+    setMeasureDistance(null);
+  }, []);
+
   const handleSaveLaunchView = useCallback(async () => {
     if (saveLaunchViewPending) {
       return;
@@ -252,6 +421,9 @@ export function ModelViewerShell({ model, onLaunchViewSaved }: ModelViewerShellP
   useEffect(() => {
     clearMovementState();
     setIsHelpOpen(false);
+    setIsMeasuring(false);
+    setMeasurePoints([]);
+    setMeasureDistance(null);
     setControlMode(isLccViewer ? "walk" : "orbit");
   }, [clearMovementState, isLccViewer, model.id]);
 
@@ -467,11 +639,22 @@ export function ModelViewerShell({ model, onLaunchViewSaved }: ModelViewerShellP
   };
 
   return (
-    <div ref={shellRootRef} className="flex h-full flex-col bg-[#0d0d0d]">
-      <div className="relative min-h-[360px] flex-1 overflow-hidden lg:min-h-[520px]">
+      <div ref={shellRootRef} className="flex h-full flex-col bg-[#0d0d0d]">
+        <div
+          ref={viewerInteractionAreaRef}
+          className="relative min-h-[360px] flex-1 overflow-hidden lg:min-h-[520px]"
+        >
         <div ref={viewerFullscreenTargetRef} className="h-full w-full bg-[#0d0d0d]">
           {renderViewer()}
         </div>
+        <ModelMeasureOverlay
+          active={isLccViewer && isMeasuring && !processingBlocked && !isExternalFullscreen && !isHelpOpen}
+          points={measurePoints}
+          distance={measureDistance}
+          onPick={handleMeasurePick}
+          onClear={handleClearMeasure}
+          onExit={handleExitMeasure}
+        />
         <ModelViewerHelp
           open={isLccViewer && isHelpOpen && !isExternalFullscreen}
           onClose={() => {
@@ -499,6 +682,12 @@ export function ModelViewerShell({ model, onLaunchViewSaved }: ModelViewerShellP
               canTogglePointsDisplayMode={isLccViewer && !processingBlocked}
               onSetEnvironmentEnabled={isLccViewer ? handleSetEnvironmentEnabled : undefined}
               canUseEnvironment={isLccViewer && !processingBlocked}
+              onToggleMeasure={isLccViewer ? handleToggleMeasure : undefined}
+              canMeasure={isLccViewer && !processingBlocked}
+              isMeasuring={isMeasuring}
+              onSetHeightClipPlane={isLccViewer ? handleSetHeightClipPlane : undefined}
+              onClearHeightClipPlane={isLccViewer ? handleClearHeightClipPlane : undefined}
+              canUseHeightClipPlane={isLccViewer && !processingBlocked}
               onToggleHelp={isLccViewer ? handleToggleHelp : undefined}
               isHelpOpen={isHelpOpen}
               canShowSaveLaunchView={canShowSaveLaunchView}

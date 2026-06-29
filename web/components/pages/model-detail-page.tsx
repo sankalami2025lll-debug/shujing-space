@@ -81,6 +81,21 @@ function buildLccDetailEmbedIframeSrc(modelId: number): string {
   return `/viewer/lcc/${modelId}?${params.toString()}`;
 }
 
+const LCC_VIEWER_STATUS_MESSAGE_TYPE = "SHUJING_LCC_VIEWER_STATUS";
+
+type LccViewerStatusMessage = {
+  type: typeof LCC_VIEWER_STATUS_MESSAGE_TYPE;
+  modelId?: number | string;
+  viewerStatus?: string;
+  loaded?: boolean;
+  firstFrame?: boolean;
+};
+
+function isLccViewerStatusMessage(value: unknown): value is LccViewerStatusMessage {
+  if (!value || typeof value !== "object") return false;
+  return (value as { type?: unknown }).type === LCC_VIEWER_STATUS_MESSAGE_TYPE;
+}
+
 function RightPanelSkeleton() {
   return (
     <div className="p-5 space-y-4 animate-pulse">
@@ -373,7 +388,13 @@ export default function ModelDetailPage({ modelId }: ModelDetailPageProps) {
         const frame = iframeRef.current;
         const iframeDoc = frame?.contentDocument;
         const childLocation = iframeDoc?.location?.pathname ?? null;
-        if (!iframeDoc || childLocation !== lccExpectedPath) return;
+        if (!iframeDoc || childLocation !== lccExpectedPath) {
+          if (Date.now() - pollStartedAt > 30000) {
+            setModelLoaded(true);
+            clearLccIframePoll(pollRef);
+          }
+          return;
+        }
 
         const childRoot = iframeDoc.querySelector("[data-lcc-viewer-status]");
         const childViewerStatus = childRoot?.getAttribute("data-lcc-viewer-status");
@@ -400,6 +421,47 @@ export default function ModelDetailPage({ modelId }: ModelDetailPageProps) {
     },
     [clearLccIframePoll, lccExpectedPath],
   );
+
+  useEffect(() => {
+    if (!detail?.id || !isLcc) return;
+
+    const handleViewerStatusMessage = (event: MessageEvent) => {
+      if (event.origin !== window.location.origin) return;
+      if (!isLccViewerStatusMessage(event.data)) return;
+
+      const messageModelId = Number(event.data.modelId);
+      if (!Number.isFinite(messageModelId) || messageModelId !== detail.id) return;
+
+      const isDesktopSource = event.source === desktopLccIframeRef.current?.contentWindow;
+      const isMobileSource = event.source === mobileLccIframeRef.current?.contentWindow;
+      if (!isDesktopSource && !isMobileSource) return;
+
+      const setModelLoaded = isMobileSource
+        ? setMobileLccIframeModelLoaded
+        : setDesktopLccIframeModelLoaded;
+      const setViewerErrored = isMobileSource
+        ? setMobileLccIframeViewerErrored
+        : setDesktopLccIframeViewerErrored;
+      const pollRef = isMobileSource
+        ? mobileLccIframeVisibilityPollRef
+        : desktopLccIframeVisibilityPollRef;
+
+      if (event.data.viewerStatus === "error") {
+        setViewerErrored(true);
+        clearLccIframePoll(pollRef);
+        return;
+      }
+
+      if (event.data.firstFrame || event.data.loaded || event.data.viewerStatus === "loaded") {
+        setModelLoaded(true);
+        setViewerErrored(false);
+        clearLccIframePoll(pollRef);
+      }
+    };
+
+    window.addEventListener("message", handleViewerStatusMessage);
+    return () => window.removeEventListener("message", handleViewerStatusMessage);
+  }, [clearLccIframePoll, detail?.id, isLcc]);
 
   useEffect(() => {
     if (!confirmOpen) return;
@@ -578,7 +640,9 @@ export default function ModelDetailPage({ modelId }: ModelDetailPageProps) {
                             : "absolute inset-0 z-20 opacity-0 pointer-events-none transition-opacity duration-300"
                         }
                       >
-                        <ModelLoadingOverlay visible showText={false} />
+                        {showDesktopLccOuterOverlay ? (
+                          <ModelLoadingOverlay visible showText={false} />
+                        ) : null}
                       </div>
                     </div>
                   ) : viewerReady ? (
@@ -627,7 +691,9 @@ export default function ModelDetailPage({ modelId }: ModelDetailPageProps) {
                               : "absolute inset-0 z-20 opacity-0 pointer-events-none transition-opacity duration-300"
                           }
                         >
-                          <ModelLoadingOverlay visible showText={false} />
+                          {showMobileLccOuterOverlay ? (
+                            <ModelLoadingOverlay visible showText={false} />
+                          ) : null}
                         </div>
                       </div>
                     ) : viewerReady ? (

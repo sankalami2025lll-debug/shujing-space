@@ -20,8 +20,10 @@ import {
   X,
   type LucideIcon,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { ModelSectionPanel } from "@/components/models/model-section-panel";
 import type {
+  ModelHeightClipOptions,
   ModelViewerCapabilities,
   ModelViewerControlMode,
 } from "@/components/models/viewers/types";
@@ -37,6 +39,12 @@ interface ModelViewerToolbarProps {
   canTogglePointsDisplayMode?: boolean;
   onSetEnvironmentEnabled?: (enabled: boolean) => boolean;
   canUseEnvironment?: boolean;
+  onToggleMeasure?: () => void;
+  canMeasure?: boolean;
+  isMeasuring?: boolean;
+  onSetHeightClipPlane?: (options: ModelHeightClipOptions) => boolean;
+  onClearHeightClipPlane?: () => boolean;
+  canUseHeightClipPlane?: boolean;
   showSaveLaunchView?: boolean;
   onToggleHelp?: () => void;
   isHelpOpen?: boolean;
@@ -48,7 +56,7 @@ interface ModelViewerToolbarProps {
   canToggleControlMode?: boolean;
 }
 
-type ActiveToolbarMenu = "none" | "operation" | "settings";
+type ActiveToolbarMenu = "none" | "operation" | "settings" | "section";
 
 type ToolbarButtonConfig = {
   key: string;
@@ -71,10 +79,19 @@ type ToolbarSettings = {
   lengthUnit: "m" | "mm";
 };
 
+type ToolbarSectionState = {
+  enabled: boolean;
+  horizontalPercent: number;
+  verticalPercent: number;
+};
+
 const CONTROL_MODE_UI_LABEL: Record<ModelViewerControlMode, string> = {
   walk: "第一人称漫游",
   orbit: "枢轴模式",
 };
+
+const SECTION_CENTER_PERCENT = 50;
+const SECTION_DEAD_ZONE = 1;
 
 function getModeIcon(mode: ModelViewerControlMode) {
   return mode === "walk" ? Footprints : Orbit;
@@ -82,6 +99,17 @@ function getModeIcon(mode: ModelViewerControlMode) {
 
 function getDisabledTooltip(name: string) {
   return `${name}（即将开放）`;
+}
+
+function isSectionPercentActive(percent: number) {
+  return Math.abs(percent - SECTION_CENTER_PERCENT) > SECTION_DEAD_ZONE;
+}
+
+function isSectionClipActive(state: Pick<ToolbarSectionState, "horizontalPercent" | "verticalPercent">) {
+  return (
+    isSectionPercentActive(state.horizontalPercent) ||
+    isSectionPercentActive(state.verticalPercent)
+  );
 }
 
 function ToolbarTooltip({ label }: { label: string }) {
@@ -337,6 +365,12 @@ export function ModelViewerToolbar({
   canTogglePointsDisplayMode = false,
   onSetEnvironmentEnabled,
   canUseEnvironment = false,
+  onToggleMeasure,
+  canMeasure = false,
+  isMeasuring = false,
+  onSetHeightClipPlane,
+  onClearHeightClipPlane,
+  canUseHeightClipPlane = false,
   showSaveLaunchView = true,
   onToggleHelp,
   isHelpOpen = false,
@@ -356,6 +390,13 @@ export function ModelViewerToolbar({
     unitSystem: "公制",
     lengthUnit: "m",
   });
+  const [sectionState, setSectionState] = useState<ToolbarSectionState>({
+    enabled: false,
+    horizontalPercent: SECTION_CENTER_PERCENT,
+    verticalPercent: SECTION_CENTER_PERCENT,
+  });
+  const lastSectionApplyAtRef = useRef(0);
+  const pendingSectionApplyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const ModeIcon = getModeIcon(controlMode);
 
   const canUseControlMode = canToggleControlMode && typeof onToggleControlMode === "function";
@@ -365,6 +406,13 @@ export function ModelViewerToolbar({
     canTogglePointsDisplayMode && typeof onTogglePointsDisplayMode === "function";
   const canUseEnvironmentToggle =
     canUseEnvironment && typeof onSetEnvironmentEnabled === "function";
+  const canUseMeasure =
+    capabilities.measure && canMeasure && typeof onToggleMeasure === "function";
+  const canUseSection =
+    capabilities.section &&
+    canUseHeightClipPlane &&
+    typeof onSetHeightClipPlane === "function" &&
+    typeof onClearHeightClipPlane === "function";
   const canUseSaveLaunchView =
     showSaveLaunchView &&
     capabilities.saveView &&
@@ -389,6 +437,95 @@ export function ModelViewerToolbar({
       return;
     }
     onToggleControlMode();
+  };
+
+  useEffect(() => {
+    return () => {
+      if (pendingSectionApplyTimerRef.current) {
+        clearTimeout(pendingSectionApplyTimerRef.current);
+      }
+    };
+  }, []);
+
+  const applySectionClip = (nextState: ToolbarSectionState) => {
+    return onSetHeightClipPlane?.({
+      enabled: nextState.enabled,
+      horizontalPercent: nextState.horizontalPercent,
+      verticalPercent: nextState.verticalPercent,
+    }) ?? false;
+  };
+
+  const scheduleSectionClip = (nextState: ToolbarSectionState) => {
+    if (!nextState.enabled) {
+      return;
+    }
+
+    const apply = () => {
+      pendingSectionApplyTimerRef.current = null;
+      lastSectionApplyAtRef.current = Date.now();
+      applySectionClip(nextState);
+    };
+    const elapsed = Date.now() - lastSectionApplyAtRef.current;
+    const delay = Math.max(0, 120 - elapsed);
+
+    if (pendingSectionApplyTimerRef.current) {
+      clearTimeout(pendingSectionApplyTimerRef.current);
+    }
+
+    if (delay === 0) {
+      apply();
+      return;
+    }
+
+    pendingSectionApplyTimerRef.current = setTimeout(apply, delay);
+  };
+
+  const handleSectionPercentChange = (
+    key: "horizontalPercent" | "verticalPercent",
+    percent: number,
+  ) => {
+    const nextPercent = Math.max(0, Math.min(100, percent));
+    setSectionState((current) => {
+      const nextState = {
+        ...current,
+        [key]: nextPercent,
+      };
+      nextState.enabled = isSectionClipActive(nextState);
+
+      if (!canUseSection) {
+        return nextState;
+      }
+
+      if (!nextState.enabled) {
+        if (pendingSectionApplyTimerRef.current) {
+          clearTimeout(pendingSectionApplyTimerRef.current);
+          pendingSectionApplyTimerRef.current = null;
+        }
+        if (current.enabled) {
+          onClearHeightClipPlane?.();
+        }
+        return nextState;
+      }
+
+      scheduleSectionClip(nextState);
+      return nextState;
+    });
+  };
+
+  const handleSectionReset = () => {
+    if (pendingSectionApplyTimerRef.current) {
+      clearTimeout(pendingSectionApplyTimerRef.current);
+      pendingSectionApplyTimerRef.current = null;
+    }
+    const cleared = onClearHeightClipPlane?.() ?? false;
+    if (!cleared) {
+      return;
+    }
+    setSectionState({
+      enabled: false,
+      horizontalPercent: SECTION_CENTER_PERCENT,
+      verticalPercent: SECTION_CENTER_PERCENT,
+    });
   };
 
   const guestTools = useMemo<ToolbarButtonConfig[]>(
@@ -420,14 +557,24 @@ export function ModelViewerToolbar({
       },
       { key: "annotation", name: "标注", icon: MessageSquare, disabled: true, tooltip: getDisabledTooltip("标注") },
       { key: "screenshot", name: "拍照", icon: Camera, disabled: true, tooltip: getDisabledTooltip("拍照") },
-      { key: "measure", name: "测量", icon: Ruler, disabled: true, tooltip: getDisabledTooltip("测量") },
+      {
+        key: "measure",
+        name: "测量",
+        icon: Ruler,
+        action: onToggleMeasure,
+        active: isMeasuring,
+        disabled: !canUseMeasure,
+        tooltip: canUseMeasure ? (isMeasuring ? "退出测量" : "测量") : "当前模型不支持测量",
+      },
       {
         key: "section",
         name: "高度剖切",
         icon: SplitSquareHorizontal,
+        action: () => setActiveMenu((current) => (current === "section" ? "none" : "section")),
+        active: activeMenu === "section" || sectionState.enabled,
         rotate: true,
-        disabled: true,
-        tooltip: getDisabledTooltip("高度剖切"),
+        disabled: !canUseSection,
+        tooltip: canUseSection ? "高度剖切" : "当前模型不支持高度剖切",
       },
       {
         key: "settings",
@@ -452,11 +599,16 @@ export function ModelViewerToolbar({
       activeMenu,
       canUseControlMode,
       canUseHelp,
+      canUseMeasure,
       canUsePointCloudToggle,
       canUseReset,
+      canUseSection,
       controlMode,
+      sectionState.enabled,
+      isMeasuring,
       isHelpOpen,
       onResetView,
+      onToggleMeasure,
       onTogglePointsDisplayMode,
       onToggleHelp,
     ],
@@ -556,6 +708,21 @@ export function ModelViewerToolbar({
           onClose={() => setActiveMenu("none")}
           onSetEnvironmentEnabled={onSetEnvironmentEnabled}
           canUseEnvironment={canUseEnvironmentToggle}
+        />
+      ) : null}
+
+      {activeMenu === "section" && isToolbarOpen && canUseSection ? (
+        <ModelSectionPanel
+          horizontalPercent={sectionState.horizontalPercent}
+          verticalPercent={sectionState.verticalPercent}
+          onHorizontalPercentChange={(percent) =>
+            handleSectionPercentChange("horizontalPercent", percent)
+          }
+          onVerticalPercentChange={(percent) =>
+            handleSectionPercentChange("verticalPercent", percent)
+          }
+          onReset={handleSectionReset}
+          onClose={() => setActiveMenu("none")}
         />
       ) : null}
     </div>

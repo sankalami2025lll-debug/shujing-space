@@ -18,6 +18,20 @@ import { buildLccShareIframeSrc, useMobileViewer } from "@/lib/use-mobile-viewer
 import type { ModelDetail } from "@/lib/types";
 
 const ORIENTATION_LANDSCAPE = "landscape" as const;
+const LCC_VIEWER_STATUS_MESSAGE_TYPE = "SHUJING_LCC_VIEWER_STATUS";
+
+type LccViewerStatusMessage = {
+  type: typeof LCC_VIEWER_STATUS_MESSAGE_TYPE;
+  modelId?: number | string;
+  viewerStatus?: string;
+  loaded?: boolean;
+  firstFrame?: boolean;
+};
+
+function isLccViewerStatusMessage(value: unknown): value is LccViewerStatusMessage {
+  if (!value || typeof value !== "object") return false;
+  return (value as { type?: unknown }).type === LCC_VIEWER_STATUS_MESSAGE_TYPE;
+}
 
 /** 手机竖屏且无法系统横屏时：整页横屏舞台（100dvh×100dvw 旋转 90°），子内容需 h-full w-full 铺满 */
 function MobileForcedLandscapeStage({
@@ -276,6 +290,40 @@ export default function ModelShareViewerPage({ modelId }: { modelId: string }) {
     };
   }, [detail, isLcc, lccIframeSrc]);
 
+  useEffect(() => {
+    if (!detail?.id || !isLcc) return;
+
+    const handleViewerStatusMessage = (event: MessageEvent) => {
+      if (event.origin !== window.location.origin) return;
+      if (!isLccViewerStatusMessage(event.data)) return;
+
+      const messageModelId = Number(event.data.modelId);
+      if (!Number.isFinite(messageModelId) || messageModelId !== detail.id) return;
+      if (event.source !== lccIframeRef.current?.contentWindow) return;
+
+      if (event.data.viewerStatus === "error") {
+        setLccIframeViewerErrored(true);
+        if (lccIframeVisibilityPollRef.current !== null) {
+          window.clearInterval(lccIframeVisibilityPollRef.current);
+          lccIframeVisibilityPollRef.current = null;
+        }
+        return;
+      }
+
+      if (event.data.firstFrame || event.data.loaded || event.data.viewerStatus === "loaded") {
+        setLccIframeModelLoaded(true);
+        setLccIframeViewerErrored(false);
+        if (lccIframeVisibilityPollRef.current !== null) {
+          window.clearInterval(lccIframeVisibilityPollRef.current);
+          lccIframeVisibilityPollRef.current = null;
+        }
+      }
+    };
+
+    window.addEventListener("message", handleViewerStatusMessage);
+    return () => window.removeEventListener("message", handleViewerStatusMessage);
+  }, [detail?.id, isLcc]);
+
   const renderViewer = () => {
     if (!detail) return null;
 
@@ -306,7 +354,7 @@ export default function ModelShareViewerPage({ modelId }: { modelId: string }) {
                 : "absolute inset-0 z-20 opacity-0 pointer-events-none transition-opacity duration-300"
             }
           >
-            <ModelLoadingOverlay visible showText={false} />
+            {showLccOuterOverlay ? <ModelLoadingOverlay visible showText={false} /> : null}
           </div>
         </div>
       );

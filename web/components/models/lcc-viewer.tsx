@@ -14,6 +14,8 @@ import type {
   ModelViewerControlMode,
   ModelViewerHandle,
   ModelViewerMovementInput,
+  ModelViewerPoint,
+  ModelHeightClipOptions,
 } from "@/components/models/viewers/types";
 import type { LaunchViewSaveResult, ModelLaunchView } from "@/lib/types";
 
@@ -73,8 +75,8 @@ interface LccRenderApi {
 }
 
 interface LccBoundsLike {
-  min: { x: number; y: number; z: number };
-  max: { x: number; y: number; z: number };
+  min: unknown;
+  max: unknown;
 }
 
 interface LccRuntimeInstance {
@@ -83,7 +85,21 @@ interface LccRuntimeInstance {
   togglePointsDisplayMode?: () => void;
   hasEnvironment?: () => boolean;
   useEnvironment?: (enabled: boolean) => void;
+  raycast?: (params: {
+    evt: MouseEvent | PointerEvent | { x: number; y: number; clientX: number; clientY: number };
+    maxDistance: number;
+    radius: number;
+  }) => unknown;
+  setClipPlane?: (normal?: number[] | null, constant?: number) => void;
+  setClipBox?: (options?: LccClipBoxOptions | null) => void;
 }
+
+type LccClipBoxOptions = {
+  position: [number, number, number];
+  rotation: [number, number, number];
+  scale: [number, number, number];
+  clipSide?: number;
+};
 
 interface LccSdkGlobal {
   LCCRender?: LccRenderApi;
@@ -1001,6 +1017,172 @@ function getBoundsSphere(bounds: THREE.Box3) {
 
 function isValidVector3(vector: THREE.Vector3) {
   return Number.isFinite(vector.x) && Number.isFinite(vector.y) && Number.isFinite(vector.z);
+}
+
+function readModelViewerPoint(value: unknown): ModelViewerPoint | null {
+  if (Array.isArray(value) && value.length >= 3) {
+    const [x, y, z] = value;
+    if (
+      typeof x === "number" &&
+      typeof y === "number" &&
+      typeof z === "number" &&
+      Number.isFinite(x) &&
+      Number.isFinite(y) &&
+      Number.isFinite(z)
+    ) {
+      return { x, y, z };
+    }
+  }
+
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const point = value as { x?: unknown; y?: unknown; z?: unknown };
+  if (
+    typeof point.x !== "number" ||
+    typeof point.y !== "number" ||
+    typeof point.z !== "number" ||
+    !Number.isFinite(point.x) ||
+    !Number.isFinite(point.y) ||
+    !Number.isFinite(point.z)
+  ) {
+    return null;
+  }
+
+  return {
+    x: point.x,
+    y: point.y,
+    z: point.z,
+  };
+}
+
+function parseModelViewerPoint(value: unknown): ModelViewerPoint | null {
+  const directPoint = readModelViewerPoint(value);
+  if (directPoint) {
+    return directPoint;
+  }
+
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const record = value as Record<string, unknown>;
+  const nestedPointKeys = ["point", "position", "world", "worldPosition", "hitPoint", "intersection"];
+  for (const key of nestedPointKeys) {
+    const nestedPoint = readModelViewerPoint(record[key]);
+    if (nestedPoint) {
+      return nestedPoint;
+    }
+  }
+
+  return null;
+}
+
+const SECTION_CLIP_CENTER_PERCENT = 50;
+const SECTION_CLIP_DEAD_ZONE_PERCENT = 1;
+const SECTION_CLIP_BOUNDS_PADDING = 1.02;
+const SECTION_CLIP_MIN_HEIGHT_RATIO = 0.002;
+const SECTION_CLIP_BOX_SIDE_KEEP_INSIDE = 1;
+
+function resolveSectionAxisRange(min: number, max: number, percent: number) {
+  const size = max - min;
+  if (!Number.isFinite(size) || size <= 0) {
+    return null;
+  }
+
+  const safePercent = THREE.MathUtils.clamp(percent, 0, 100);
+  if (Math.abs(safePercent - SECTION_CLIP_CENTER_PERCENT) <= SECTION_CLIP_DEAD_ZONE_PERCENT) {
+    return {
+      active: false,
+      center: (min + max) / 2,
+      size,
+    };
+  }
+
+  const ratio =
+    safePercent > SECTION_CLIP_CENTER_PERCENT
+      ? (safePercent - SECTION_CLIP_CENTER_PERCENT) / SECTION_CLIP_CENTER_PERCENT
+      : (SECTION_CLIP_CENTER_PERCENT - safePercent) / SECTION_CLIP_CENTER_PERCENT;
+  const minKeptSize = Math.max(size * SECTION_CLIP_MIN_HEIGHT_RATIO, 1e-5);
+  const keptSize = Math.max(size * (1 - THREE.MathUtils.clamp(ratio, 0, 1)), minKeptSize);
+  const center =
+    safePercent > SECTION_CLIP_CENTER_PERCENT
+      ? min + keptSize / 2
+      : max - keptSize / 2;
+
+  if (![center, keptSize].every(Number.isFinite)) {
+    return null;
+  }
+
+  return {
+    active: true,
+    center,
+    size: keptSize,
+  };
+}
+
+function resolveSectionClipBox(
+  options: ModelHeightClipOptions,
+  boundsLike: LccBoundsLike | null | undefined,
+): LccClipBoxOptions | null | undefined {
+  const bounds = createBoundsBoxFromSdk(boundsLike);
+  const summary = bounds ? createBoundsSummary(bounds) : null;
+  if (!bounds || !summary) {
+    return undefined;
+  }
+
+  const sizeX = bounds.max.x - bounds.min.x;
+  const sizeY = bounds.max.y - bounds.min.y;
+  const sizeZ = bounds.max.z - bounds.min.z;
+  if (
+    !Number.isFinite(sizeX) ||
+    !Number.isFinite(sizeY) ||
+    !Number.isFinite(sizeZ) ||
+    sizeX <= 0 ||
+    sizeY <= 0 ||
+    sizeZ <= 0
+  ) {
+    return undefined;
+  }
+
+  const centerX = (bounds.min.x + bounds.max.x) / 2;
+  const horizontalRange = resolveSectionAxisRange(
+    bounds.min.y,
+    bounds.max.y,
+    options.horizontalPercent,
+  );
+  const verticalRange = resolveSectionAxisRange(
+    bounds.min.z,
+    bounds.max.z,
+    options.verticalPercent,
+  );
+  if (!horizontalRange || !verticalRange) {
+    return undefined;
+  }
+
+  if (!horizontalRange.active && !verticalRange.active) {
+    return null;
+  }
+
+  if (![centerX, horizontalRange.center, verticalRange.center].every(Number.isFinite)) {
+    return undefined;
+  }
+
+  return {
+    position: [centerX, horizontalRange.center, verticalRange.center],
+    rotation: [0, 0, 0],
+    scale: [
+      Math.max(sizeX * SECTION_CLIP_BOUNDS_PADDING, 1e-5),
+      horizontalRange.active
+        ? horizontalRange.size
+        : Math.max(sizeY * SECTION_CLIP_BOUNDS_PADDING, 1e-5),
+      verticalRange.active
+        ? verticalRange.size
+        : Math.max(sizeZ * SECTION_CLIP_BOUNDS_PADDING, 1e-5),
+    ],
+    clipSide: SECTION_CLIP_BOX_SIDE_KEEP_INSIDE,
+  };
 }
 
 function buildLookAtSnapshot(args: {
@@ -2533,6 +2715,80 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
           return false;
         }
       },
+      pickPoint: async (clientX, clientY, nativeEvent) => {
+        const runtimeInstance = getRuntimeInstance(lccInstanceRef.current);
+        if (!runtimeInstance || typeof runtimeInstance.raycast !== "function") {
+          return null;
+        }
+
+        try {
+          const maxDistance = Math.max(lastBoundsMaxDimRef.current * 20, 300);
+          const radius = Math.max(lastBoundsMaxDimRef.current * 0.002, 0.05);
+          const rawResult = runtimeInstance.raycast({
+            evt: nativeEvent ?? { x: clientX, y: clientY, clientX, clientY },
+            maxDistance,
+            radius,
+          });
+          return parseModelViewerPoint(rawResult);
+        } catch (error) {
+          logLccWarn("raycast 测量拾取失败", error);
+          return null;
+        }
+      },
+      setHeightClipPlane: (options) => {
+        const runtimeInstance = getRuntimeInstance(lccInstanceRef.current);
+        if (!runtimeInstance || typeof runtimeInstance.setClipBox !== "function") {
+          return false;
+        }
+
+        if (!options.enabled) {
+          try {
+            runtimeInstance.setClipBox(null);
+            return true;
+          } catch (error) {
+            logLccWarn("清除高度剖切失败", error);
+            return false;
+          }
+        }
+
+        const clipBox = resolveSectionClipBox(options, runtimeInstance.getBounds?.());
+        if (clipBox === undefined) {
+          return false;
+        }
+
+        if (!clipBox) {
+          try {
+            runtimeInstance.setClipBox(null);
+            return true;
+          } catch (error) {
+            logLccWarn("清除高度剖切失败", error);
+            return false;
+          }
+        }
+
+        try {
+          runtimeInstance.setClipBox(clipBox);
+          return true;
+        } catch (error) {
+          logLccWarn("高度剖切 setClipBox 失败", error);
+          return false;
+        }
+      },
+      clearHeightClipPlane: () => {
+        const runtimeInstance = getRuntimeInstance(lccInstanceRef.current);
+        if (!runtimeInstance || typeof runtimeInstance.setClipBox !== "function") {
+          return false;
+        }
+
+        try {
+          runtimeInstance.setClipBox(null);
+          return true;
+        } catch (error) {
+          logLccWarn("清除高度剖切失败", error);
+          return false;
+        }
+      },
+      getViewerBounds: () => getRuntimeInstance(lccInstanceRef.current)?.getBounds?.() ?? null,
       getCurrentView: () => {
         const result = buildLaunchViewSaveResult();
         return result.ok ? result.view : null;
