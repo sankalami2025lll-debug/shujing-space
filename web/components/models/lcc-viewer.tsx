@@ -36,8 +36,6 @@ const LCC_MODEL_PIXEL_RATIO_THRESHOLD = 0.003;
 const LCC_MODEL_PIXEL_MIN_COUNT = 3;
 /** LCC 核心资源后缀，用于网络监控 */
 const LCC_CORE_RESOURCE_PATTERNS = /\.(sog|btree|ply|lcc2|b3dm|i3dm|pnts|cmpt|geojson|bin|glb|gltf|ktx2|png|jpg|jpeg)(\?|#|$)/i;
-const LCC_WATERMARK_CROP_PX = 8;
-const LCC_WATERMARK_BOTTOM_BAR_PX = 16;
 const RELEVANT_LCC_RESOURCE_PATH_RE =
   /(?:\.lcc2?|\/index\.bin|\/environment\.bin|\/collision\.lci|\/attrs\.lcp)(?:$|\?)/i;
 
@@ -4480,24 +4478,26 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
     : viewerStatus === "error"
       ? "error"
       : "loading";
+  const viewerReadyForBrowsing =
+    viewerStatus === "loaded" || firstFrameRenderedRef.current || loadingPhase === "hidden";
+  const detailLoadingDiagnosticActive =
+    detailLoadingActive && !showOverlay && !viewerReadyForBrowsing;
 
   return (
     <div
       ref={viewerRootRef}
       data-lcc-loaded={viewerStatus === "loaded" ? "true" : "false"}
       data-lcc-first-frame={firstFrameRenderedRef.current ? "true" : "false"}
-      data-lcc-detail-loading={detailLoadingActive ? "true" : "false"}
+      data-lcc-detail-loading={detailLoadingDiagnosticActive ? "true" : "false"}
       data-lcc-viewer-status={viewerStatus}
       data-lcc-complete-reason={completeReasonRef.current ?? ""}
       data-lcc-sdk-loaded={sdkLoadedRef.current ? "true" : "false"}
       className="absolute inset-0 overflow-hidden bg-[radial-gradient(circle_at_top,rgba(45,212,191,0.14),transparent_32%),linear-gradient(135deg,#07111a_0%,#071826_45%,#04070c_100%)]"
     >
-      {/* 通过底部微裁切抬高 viewer 可视区域，尽量自然吃掉 SDK 底部水印。 */}
       <div className="absolute inset-0 overflow-hidden">
         <div
           ref={mountRef}
-          className="absolute inset-x-0 top-0"
-          style={{ bottom: `-${LCC_WATERMARK_CROP_PX}px` }}
+          className="absolute inset-0"
         />
       </div>
       <div
@@ -4516,12 +4516,6 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
         progress={displayProgress}
         showText={false}
       />
-      {detailLoadingActive && !showOverlay && viewerStatus === "loaded" ? (
-        <div className="pointer-events-none absolute bottom-4 right-4 z-20 inline-flex items-center gap-2 rounded-full border border-cyan-300/20 bg-black/55 px-3 py-1.5 text-[12px] text-cyan-100/85 shadow-lg backdrop-blur-md">
-          <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-cyan-300 shadow-[0_0_10px_rgba(103,232,249,0.65)]" />
-          <span>模型细节加载中...</span>
-        </div>
-      ) : null}
     </div>
   );
 });
