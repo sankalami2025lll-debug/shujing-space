@@ -16,7 +16,9 @@ RUN npm config set registry https://registry.npmmirror.com && npm install -g pnp
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 ARG NEXT_PUBLIC_API_BASE_URL
+ARG NEXT_PUBLIC_LCC_APP_KEY
 ENV NEXT_PUBLIC_API_BASE_URL=$NEXT_PUBLIC_API_BASE_URL
+ENV NEXT_PUBLIC_LCC_APP_KEY=$NEXT_PUBLIC_LCC_APP_KEY
 ENV NODE_ENV=production
 RUN pnpm build
 

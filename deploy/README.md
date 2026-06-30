@@ -35,7 +35,7 @@ cd web && pnpm dev
 
 ## 生产构建与部署
 
-### 1. API 基址注入规则
+### 1. 前端 public 变量注入规则
 
 前端生产环境默认读取 `NEXT_PUBLIC_API_BASE_URL`，未设置时回退到 `/api`。
 当前项目的标准生产方案是：
@@ -66,6 +66,18 @@ NEXT_PUBLIC_API_BASE_URL=https://api.your-domain.com pnpm build
 - 不要在 `next.config.ts` 中追加 production rewrite 指向 `localhost:4000`
 - 不要把生产后端地址硬编码到业务代码
 - 不要在前端页面里直接拼 `http://127.0.0.1:4000`
+
+### 1.1 LCC WebSDK appKey 注入规则
+
+`NEXT_PUBLIC_LCC_APP_KEY` 是 LCC WebSDK 前端授权变量，`LccViewer` 会在构建产物中读取它并传给 `LCCRender.load` 的 `appKey`。
+
+生产 Docker 构建必须同时满足：
+
+1. `deploy/.env.prod` 中配置 `NEXT_PUBLIC_LCC_APP_KEY`
+2. `deploy/docker-compose.prod.yml` 的 `web.build.args` 传递 `NEXT_PUBLIC_LCC_APP_KEY`
+3. `web/Dockerfile` 的 build stage 声明 `ARG NEXT_PUBLIC_LCC_APP_KEY` 并设置同名 `ENV`
+
+真实 appKey 只放服务器 `deploy/.env.prod` 或本地未入库 env 文件中，严禁提交到 Git。
 
 ### 2. 生产环境变量
 
@@ -98,6 +110,7 @@ cp deploy/.env.prod.example deploy/.env.prod
 | `OSS_PRESIGN_EXPIRES` | 预签名 PUT 有效期（秒） | `900` |
 | `MAX_MODEL_SIZE_MB` | 模型上传大小上限 | `500` |
 | `MAX_COVER_SIZE_MB` | 封面上传大小上限 | `5` |
+| `NEXT_PUBLIC_LCC_APP_KEY` | LCC WebSDK 前端授权 appKey（build-time public 变量） | 留空占位，生产填真实值 |
 | `VIEWER_URL_ALLOWED_HOSTS` | 外链 viewer 域名白名单 | `sketchfab.com,www.sketchfab.com` |
 
 完整变量列表见 [.env.prod.example](.env.prod.example)。
