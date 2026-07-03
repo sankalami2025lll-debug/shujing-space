@@ -4482,6 +4482,7 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
     viewerStatus === "loaded" || firstFrameRenderedRef.current || loadingPhase === "hidden";
   const detailLoadingDiagnosticActive =
     detailLoadingActive && !showOverlay && !viewerReadyForBrowsing;
+  const showBottomEdgeSafetyBar = viewerReadyForBrowsing;
 
   return (
     <div
@@ -4509,6 +4510,12 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
         }}
       />
       <div className="pointer-events-none absolute inset-x-0 top-0 h-24 bg-gradient-to-b from-cyan-400/10 to-transparent" />
+      {showBottomEdgeSafetyBar ? (
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-x-0 bottom-0 z-[8] h-[16px] bg-gradient-to-b from-transparent via-black/22 to-black/45 backdrop-blur-[16px] backdrop-brightness-65 [mask-image:linear-gradient(to_bottom,transparent_0%,rgba(0,0,0,0.72)_34%,black_62%,black_100%)]"
+        />
+      ) : null}
 
       <ModelLoadingOverlay
         visible={showOverlay}
