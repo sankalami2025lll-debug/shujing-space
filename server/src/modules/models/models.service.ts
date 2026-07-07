@@ -567,7 +567,8 @@ export class ModelsService {
     return fileFormat === 'zip';
   }
 
-  // 当前数据库字段仍为 r2_key；待未来 schema 迁移后再统一删除该兼容读取。
+  // 当前数据库字段仍为 r2_key（历史命名，实际存阿里云 OSS object key）；
+  // 待未来 schema 迁移后再统一删除该兼容读取。
   private getStoredObjectKey(file: { objectKey?: string; r2Key?: string }): string {
     return file.objectKey ?? file.r2Key ?? '';
   }

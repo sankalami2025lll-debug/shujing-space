@@ -84,8 +84,8 @@ function calculateTotalMeasureDistance(points: ModelMeasurePoint[]) {
 
 function areMeasureScreensClose(a: ModelMeasurePoint["screenPoint"], b: ModelMeasurePoint["screenPoint"]) {
   return (
-    Math.abs(a.x - b.x) < 0.25 &&
-    Math.abs(a.y - b.y) < 0.25 &&
+    Math.abs(a.x - b.x) < 0.05 &&
+    Math.abs(a.y - b.y) < 0.05 &&
     (a.visible ?? true) === (b.visible ?? true)
   );
 }
@@ -101,7 +101,6 @@ const MEASURE_AXIS_SCREEN_PADDING_PX = 120;
 const MEASURE_AXIS_SNAP_LINE_PX = 18;
 const MEASURE_AXIS_SNAP_POINT_PX = 64;
 const MEASURE_PREVIEW_PICK_INTERVAL_MS = 120;
-const MEASURE_REPROJECT_INTERVAL_MS = 33;
 const FALLBACK_MEASURE_PLANE_AXES: ModelViewerMeasureAxis[] = [
   { id: "model-x", direction: { x: -1, y: 0, z: 0, coordinateSpace: "render" } },
   { id: "model-y", direction: { x: 0, y: 0, z: 1, coordinateSpace: "render" } },
@@ -730,13 +729,8 @@ export function ModelViewerShell({ model, onLaunchViewSaved }: ModelViewerShellP
     }
 
     let frameId = 0;
-    let lastSyncAt = Date.now();
     const tick = () => {
-      const now = Date.now();
-      if (now - lastSyncAt >= MEASURE_REPROJECT_INTERVAL_MS) {
-        lastSyncAt = now;
-        syncMeasureProjection();
-      }
+      syncMeasureProjection();
       frameId = window.requestAnimationFrame(tick);
     };
 

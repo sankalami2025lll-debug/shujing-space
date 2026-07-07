@@ -20,6 +20,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import { PaginationDto } from '../../common/dto/pagination.dto';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -34,6 +35,8 @@ export class TrainingController {
   constructor(private readonly trainingService: TrainingService) {}
 
   // POST /api/training-applications：提交申请（游客可提交；登录态自动回填 userId）
+  // IP 限流：同一 IP 60s 内最多 3 次，防止训练数据服务申请表单被刷量
+  @Throttle({ default: { limit: 3, ttl: 60_000 } })
   @Post()
   @HttpCode(HttpStatus.OK)
   @UseGuards(OptionalJwtAuthGuard)
@@ -47,6 +50,7 @@ export class TrainingController {
   }
 
   // GET /api/training-applications/my：查询本人申请（需登录）
+  // 走全局默认限流（60/min/IP）
   @Get('my')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()

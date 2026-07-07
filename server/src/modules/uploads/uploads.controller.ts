@@ -7,6 +7,7 @@
  */
 import { Body, Controller, HttpCode, HttpStatus, Post, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { AuthUser } from '../auth/jwt-payload.interface';
@@ -22,6 +23,8 @@ export class UploadsController {
   constructor(private readonly uploadsService: UploadsService) {}
 
   // POST /api/uploads/presign：申请对象存储预签名上传地址（需登录）
+  // IP 限流：同一 IP 60s 内最多 10 次，防止登录后批量刷预签名 URL
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @Post('presign')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: '申请对象存储预签名直传地址（前端直传，文件不经服务器）' })
@@ -30,6 +33,8 @@ export class UploadsController {
   }
 
   // POST /api/uploads/callback：上传完成回执（2G：须 HeadObject 确认对象已存在后才登记）
+  // IP 限流：同一 IP 60s 内最多 10 次，与 presign 配对，防止回执刷写 model_files
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @Post('callback')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({

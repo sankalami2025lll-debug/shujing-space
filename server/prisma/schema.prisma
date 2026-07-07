@@ -4,8 +4,8 @@
 // 依据：docs/backend-architecture-plan.md 第四节（共 10 张表）。
 //
 // 红线：
-// - 数据库只存文件 URL / R2 object key / 业务信息，不存任何二进制。
-// - 模型文件、封面图、视频实体一律落 Cloudflare R2；本表只记录可访问 URL 与 r2_key。
+// - 数据库只存文件 URL / 对象存储 object key / 业务信息，不存任何二进制。
+// - 模型文件、封面图、视频实体一律落阿里云 OSS；本表只记录可访问 URL 与 r2_key（r2_key 为历史字段名，实际存 OSS object key）。
 // - 枚举一律用 Prisma enum（角色 / 状态 / 可见性 / viewerType / 文件类型 / 验证码场景）。
 //
 // 字段映射（前端 communityData.ts → 本 schema）：
@@ -149,7 +149,7 @@ model User {
   company      String?    @db.VarChar(120) // 公司
   roleType     String?    @map("role_type") @db.VarChar(40) // 注册表单填写的角色/需求类型
   role         UserRole   @default(user) // 系统权限
-  avatarUrl    String?    @map("avatar_url") @db.VarChar(255) // 头像（R2 URL）
+  avatarUrl    String?    @map("avatar_url") @db.VarChar(255) // 头像（阿里云 OSS URL）
   status       UserStatus @default(active) // 账号状态
   createdAt    DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt    DateTime   @updatedAt @map("updated_at") @db.Timestamptz(6)
@@ -191,7 +191,7 @@ model Model {
   tags                Json                  @default("[]") // 标签数组
   scenes              Json                  @default("[]") // 应用场景多选
   description         String                @default("") @db.Text // 简介
-  coverUrl            String                @default("") @map("cover_url") @db.VarChar(255) // 封面图 R2 URL（不存二进制）
+  coverUrl            String                @default("") @map("cover_url") @db.VarChar(255) // 封面图（阿里云 OSS URL，不存二进制）
   modelUrl            String?               @map("model_url") @db.VarChar(255) // 模型资源 / 外部 Viewer 地址 → 前端 viewerUrl
   viewerType          ViewerType            @default(none) @map("viewer_type") // 查看器来源
   allowIframe         Boolean               @default(true) @map("allow_iframe") // 是否允许 iframe 内嵌（兜底用）
@@ -228,14 +228,14 @@ model Model {
   @@map("models")
 }
 
-/// model_files：上传文件登记表（指向 R2，只存 URL / object key，不存二进制）
+/// model_files：上传文件登记表（指向阿里云 OSS，只存 URL / object key，不存二进制）
 model ModelFile {
   id           BigInt   @id @default(autoincrement())
   userId       BigInt   @map("user_id") // 上传者
   kind         FileKind // 文件用途：model / cover / video
   originalName String   @map("original_name") @db.VarChar(255) // 原始文件名
-  r2Key        String   @map("r2_key") @db.VarChar(255) // R2 对象 key
-  url          String   @db.VarChar(255) // 可访问 URL（R2 公共域 / CDN 域）
+  r2Key        String   @map("r2_key") @db.VarChar(255) // 对象存储 object key（字段名 r2_key 为历史命名，实际存阿里云 OSS object key）
+  url          String   @db.VarChar(255) // 可访问 URL（阿里云 OSS 公共域 / CDN 域）
   size         BigInt // 字节
   mime         String   @db.VarChar(80) // MIME 类型
   createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)

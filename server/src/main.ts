@@ -33,6 +33,13 @@ async function bootstrap() {
   // 安全响应头
   app.use(helmet());
 
+  // 反代 IP 信任：线上经 OpenResty / 1Panel 单层反代到容器，
+  // 必须显式声明信任层数，express 才会取 X-Forwarded-For 中的真实客户端 IP 作为 req.ip。
+  // 这里设为 1：仅信任最近一跳反代写入的 X-Forwarded-For 最右侧地址，
+  // 不盲目信任多层 X-Forwarded-For，避免被伪造请求误导限流桶。
+  // 影响：限流（@nestjs/throttler 默认按 req.ip）与健康检查/日志取到的 IP 更接近真实客户端。
+  app.getHttpAdapter().getInstance().set('trust proxy', 1);
+
   // 跨域：仅允许配置的前端来源（数组）
   // 生产环境：必须使用配置的 CORS_ORIGIN（env.validation 已强制非空，不会 fallback true）
   // 开发环境：CORS_ORIGIN 为空时放通所有来源以方便调试（生产环境因校验拦截会阻止启动）

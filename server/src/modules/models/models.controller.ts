@@ -23,6 +23,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { OptionalJwtAuthGuard } from '../auth/guards/optional-jwt-auth.guard';
@@ -40,6 +41,8 @@ export class ModelsController {
 
   // GET /api/models：模型列表（仅已发布 + 公开），支持分类/关键词/排序/分页
   // 可选登录态：游客可访问；登录用户额外附带 isLiked / isFavorited（OptionalJwtAuthGuard 不拦截游客）
+  // IP 限流：同一 IP 60s 内最多 60 次，与全局默认一致，显式声明便于后续按需调整
+  @Throttle({ default: { limit: 60, ttl: 60_000 } })
   @Get()
   @UseGuards(OptionalJwtAuthGuard)
   @ApiBearerAuth()
@@ -50,6 +53,8 @@ export class ModelsController {
 
   // GET /api/models/:id：模型详情（2F）；游客/非作者仅 published+public；作者可看本人全状态模型
   // id 非数字 → 400，未找到/无权限 → 404；OptionalJwtAuthGuard 不强制登录
+  // IP 限流：同一 IP 60s 内最多 120 次，详情读放大场景放宽，仍能挡刷量
+  @Throttle({ default: { limit: 120, ttl: 60_000 } })
   @Get(':id')
   @UseGuards(OptionalJwtAuthGuard)
   @ApiBearerAuth()
@@ -65,6 +70,8 @@ export class ModelsController {
   }
 
   // POST /api/models：发布模型（需登录）；关联已上传的模型/封面文件
+  // IP 限流：同一 IP 60s 内最多 10 次，防止登录后批量刷发布
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @Post()
   @HttpCode(HttpStatus.OK)
   @UseGuards(JwtAuthGuard)
@@ -75,6 +82,7 @@ export class ModelsController {
   }
 
   // PUT /api/models/:id/launch-view：保存模型启动视图（需登录且仅作者本人可调用）
+  // 走全局默认限流（60/min/IP）
   @Put(':id/launch-view')
   @HttpCode(HttpStatus.OK)
   @UseGuards(JwtAuthGuard)
@@ -89,6 +97,7 @@ export class ModelsController {
   }
 
   // DELETE /api/models/:id/launch-view：清空模型启动视图（需登录且仅作者本人可调用）
+  // 走全局默认限流（60/min/IP）
   @Delete(':id/launch-view')
   @HttpCode(HttpStatus.OK)
   @UseGuards(JwtAuthGuard)
@@ -103,6 +112,7 @@ export class ModelsController {
 
   // PATCH /api/models/:id：更新模型基础信息（需登录且仅作者本人可调用）。
   // 允许更新：title、description、coverUrl。
+  // 走全局默认限流（60/min/IP）
   @Patch(':id')
   @HttpCode(HttpStatus.OK)
   @UseGuards(JwtAuthGuard)
@@ -119,6 +129,8 @@ export class ModelsController {
   // POST /api/models/:id/view：记录浏览量（2E）。游客 / 登录均可，无需鉴权（不挂 JwtAuthGuard）。
   // 仅对「已发布 + 公开」模型 viewsCount +1；不存在/不可见 → 404；返回最新 viewsCount。
   // 与 GET /api/models/:id 解耦：读接口保持只读语义，浏览量由前端详情页打开时单独打点。
+  // IP 限流：同一 IP 60s 内最多 30 次，防止前端重复打点刷浏览量
+  @Throttle({ default: { limit: 30, ttl: 60_000 } })
   @Post(':id/view')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: '记录模型浏览量（游客可用，viewsCount +1，返回最新值）' })

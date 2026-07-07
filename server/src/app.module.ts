@@ -4,7 +4,9 @@
  * 业务模块（认证/模型/上传/训练申请/联系/后台）按开发顺序逐步在此接入，预留位置见下方注释。
  */
 import { Module } from '@nestjs/common';
+import { APP_GUARD } from '@nestjs/core';
 import { ConfigModule } from '@nestjs/config';
+import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { configuration } from './config/configuration';
 import { validateEnv } from './config/env.validation';
 import { PrismaModule } from './prisma/prisma.module';
@@ -27,6 +29,18 @@ import { UploadTasksModule } from './modules/upload-tasks/upload-tasks.module';
       isGlobal: true,
       validate: validateEnv,
       load: [configuration],
+    }),
+    // 全局限流：@nestjs/throttler，默认桶 60 次 / 60s / IP（trust proxy=1 已在 main.ts 设置，
+    //           反代后 req.ip 取真实客户端 IP）。
+    //   - 命中后抛 ThrottlerException（429），由全局 AllExceptionFilter 包装为 {code:429,message,data:null}，
+    //     message 固定中文，不泄露内部路径/bucket/object key。
+    //   - 通过 APP_GUARD 注册 ThrottlerGuard，全局生效；具体路由可用 @Throttle 覆盖默认限流。
+    //   - 守卫执行顺序：APP_GUARD 先于控制器级 @UseGuards(JwtAuthGuard)，但 ThrottlerGuard 不解析 JWT，
+    //     缺失/非法 token 时只按 IP 限流，不会抛认证错误，不绕过也不改变 JwtAuthGuard 行为。
+    //   - 本阶段统一按 IP tracker；后续若多人共用 IP 出现误伤，再单独升级 user-aware tracker。
+    ThrottlerModule.forRoot({
+      throttlers: [{ name: 'default', ttl: 60_000, limit: 60 }],
+      errorMessage: '请求过于频繁，请稍后再试',
     }),
     // 全局数据库
     PrismaModule,
@@ -52,6 +66,10 @@ import { UploadTasksModule } from './modules/upload-tasks/upload-tasks.module';
     AdminModule,
     // 站点配置：GET /api/site-config（游客）+ GET/PUT /api/admin/site-config（仅 admin）
     SiteConfigModule,
+  ],
+  providers: [
+    // 全局限流守卫：所有路由默认 60/min/IP；具体接口在 controller 用 @Throttle 覆盖
+    { provide: APP_GUARD, useClass: ThrottlerGuard },
   ],
 })
 export class AppModule {}

@@ -11,7 +11,7 @@
  */
 import { Body, Controller, Get, HttpCode, HttpStatus, Post, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
-import { Throttle, ThrottlerGuard } from '@nestjs/throttler';
+import { Throttle } from '@nestjs/throttler';
 import { VerificationScene } from '@prisma/client';
 import { AuthService } from './auth.service';
 import { CurrentUser } from './decorators/current-user.decorator';
@@ -33,11 +33,10 @@ export class AuthController {
 
   // POST /api/auth/send-code：发送验证码（注册/登录/找回共用）
   // 双层限频：
-  //  1) IP 限流（本装饰器）：同一 IP 60s 内最多 5 次，超限返回 429「请求过于频繁，请稍后再试」。
+  //  1) IP 限流（@Throttle + 全局 APP_GUARD）：同一 IP 60s 内最多 5 次，超限返回 429「请求过于频繁，请稍后再试」。
   //  2) 业务限频（VerificationService）：同一 target+scene 60s 内仅一次，仍然保留。
-  // 仅本路由挂 ThrottlerGuard，不影响 login/register/me 等其它接口。
+  // 限流由全局 ThrottlerGuard 接管，无需本路由再显式 @UseGuards(ThrottlerGuard)。
   @Throttle({ default: { limit: 5, ttl: 60_000 } })
-  @UseGuards(ThrottlerGuard)
   @Post('send-code')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: '发送验证码（开发环境返回 devCode；同一 IP 60s 限 5 次）' })
@@ -50,6 +49,8 @@ export class AuthController {
   }
 
   // POST /api/auth/register：注册并直接返回登录态
+  // IP 限流：同一 IP 60s 内最多 3 次，防止批量注册刷接口
+  @Throttle({ default: { limit: 3, ttl: 60_000 } })
   @Post('register')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: '用户注册（手机/邮箱 + 验证码 + 密码 + 协议）' })
@@ -58,6 +59,8 @@ export class AuthController {
   }
 
   // POST /api/auth/login：密码或验证码登录
+  // IP 限流：同一 IP 60s 内最多 5 次，防止密码爆破 / 短信验证码撞库
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
   @Post('login')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: '用户登录（密码 / 验证码）' })
@@ -66,6 +69,8 @@ export class AuthController {
   }
 
   // POST /api/auth/reset-password：找回 / 重置密码
+  // IP 限流：同一 IP 60s 内最多 3 次，防止验证码撞库重置他人密码
+  @Throttle({ default: { limit: 3, ttl: 60_000 } })
   @Post('reset-password')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: '找回 / 重置密码（验证码校验）' })
@@ -74,6 +79,7 @@ export class AuthController {
   }
 
   // GET /api/auth/me：当前登录用户（需 Bearer Token）
+  // 走全局默认限流（60/min/IP）
   @Get('me')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
@@ -83,6 +89,7 @@ export class AuthController {
   }
 
   // POST /api/auth/logout：退出登录（无状态，仅提示前端删除 token）
+  // 走全局默认限流（60/min/IP）
   @Post('logout')
   @HttpCode(HttpStatus.OK)
   @UseGuards(JwtAuthGuard)

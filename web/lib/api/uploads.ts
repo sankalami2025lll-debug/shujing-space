@@ -1,6 +1,6 @@
 /**
  * 模块：文件上传接口封装 api/uploads.ts
- * 用途：封装 R2 直传流程（presign → 浏览器 PUT → callback），供 UploadModal 发布模型时上传模型/封面文件。
+ * 用途：封装对象存储（阿里云 OSS）直传流程（presign → 浏览器 PUT → callback），供 UploadModal 发布模型时上传模型/封面文件。
  * 对应后端：UploadsModule
  *   - POST /api/uploads/presign   申请预签名地址（需登录）
  *   - POST /api/uploads/callback  上传完成登记 model_files（需登录）
@@ -13,8 +13,9 @@ import type {
   UploadCallbackResult,
 } from "../types";
 
-// R2_NOT_CONFIGURED_MESSAGE：对象存储环境未配置时展示给用户的固定文案（保留常量名，避免改调用处）。
-export const R2_NOT_CONFIGURED_MESSAGE =
+// OSS_NOT_CONFIGURED_MESSAGE：对象存储环境未配置时展示给用户的固定文案。
+// 常量名原为 R2_NOT_CONFIGURED_MESSAGE，因实际对象存储已统一为阿里云 OSS 而改名（仅本文件内部引用，安全）。
+export const OSS_NOT_CONFIGURED_MESSAGE =
   "对象存储未配置，请先配置对象存储";
 
 export const UPLOAD_ABORTED_MESSAGE = "已取消上传";
@@ -57,14 +58,14 @@ export interface UploadPutOptions {
   onProgress?: (progress: UploadProgress) => void;
 }
 
-// presignUpload：申请 R2 预签名 PUT 地址；503 时映射为固定用户文案。
+// presignUpload：申请对象存储预签名 PUT 地址；503 时映射为固定用户文案。
 export function presignUpload(params: PresignParams): Promise<PresignResult> {
   return http
     .post<PresignResult>("/uploads/presign", params)
     .then((result) => result)
     .catch((e: unknown) => {
       if (e instanceof ApiError && e.status === 503) {
-        throw new ApiError(R2_NOT_CONFIGURED_MESSAGE, e.code, e.status);
+        throw new ApiError(OSS_NOT_CONFIGURED_MESSAGE, e.code, e.status);
       }
       throw e;
     });
@@ -78,7 +79,7 @@ export function uploadCallback(
 }
 
 /**
- * putFileToPresignedUrl：浏览器直传 R2（PUT presign.uploadUrl）。
+ * putFileToPresignedUrl：浏览器直传对象存储（PUT presign.uploadUrl）。
  * 使用 presign 返回的 requiredHeaders（含 Content-Type），不走本站 /api 代理。
  */
 export async function putFileToPresignedUrl(
@@ -156,10 +157,11 @@ export async function putFileToPresignedUrl(
 }
 
 /**
- * uploadFileToR2：完整直传链路 presign → PUT → callback。
- * R2 未配置时在 presign 阶段抛 503 固定文案；不伪造成功、不落本地。
+ * uploadFileToOss：完整直传链路 presign → PUT → callback。
+ * 对象存储未配置时在 presign 阶段抛 503 固定文案；不伪造成功、不落本地。
+ * 函数名原为 uploadFileToR2，因实际对象存储已统一为阿里云 OSS 而改名（仅本文件内部引用，安全）。
  */
-export async function uploadFileToR2(
+export async function uploadFileToOss(
   kind: FileKind,
   file: File,
   options: UploadPutOptions = {},

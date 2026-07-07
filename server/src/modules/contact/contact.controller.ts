@@ -9,6 +9,7 @@
  */
 import { Body, Controller, Get, HttpCode, HttpStatus, Post } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import { ContactService } from './contact.service';
 import { CreateLeadDto } from './dto/create-lead.dto';
 
@@ -18,6 +19,8 @@ export class ContactController {
   constructor(private readonly contactService: ContactService) {}
 
   // POST /api/contact/leads：提交联系线索（游客可提交）
+  // IP 限流：同一 IP 60s 内最多 5 次，防止联系表单被 spam 刷量
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
   @Post('leads')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: '提交联系线索（游客可提交，status 固定 new）' })
@@ -26,6 +29,7 @@ export class ContactController {
   }
 
   // GET /api/contact/options：获取表单选项配置（游客可访问）
+  // 走全局默认限流（60/min/IP）
   @Get('options')
   @ApiOperation({ summary: '获取联系表单选项配置（业务场景/数据类型/项目阶段/预算范围）' })
   getOptions() {

@@ -8,7 +8,6 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { JwtModule, JwtModuleOptions } from '@nestjs/jwt';
-import { ThrottlerModule } from '@nestjs/throttler';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
@@ -23,14 +22,9 @@ type ExpiresInValue = NonNullable<JwtModuleOptions['signOptions']>['expiresIn'];
 
 @Module({
   imports: [
-    // 限流：仅为 send-code 接口提供 IP 限流能力（同一 IP 60s 内最多 5 次）。
-    // 说明：此处只注册 throttler 配置与存储（内存），不注册全局 APP_GUARD，
-    //       因此默认不影响其它接口；只有显式挂 @UseGuards(ThrottlerGuard) 的路由才限流。
-    ThrottlerModule.forRoot({
-      throttlers: [{ name: 'default', ttl: 60_000, limit: 5 }],
-      // 超限统一返回中文提示（429，由全局异常过滤器包装为 {code,message,data}）
-      errorMessage: '请求过于频繁，请稍后再试',
-    }),
+    // 限流说明：ThrottlerModule.forRoot 与 APP_GUARD=ThrottlerGuard 已上移到 AppModule 全局注册，
+    //           本模块不再重复注册。send-code 接口通过 @Throttle({default:{limit:5,ttl:60000}})
+    //           覆盖全局默认 60/min/IP，由全局 APP_GUARD 接管执行，无需本模块再挂 ThrottlerGuard。
     // JWT：密钥与有效期来自环境变量（JWT_ACCESS_SECRET / JWT_ACCESS_EXPIRES）
     JwtModule.registerAsync({
       imports: [ConfigModule],
