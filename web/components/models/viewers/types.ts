@@ -31,10 +31,35 @@ export type ModelViewerPanByDelta = {
   source?: ModelViewerPanDeltaSource;
 };
 
+export type ModelViewerPointCoordinateSpace = "sdk" | "render";
+
 export type ModelViewerPoint = {
   x: number;
   y: number;
   z: number;
+  /** 测量点所在坐标空间。render 表示已经转换到当前 Three.js 渲染世界，可稳定重投影。 */
+  coordinateSpace?: ModelViewerPointCoordinateSpace;
+};
+
+export type ModelViewerProjectedPoint = {
+  clientX: number;
+  clientY: number;
+  visible: boolean;
+};
+
+export type ModelViewerPickResult = {
+  /** SDK raycast 原始命中点，保留给后续做捕捉校验/诊断，不直接用于屏幕绘制。 */
+  rawHitPoint: ModelViewerPoint;
+  /** 最终锁定在当前 Three.js 渲染世界中的测量点，用于距离计算和相机重投影。 */
+  lockedWorldPoint: ModelViewerPoint;
+  /** 约束测量投影点。自由测量阶段为空，水平/垂直约束后再写入。 */
+  projectedPoint?: ModelViewerPoint | null;
+};
+
+export type ModelViewerMeasureAxis = {
+  id: "model-x" | "model-y" | "model-z";
+  /** 模型基准坐标轴方向，已转换为 render 世界坐标。产品语义：X/Y 为平面，Z 为垂直。 */
+  direction: ModelViewerPoint;
 };
 
 export type ModelHeightClipOptions = {
@@ -55,7 +80,11 @@ export type ModelViewerHandle = {
     clientX: number,
     clientY: number,
     nativeEvent?: MouseEvent | PointerEvent,
-  ) => Promise<ModelViewerPoint | null>;
+  ) => Promise<ModelViewerPickResult | null>;
+  /** 将 SDK 命中的模型空间点投影到当前浏览器视口坐标，用于测量点/线随相机实时绑定模型。 */
+  projectPoint?: (point: ModelViewerPoint) => ModelViewerProjectedPoint | null;
+  /** 测量辅助参考轴：固定使用模型基准三轴，避免随相机视图变化。 */
+  getMeasurePlaneAxes?: () => ModelViewerMeasureAxis[];
   setHeightClipPlane?: (options: ModelHeightClipOptions) => boolean;
   clearHeightClipPlane?: () => boolean;
   getViewerBounds?: () => unknown;

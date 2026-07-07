@@ -1,10 +1,10 @@
-> 记录日期：2026-06-12（持续补记至 2026-06-21）
+> 记录日期：2026-06-12（持续补记至 2026-07-07）
 > 记录范围：LCC Web SDK 接入、运行时升级、Viewer 交互与文档口径。
 > 明确未改范围：`server/`、数据库、OSS、`deploy/.env.prod`（除非各节单独说明）。
 > 最新口径：当前对象存储实际为 **阿里云 OSS**；文档统一使用 `OSS_* / objectKey / oss-compatible.service.ts` 作为对象存储命名。
 > **优先读本节**：下方「当前运行时口径（0.6.1）」为 web 实际加载依据；第 1～11 节含 0.6.0 历史接入记录，勿与运行时混淆。
 
-## 当前运行时口径（0.6.1，2026-06-20）
+## 当前运行时口径（0.6.1，2026-07-07）
 
 | 项 | 值 |
 |---|---|
@@ -18,6 +18,13 @@
 | LCCRender 公开 API | `load`、`setCamera`、`update`、`unload`、`dispose`、`raycast`、`raycastFromOrigin`、`clearIndexDB`、`getVersion` |
 
 **说明**：SDK 只负责 LCC 场景渲染；walk / orbit 相机与鼠标交互均在项目层 `lcc-viewer.tsx`（walk 自研 + orbit 用 Three.js `OrbitControls`）。
+
+2026-07-07 补充：
+
+- 已确认本地、生产仓库、生产容器公开 SDK hash 一致。
+- `lcc-web-sdk.umd.js = 8adb7a0848b747e0f558e0f3ae0e35d4e87833e1801d197e111a5e4a300b29b6`
+- `lcc-web-sdk.js = 419b770edd6e08c302f64ea9c3bb0b09c218ff109ad5778c9f6a3fd37055a885`
+- 线上出现 `XGRIDS / FPS N/A` 时，优先排查 `NEXT_PUBLIC_LCC_APP_KEY` 构建注入、域名白名单与官方授权配置，不再优先归因为 SDK hash 不一致。
 
 ### 默认启动视图优先级（已封板）
 
@@ -192,7 +199,13 @@
   - 业务侧继续保持“无 appKey 时不传 `appKey` 字段”的条件展开
   - 暂未发现 `...(LCC_APP_KEY ? { appKey: LCC_APP_KEY } : {})` 对本轮故障构成决定性影响
 
-## 12C. 水印来源与品牌控制结论（2026-06-12）
+2026-07-07 补充：
+
+- 上述结论仅针对 2026-06-12 的“卡 92%”故障。
+- 线上 `XGRIDS / FPS N/A` 与控制台 `Warning: No appKey provided to the WebSDK!` 应按 appKey / 域名授权链路处理。
+- 不允许把 appKey 写入 Git；生产应通过构建环境变量注入 `NEXT_PUBLIC_LCC_APP_KEY`。
+
+## 12C. 底部标识与品牌控制结论（2026-07-07）
 
 - 真实页面检查结论：
   - `XGRIDS` 未作为普通 DOM 文本节点出现
@@ -203,20 +216,23 @@
 - 当前口径：
   - 不能把“直接删水印”视作公开支持的前端能力
   - 若需正式去除，应优先向 XGRIDS 官方确认授权等级与 `appKey` 能力
+  - 本项目正式路线是注入官方 appKey 并确认 `shujingspace.com` 域名授权
+  - 不修改 SDK 文件，不 DOM 删除，不 CSS 硬遮官方标识
 
-## 12D. 当前内部视觉处理（2026-06-12）
+## 12D. 当前临时视觉兜底口径（2026-07-07）
 
-- 仅内部前端视觉处理，不修改 SDK：
-  - `LCC_WATERMARK_CROP_PX = 8`
-  - `LCC_WATERMARK_BOTTOM_BAR_PX = 16`
-- 实施位置：
-  - `web/components/models/lcc-viewer.tsx`
-- 实施方式：
-  - `mountRef` 所在画布区域通过 `overflow-hidden` 做底部微裁切
-  - 在 `viewerStatus === "loaded"` 后附加一条 `16px` 底边
-- 当前状态：
-  - 该方案仅作为内部视觉收口存在
-  - 不是官方去水印方案
+- 已废弃旧处理：
+  - 不再维护 `LCC_WATERMARK_CROP_PX = 8`
+  - 不再维护 `LCC_WATERMARK_BOTTOM_BAR_PX = 16`
+  - 不再把 `bottom: -8px` 或 loaded 后 `16px` 实心黑边作为当前方案
+- 用户暂时无法取得 appKey 时，可作为临时展示兜底使用轻量底部虚化安全条。
+- 临时兜底要求：
+  - 不修改 SDK
+  - 不删除 DOM
+  - 不遮挡交互区域
+  - `pointer-events-none`
+  - 不影响工具栏、测量点线、测量标签、剖切面板、全屏与手机分享页
+- 当前临时效果口径：约 `16px` 高、轻微渐变/虚化过渡、不使用实心黑边。
 
 ---
 

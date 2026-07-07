@@ -1,6 +1,6 @@
 # 统一模型浏览器架构（第一、二阶段 + UI 收口）
 
-> 更新时间：2026-06-26  
+> 更新时间：2026-07-07
 > 第一阶段目标：先完成“统一壳子 + 引擎接口 + 分发结构”，不一次性接入全部模型引擎。  
 > 第二阶段目标：先稳定“统一工具栏能力接口 + Shell 操作入口”，暂不接新的 GLB 引擎。  
 > 当前详情页 UI：用户前端不显示开发说明模块与顶部标签栏，模型操作统一收口到视图内部左下角折叠工具栏。  
@@ -163,6 +163,16 @@ type ModelViewerCapabilities = {
 - 工具按钮若尚未接入，必须保持 `disabled`，点击不报错
 - `takeScreenshot` 接口已预留，但本轮不强制实现真实截图
 
+2026-07-07 补充：LCC / LCC2 已在统一 handle 上继续扩展以下真实能力，供 toolbar、shell 与 `/viewer/lcc/[id]` iframe 直接页复用：
+
+- 点云显示切换：`togglePointsDisplayMode`
+- 环境开关：`hasEnvironment / setEnvironmentEnabled`
+- 测量拾取：基于 SDK raycast 的点拾取与世界点锁定
+- 模型剖切：基于 `setClipBox` 的左右/上下组合剖切
+- 当前视图读写：`getCurrentView / applyView`
+
+这些能力仍不得修改 `LCCRender.load(...)` 入参、`entryUrl / dataPath` 规则、默认视角链与上传/OSS 链路。
+
 ## 三点一、模型启动视图保存（第一阶段后端契约）
 
 - 修改时间：`2026-06-06`
@@ -303,14 +313,17 @@ type ModelViewerCapabilities = {
 - 当前已知风险：
   - 外层详情页如果只看到 iframe 内 `error` 而不是 `loaded`，目前仍会继续显示 Loading
 
-## 三点五、LCC 水印当前口径（2026-06-12）
+## 三点五、LCC 底部标识与 appKey 当前口径（2026-07-07）
 
-- `XGRIDS` 水印当前判断不是普通 DOM，而是更接近 SDK / 授权链写入画布的品牌层
-- 公开文档未查到正式“去水印 / 品牌控制”开关
-- 当前仓库仅采用内部视觉处理，不视为官方去水印能力：
-  - `LccViewer` 底部微裁切 `8px`
-  - `viewerStatus === "loaded"` 后加 `16px` 底边
-- 该方案仅用于内部展示，不修改 SDK 文件
+- 已确认 LCC Web SDK 0.6.1 的公开文件 hash 在本地、生产仓库、生产容器中一致。
+- 线上出现 `XGRIDS / FPS N/A` 时，浏览器控制台曾提示 `Warning: No appKey provided to the WebSDK!` 与 `watermark info ---> shujingspace.com undefined`。
+- 因此当前优先排查方向是：`NEXT_PUBLIC_LCC_APP_KEY` 是否在 web 构建阶段注入、`shujingspace.com` 是否已进入官方域名白名单、授权配置是否完整。
+- 已废弃旧的底部视觉处理：
+  - 不再维护 `LCC_WATERMARK_CROP_PX = 8`。
+  - 不再维护 `LCC_WATERMARK_BOTTOM_BAR_PX = 16`。
+  - 不再把 `bottom: -8px` 或 loaded 后 `16px` 实心黑边作为当前方案。
+- 禁止通过修改 SDK、DOM 删除、CSS 硬遮官方标识来解决授权问题。
+- 用户暂时无法取得 appKey 时，可保留轻量底部虚化安全条作为临时展示兜底；该兜底不得影响工具栏、测量点线、剖切面板、全屏和手机分享页。
 
 ## 四、Viewer 分发规则
 
@@ -429,29 +442,124 @@ type ModelViewerCapabilities = {
   - OSGB / 3D Tiles：未来优先 tileset boundingVolume / Cesium camera
 - `ModelViewerShell` 只负责调用各 Viewer 的 `resetView`，不承载任何具体视角算法
 
-## 七、第二阶段工具栏接入情况
+## 七、左下角工具栏当前接入情况（2026-07-07）
 
-### 已接入按钮
+### 已接入按钮 / 能力
 
-- 重置视角：Shell 调用 Viewer `resetView / fitView`，LCC 当前会回到真实默认视角快照，而不是 remount
-- 全屏：由 `ModelViewerShell` 对模型视图容器执行 `requestFullscreen / exitFullscreen`
+- 初始视角 / 重置：调用 Viewer `resetView / fitView`，LCC 回到当前默认视角链，不 remount。
+- 操作模式：第一人称 `walk` 与枢轴 `orbit` 切换，内部枚举不改，用户文案为“第一人称 / 枢轴”。
+- 点云切换：LCC/LCC2 通过 SDK 显示模式切换能力实现；不支持时提示，不伪造状态。
+- 测量：基于 SDK raycast 的真实点拾取，支持多段直线保留、线段长度标签、世界点重投影、完成/清除/退出。
+- 模型剖切：基于 `setClipBox` 的 `左右剖切 / 上下剖切` 两条真实滑杆；两条滑杆合并为一个 final clip box。
+- 设置：设置面板可打开；“无 / 环境”接 `useEnvironment(false/true)`；“天空球”、渲染质量、单位等仍为 UI state。
+- 帮助：打开现有 `ModelViewerHelp`，按第一人称/枢轴展示真实操作说明。
+- 保存启动视图：owner-only，调用已有 `onSaveLaunchView` / launchView 保存链路。
 
-### 占位 / 禁用按钮
+### owner-only 规则
 
-- 截图
-- 旋转 / 环绕
-- 平移
-- 缩放
-- 漫游
-- 测量
+- 保存启动视图、模型旋转、模型高度、模型平移/移动属于 owner-only 组。
+- 模型所有者可见；游客、非所有者、readonly 分享页不渲染该组。
+- 当前只有保存启动视图接真实逻辑；模型旋转、模型高度、模型平移仍保持占位，不伪造模型变换。
+
+### 仍为占位 / 禁用
+
 - 标注
-- 图层
-- 信息
+- 拍照
+- 面积测量
+- 模型旋转
+- 模型高度
+- 模型平移 / 移动
 
 说明：
 
-- 当前这些按钮统一展示为禁用态，title 提示“暂未接入”
-- 后续真实 `GlbViewer` 将直接复用同一套 `Toolbar / Shell / capabilities`，只需补 Viewer 句柄与能力声明
+- 未实现能力必须保持 disabled / 灰显 / “即将开放”提示，不能绑定假 action。
+- 顶部右侧全屏按钮没有从参考文件迁移；现有全屏纯净模式继续由原逻辑维护。
+- 后续真实 `GlbViewer` 等格式仍应复用同一套 `Toolbar / Shell / capabilities`，由各 Viewer 自己补 handle 能力。
+
+## 七点零一、测量工具当前实现口径（2026-07-07）
+
+当前测量工具只承诺“距离测量 / 多段直线测量”，不承诺面积测量、自动识别墙面/地面、智能捕着或 CAD 级约束。
+
+### 数据模型
+
+测量点内部按以下层级理解：
+
+- `rawHitPoint`：SDK raycast 命中的真实模型点。
+- `lockedWorldPoint`：最终锁定并用于距离计算的世界点。
+- `projectedPoint`：辅助投影点，仅作为参考。
+- `screenPoint`：由世界点按当前相机重投影得到的显示坐标。
+
+重要规则：
+
+- 普通测量点必须优先使用真实 raycast 命中点。
+- 辅助投影不得替换真实测量点。
+- 测量线和标签必须根据 `lockedWorldPoint` 重投影，不得绑定首次点击时的旧屏幕坐标。
+
+### 多段测量
+
+- 一段直线完成后，线段和长度标签保留在模型中。
+- 用户可以继续测量另一段独立直线。
+- 面板 `完成` 后停止继续拾取点，保留已测量数据，用户可旋转/缩放/浏览模型。
+- `清除` 清空当前已测量的全部线段，仍停留在测量工具。
+- `退出` 退出测量工具并清空当前测量状态。
+
+### 操作键
+
+- 左键：取点。
+- 双击 / `Enter`：完成当前测量。
+- 右键：撤回上一步。
+- `Esc`：退出测量工具。
+
+### 当前封板说明
+
+- 自由/水平/垂直面板切换、X/Y/Z 数据面板、详细点列表已从主面板移除，避免干扰用户浏览。
+- 辅助轴功能已探索但未作为严谨结果来源封板；后续如继续开发，必须使用模型空间 XYZ 基准，而不是视图方向。
+
+## 七点零二、模型剖切当前实现口径（2026-07-07）
+
+### API 路线
+
+- `setClipPlane(normal, constant)` 不再用于模型剖切。该 API 当前按屏幕中心卷帘/对比裁切理解，不能冒充模型自身高度/水平裁切。
+- 当前模型剖切只使用 `setClipBox`。
+- 不修改 `LCCRender.load(...)` 入参，不修改 `entryUrl / dataPath`。
+
+### UI 与行为
+
+- 面板标题为模型剖切方向，不重做大面板。
+- 只保留两条真实滑杆：
+  - `左右剖切`
+  - `上下剖切`
+- 不保留多余青色装饰条、方向说明行、非交互进度条。
+- 不恢复右侧竖向滑杆。
+
+### setClipBox 合并规则
+
+- 两条滑杆必须合并为一个 final clip box。
+- 不允许先调用一次左右 clip box，再调用一次上下 clip box 覆盖。
+- 两条滑杆都为 50% 时调用 `setClipBox(null)`，模型完整恢复。
+- 任意滑杆偏离 50% 时按组合 box 裁切。
+
+## 七点零三、Loading 同步与性能收口（2026-07-07）
+
+### iframe loaded 同步
+
+- `/viewer/lcc/[id]` 会向父页面发送 `SHUJING_LCC_VIEWER_STATUS`。
+- payload 包含 `loaded / firstFrame / viewerStatus`。
+- `/models/{id}` 与 `/models/{id}/view` 父页面收到 `loaded=true`、`firstFrame=true` 或 `viewerStatus="loaded"` 任一条件后关闭外层 Loading overlay。
+- iframe 内 loaded 状态可短时间重复发送数次兜底，避免父层错过首次消息；不允许长期 interval。
+
+### 细节加载提示
+
+- 模型主画面和工具栏可操作后，不再显示“模型细节加载中...”。
+- 如果 SDK 后续仍渐进细化画质，第一版也不再向用户展示“加载中”状态，避免误导用户以为模型未完成。
+
+### 性能收口
+
+- LCC 资源跟踪只持续到首帧/loaded，之后停止 `performance.getEntriesByType("resource")` 的高频扫描。
+- 首帧后不再持续写 detail-loading/debug DOM 属性。
+- 测量线和标签重投影按约 33ms 节流。
+- 测量预览 raycast 按约 120ms 节流。
+- 放大镜不再依赖高成本 `getImageData` 作为严谨测量能力。
 
 ## 七点一、LCC / LCC2 真实操作控制第一版
 

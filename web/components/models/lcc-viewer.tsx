@@ -13,8 +13,11 @@ import { ModelLoadingOverlay } from "@/components/models/model-loading-overlay";
 import type {
   ModelViewerControlMode,
   ModelViewerHandle,
+  ModelViewerMeasureAxis,
   ModelViewerMovementInput,
+  ModelViewerPickResult,
   ModelViewerPoint,
+  ModelViewerProjectedPoint,
   ModelHeightClipOptions,
 } from "@/components/models/viewers/types";
 import type { LaunchViewSaveResult, ModelLaunchView } from "@/lib/types";
@@ -1075,6 +1078,50 @@ function parseModelViewerPoint(value: unknown): ModelViewerPoint | null {
   }
 
   return null;
+}
+
+function isProjectedPointVisible(projected: THREE.Vector3) {
+  return (
+    Number.isFinite(projected.x) &&
+    Number.isFinite(projected.y) &&
+    Number.isFinite(projected.z) &&
+    projected.x >= -1 &&
+    projected.x <= 1 &&
+    projected.y >= -1 &&
+    projected.y <= 1 &&
+    projected.z >= -1 &&
+    projected.z <= 1
+  );
+}
+
+function vectorToRenderMeasurePoint(vector: THREE.Vector3): ModelViewerPoint {
+  return {
+    x: vector.x,
+    y: vector.y,
+    z: vector.z,
+    coordinateSpace: "render",
+  };
+}
+
+function getModelMeasureAxes(): ModelViewerMeasureAxis[] {
+  const modelXAxis = new THREE.Vector3(1, 0, 0).transformDirection(OFFICIAL_MODEL_MATRIX);
+  const modelYAxis = new THREE.Vector3(0, 1, 0).transformDirection(OFFICIAL_MODEL_MATRIX);
+  const modelZAxis = new THREE.Vector3(0, 0, 1).transformDirection(OFFICIAL_MODEL_MATRIX);
+
+  return [
+    {
+      id: "model-x",
+      direction: vectorToRenderMeasurePoint(modelXAxis),
+    },
+    {
+      id: "model-y",
+      direction: vectorToRenderMeasurePoint(modelYAxis),
+    },
+    {
+      id: "model-z",
+      direction: vectorToRenderMeasurePoint(modelZAxis),
+    },
+  ];
 }
 
 const SECTION_CLIP_CENTER_PERCENT = 50;
@@ -2148,6 +2195,7 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
   const lccResourceActiveCountRef = useRef(0);
   const lccResourceLastStartAtRef = useRef<number | null>(null);
   const lccResourceLastEndAtRef = useRef<number | null>(null);
+  const lccResourceTrackingSettledRef = useRef(false);
   const firstFrameContentFramesRef = useRef(0);
   const firstFrameContentReadyAtRef = useRef<number | null>(null);
   const [viewerStatus, setViewerStatus] = useState<LccViewerStatus>("idle");
@@ -2666,6 +2714,145 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
 
   applyMovementFrameRef.current = applyMovementFrame;
 
+  const resolveMeasureProjectionCandidate = useCallback(
+    (
+      point: ModelViewerPoint,
+      pointer?: { clientX: number; clientY: number },
+    ):
+      | (ModelViewerProjectedPoint & {
+          worldPoint: THREE.Vector3;
+          score: number;
+        })
+      | null => {
+      const camera = cameraRef.current;
+      const canvas = rendererRef.current?.domElement ?? interactionCanvasRef.current;
+      if (!camera || !canvas) {
+        return null;
+      }
+
+      const rect = canvas.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) {
+        return null;
+      }
+
+      const directPoint = new THREE.Vector3(point.x, point.y, point.z);
+      const matrixPoint = directPoint.clone().applyMatrix4(OFFICIAL_MODEL_MATRIX);
+      const activeBounds = lastActiveBoundsRef.current
+        ?.clone()
+        .expandByScalar(Math.max(lastBoundsMaxDimRef.current * 0.05, 0.1));
+
+      camera.updateMatrixWorld(true);
+      camera.updateProjectionMatrix();
+
+      const projectCandidate = (worldPoint: THREE.Vector3, inBounds: boolean) => {
+        const projected = worldPoint.clone().project(camera);
+        if (
+          !Number.isFinite(projected.x) ||
+          !Number.isFinite(projected.y) ||
+          !Number.isFinite(projected.z)
+        ) {
+          return null;
+        }
+
+        const visible = isProjectedPointVisible(projected);
+        const clientX = rect.left + ((projected.x + 1) / 2) * rect.width;
+        const clientY = rect.top + ((1 - projected.y) / 2) * rect.height;
+        const pointerDistance = pointer
+          ? Math.hypot(clientX - pointer.clientX, clientY - pointer.clientY)
+          : 0;
+        return {
+          clientX,
+          clientY,
+          worldPoint,
+          inBounds,
+          visible,
+          projected,
+          score: pointer
+            ? -pointerDistance * 1000 +
+              (visible ? 100 : 0) +
+              (projected.z >= -1 && projected.z <= 1 ? 10 : 0) +
+              (inBounds ? 1 : 0)
+            : (visible ? 10000 : 0) +
+              (inBounds ? 1000 : 0) +
+              (projected.z >= -1 && projected.z <= 1 ? 100 : 0) -
+              Math.abs(projected.x) -
+              Math.abs(projected.y),
+        };
+      };
+
+      if (point.coordinateSpace === "render") {
+        const renderCandidate = projectCandidate(
+          directPoint,
+          activeBounds?.containsPoint(directPoint) ?? false,
+        );
+        return renderCandidate;
+      }
+
+      if (point.coordinateSpace === "sdk") {
+        const sdkCandidate = projectCandidate(
+          matrixPoint,
+          activeBounds?.containsPoint(matrixPoint) ?? false,
+        );
+        return sdkCandidate;
+      }
+
+      const directCandidate = projectCandidate(
+        directPoint,
+        activeBounds?.containsPoint(directPoint) ?? false,
+      );
+      const matrixCandidate = projectCandidate(
+        matrixPoint,
+        activeBounds?.containsPoint(matrixPoint) ?? false,
+      );
+      const candidate =
+        [directCandidate, matrixCandidate]
+          .filter((item): item is NonNullable<typeof item> => Boolean(item))
+          .sort((a, b) => b.score - a.score)[0] ?? null;
+
+      if (!candidate) {
+        return null;
+      }
+
+      return candidate;
+    },
+    [],
+  );
+
+  const projectPointToClient = useCallback(
+    (point: ModelViewerPoint): ModelViewerProjectedPoint | null => {
+      const candidate = resolveMeasureProjectionCandidate(point);
+      if (!candidate) {
+        return null;
+      }
+
+      return {
+        clientX: candidate.clientX,
+        clientY: candidate.clientY,
+        visible: candidate.visible,
+      };
+    },
+    [resolveMeasureProjectionCandidate],
+  );
+
+  const lockMeasurePointToRenderSpace = useCallback(
+    (
+      point: ModelViewerPoint,
+      pointer: { clientX: number; clientY: number },
+    ): ModelViewerPickResult | null => {
+      const candidate = resolveMeasureProjectionCandidate(point, pointer);
+      if (!candidate) {
+        return null;
+      }
+
+      return {
+        rawHitPoint: { ...point },
+        lockedWorldPoint: vectorToRenderMeasurePoint(candidate.worldPoint),
+        projectedPoint: null,
+      };
+    },
+    [resolveMeasureProjectionCandidate],
+  );
+
   useImperativeHandle(ref, () => ({
       fitView: () => {
         if (!fitCurrentView()) {
@@ -2727,12 +2914,15 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
             maxDistance,
             radius,
           });
-          return parseModelViewerPoint(rawResult);
+          const point = parseModelViewerPoint(rawResult);
+          return point ? lockMeasurePointToRenderSpace(point, { clientX, clientY }) : null;
         } catch (error) {
           logLccWarn("raycast 测量拾取失败", error);
           return null;
         }
       },
+      projectPoint: (point) => projectPointToClient(point),
+      getMeasurePlaneAxes: () => getModelMeasureAxes(),
       setHeightClipPlane: (options) => {
         const runtimeInstance = getRuntimeInstance(lccInstanceRef.current);
         if (!runtimeInstance || typeof runtimeInstance.setClipBox !== "function") {
@@ -3124,6 +3314,7 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
       lccResourceActiveCountRef.current = 0;
       lccResourceLastStartAtRef.current = null;
       lccResourceLastEndAtRef.current = null;
+      lccResourceTrackingSettledRef.current = false;
       progressRef.current = 0;
       setViewerStatus("idle");
       setProgress(0);
@@ -3156,6 +3347,7 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
       lccResourceActiveCountRef.current = 0;
       lccResourceLastStartAtRef.current = null;
       lccResourceLastEndAtRef.current = null;
+      lccResourceTrackingSettledRef.current = false;
       progressRef.current = 0;
       setViewerStatus("error");
       setProgress(0);
@@ -3196,6 +3388,7 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
       lccResourceActiveCountRef.current = 0;
       lccResourceLastStartAtRef.current = null;
       lccResourceLastEndAtRef.current = null;
+      lccResourceTrackingSettledRef.current = false;
       progressRef.current = 0;
       setSdkLoadedState(false);
       // 每个新模型重置 bounds 上下文，防止跨模型污染
@@ -3350,6 +3543,8 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
           antialias: true,
           alpha: true,
           powerPreference: "high-performance",
+          // 测量放大镜需要复制当前 WebGL 帧；保留缓冲避免读到空帧。
+          preserveDrawingBuffer: true,
         });
         rendererRef.current = currentRenderer;
         currentRenderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
@@ -4355,8 +4550,10 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
               }
             }
 
-            // 每帧采样 LCC 核心资源的 PerformanceObserver 条目
-            if (typeof performance !== "undefined" && performance.getEntriesByType) {
+            // 加载阶段需要跟踪 LCC 分片资源；首帧完成后只做一次收尾，避免浏览时每帧遍历 performance entries。
+            const shouldTrackLccResources = !firstFrameRenderedRef.current;
+            if (shouldTrackLccResources && typeof performance !== "undefined" && performance.getEntriesByType) {
+              lccResourceTrackingSettledRef.current = false;
               try {
                 const resourceEntries = performance.getEntriesByType("resource");
                 let activeCount = 0;
@@ -4399,6 +4596,11 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
               } catch {
                 // Performance API 不可用时忽略
               }
+            } else if (!shouldTrackLccResources && !lccResourceTrackingSettledRef.current) {
+              lccResourceTrackingSettledRef.current = true;
+              lccResourceActiveCountRef.current = 0;
+              setDetailLoadingActive(false);
+              setDebugAttr("data-lcc-detail-loading", "false");
             }
           } catch (error) {
             isFailed = true;

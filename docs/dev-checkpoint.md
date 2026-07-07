@@ -1,6 +1,6 @@
 # 数境空间官网 阶段开发检查点
 
-> 更新日期：2026-06-26（模型浏览器 Loading、分享页与全屏体验回归修复）
+> 更新日期：2026-07-07（模型浏览器工具栏真实能力、测量多段线、setClipBox 剖切、Loading 同步与性能优化记录）
 > 范围：仅记录已实际落地的改动与事实，供后续 Agent 续接。
 > 索引：LCC Web SDK 接入记录详见 `docs/lcc-web-sdk-integration.md`
 > 索引：模型浏览器统一架构详见 `docs/model-viewer-architecture.md`
@@ -15,7 +15,7 @@
 > 补记：2026-06-12 已完成官网品牌 Logo 收口：顶部导航和普通页面 Footer 统一改为整图资源 `/loading/loading-logo-reference1.png`，顶部固定 `60px`、底部固定 `57px`；模型加载动画继续使用 `/brand/model-loading-logo.png`，不得混用。
 > 补记：2026-06-12 已完成 LCC 详情页 iframe 独立查看器收口：`/models/[id]` 下的 LCC/LCC2 模型统一走 `/viewer/lcc/[id]` iframe；外层只保留唯一品牌 Loading，是否收起由子文档 `data-lcc-loaded=true + data-lcc-complete-reason=onLoadedStable` 决定。详情见 `docs/model-viewer-architecture.md`
 > 补记：2026-06-12 已完成“所有 LCC 模型卡在 92%”运行时排查与最小修复：真实根因是某些运行时下 SDK `onLoaded` 未触发，导致原完成链无法进入 `onLoadedStable`；现已增加保持协议不变的安全兜底，最终仍写入 `data-lcc-loaded=true` 与 `data-lcc-complete-reason=onLoadedStable`。本轮验证 `/models/77`、`/viewer/lcc/77` 及额外模型通过；当前环境未注入 `NEXT_PUBLIC_LCC_APP_KEY`，已确认本次故障与 appKey 缺失无关。详情见 `docs/lcc-web-sdk-integration.md`
-> 补记：2026-06-12 已确认 `XGRIDS` 水印并非页面 DOM，而是更接近 SDK / 授权链写入画布的品牌层；公开文档未查到正式去水印开关。当前仓库仅采用内部视觉处理：`lcc-viewer.tsx` 底部微裁切 `8px` + loaded 后 `16px` 底边，属于前端内部遮挡，不是官方去水印方案。详情见 `docs/lcc-watermark-visual-workaround.md`
+> 补记：2026-07-07 已纠正 LCC 底部标识口径：不再把 `8px` 微裁切 + `16px` 黑边作为当前方案；SDK hash 本地/生产/容器一致，线上 `XGRIDS / FPS N/A` 优先按 `NEXT_PUBLIC_LCC_APP_KEY` 构建注入与域名白名单排查。用户暂时无法取得 appKey 时，只允许非 SDK、非 DOM hack 的轻量底部视觉兜底；正式方案仍是官方授权配置。详情见 `docs/lcc-watermark-visual-workaround.md`
 > 补记：OSS 命名收口后的上传链路已完成真实环境冒烟：`server/.env` 已切到 `OSS_*`，直连 `127.0.0.1:4000` 验证 `POST /api/uploads/presign` 成功返回 `uploadUrl + objectKey`，`r2Key` 仅保留为 deprecated 兼容别名；随后完成 1x1 PNG 直传阿里云 OSS、`/api/uploads/callback` 回调、测试模型发布、数据库落库核验（`fileUrl / viewerUrl / objectKey` 正常），且 `cd server && pnpm build` 通过。
 > 补记：根据 `docs/review-report-2026-06-06.md` 第一阶段整改，生产部署口径已收口为“`web` 生产默认走 `/api`，由 Nginx/OpenResty 反代到 `server:4000`”；`deploy/.env.prod.example` 已改为与后端真实读取一致的变量名（`PORT / JWT_ACCESS_SECRET / JWT_ACCESS_EXPIRES / MAX_MODEL_SIZE_MB` 等），不再使用旧口径 `SERVER_PORT / JWT_SECRET / JWT_EXPIRES_IN / MAX_FILE_SIZE_MB`。
 > 补记：模型启动视图保存第一阶段已落地后端契约：`models` 新增 `launch_view_json / launch_view_updated_at / launch_view_updated_by`；`GET /api/models/:id` 已返回 `launchView + canSaveLaunchView`；新增 `PUT/DELETE /api/models/:id/launch-view`，仅模型归属用户可写。当前未修改前端 Viewer、`LCCRender.load`、`dataPath`、`boundsCenterHomeView`、OSS/上传链路；`cd server && pnpm build` 通过，定向 Jest（`models.service.spec.ts`、`models.controller.spec.ts`）通过。本地 `prisma migrate dev` 因 `localhost:5432` 不可达未能实际 apply，但迁移 SQL 已补入 `server/prisma/migrations/20260606101500_add_model_launch_view/migration.sql`。
@@ -230,6 +230,113 @@ ModelViewerShell：
 - Loading：Logo 等比例，进度条明显比 Logo 长。
 - Docker：web build 不再出现 corepack / pnpm latest 超时。
 
+## 2026-07-07 模型浏览器工具栏、测量、剖切与性能优化记录
+
+本节记录 2026-06-26 之后已完成但尚未完整写入文档的模型浏览器阶段性事实，供后续继续开发工具栏能力时对齐边界。
+
+### 1. 左下角工具栏新设计与权限规则
+
+- 左下角工具栏已按 `reference/figma/model-viewer-toolbar.reference.tsx` 的 Viewer controls 方向完成新 UI：黑色半透明、毛玻璃、低透明描边、圆角、阴影、cyan active、高可见 disabled。
+- 本轮只迁移左下角工具栏，不迁移顶部右侧全屏按钮，不迁移旧社区页、上传弹窗、训练数据服务、右侧信息栏等参考文件无关内容。
+- 已接真实功能：初始视角/重置、第一人称/枢轴模式切换、帮助、点云切换、测量、模型剖切、设置面板里的环境开关、保存启动视图。
+- owner-only 工具组规则：保存启动视图、模型旋转、模型高度、模型平移只允许模型归属用户看到；readonly 分享页与非所有者不渲染该组。
+- 当前 owner-only 中只有保存启动视图接现有真实回调；模型旋转、模型高度、模型平移仍为后续能力，不能伪造模型数据或矩阵变换。
+
+### 2. 点云切换与设置面板环境开关
+
+- `LccViewer` 已通过统一 handle 暴露点云切换能力，`ModelViewerShell`、`ModelViewerToolbar` 和 `/viewer/lcc/[id]` iframe 直接页均已桥接。
+- 点云切换只调用 SDK 的显示模式切换能力，未修改 `LCCRender.load`、`entryUrl`、`dataPath`、默认视角链或保存视图逻辑。
+- 设置面板中“无 / 环境”已接 `hasEnvironment / useEnvironment / setEnvironmentEnabled`：`无` 调 `useEnvironment(false)`，`环境` 支持时调 `useEnvironment(true)`。
+- “天空球”仅保留 UI state，不调用未知 SDK API；渲染质量、单位系统、长度单位等设置目前也是 UI 状态，不影响真实 viewer。
+
+### 3. 测量工具当前封板口径
+
+- 测量使用 SDK raycast 命中真实模型点，测量点数据模型已拆分为：
+  - `rawHitPoint`：SDK raycast 命中的真实点。
+  - `lockedWorldPoint`：最终锁定并用于距离计算的世界点。
+  - `projectedPoint`：辅助投影点，仅作为参考。
+  - `screenPoint`：每帧或节流后由世界点重投影得到的显示坐标。
+- 已完成“世界点重投影”：测量线与标签不再绑定旧屏幕像素，旋转视角后会按锁定的世界点重新投影，避免线段随相机乱跳。
+- 已完成“真实点附着优先”：自由测量与普通点位以真实 raycast 命中点作为测量点；辅助投影只做参考，不替换真实测量点。
+- 已完成多段直线测量：一段测量完成后线段和长度标签保留在模型中，用户可以继续测量另一段独立直线。
+- 测量面板当前简化为核心操作：保留距离测量入口以及底部 `清除 / 完成 / 退出`。已移除自由/水平/垂直切换、X/Y/Z 数据面板、详细点列表等会干扰普通使用的展示。
+- 交互语义：左键取点；双击或 `Enter` 完成当前测量；右键撤回上一步点；`Esc` 退出测量工具。
+- 面板按钮语义：`完成` 停止继续拾取并保留已测量线段，允许用户旋转/浏览模型；`清除` 清空当前已测量的所有数据但仍停留在测量工具；`退出` 退出测量工具并清空当前测量状态。
+- 辅助轴/捕着参考线功能已探索，但当前先封板：不作为严谨测量结果来源，后续如继续做，应基于模型空间 XYZ 基准而不是视图方向。
+
+### 4. 模型剖切当前封板口径
+
+- 已停止把 `setClipPlane(normal, constant)` 当作“模型高度剖切”。该 API 实际更接近屏幕中心卷帘/对比裁切，不适合按模型自身高度或水平范围查看内部结构。
+- 当前模型剖切改为使用 `setClipBox`，不再用 `setClipPlane` 做模型剖切。
+- 面板只保留两条真实滑杆：`左右剖切` 与 `上下剖切`。
+- 两条滑杆必须合并成一个 `final clipBox`，不能连续调用两次 `setClipBox` 分别覆盖。
+- 任意一条滑杆偏离 50% 时按组合 clip box 裁切；两条都回到 50% 时调用 `setClipBox(null)`，模型完整恢复。
+- UI 已删除多余青色装饰条、方向说明行、非真实进度条；不恢复右侧竖向滑杆。
+
+### 5. Loading 与 iframe loaded 同步
+
+- `/models/{id}` 和 `/models/{id}/view` 外层曾在 iframe 内模型已可操作时仍停留 92% overlay。
+- 当前统一通过 `/viewer/lcc/[id]` 向父页面发送 `SHUJING_LCC_VIEWER_STATUS`，payload 包含 `loaded / firstFrame / viewerStatus`。
+- 父页面收到 `loaded === true`、`firstFrame === true` 或 `viewerStatus === "loaded"` 任一条件后，即关闭外层 Loading overlay。
+- iframe 内 loaded 状态会短时间兜底广播数次，避免父页面错过首次消息；不使用长期 interval。
+- 用户可见的“模型细节加载中...”浮层已移除/隐藏：模型主画面和工具栏可操作后，不再显示会误导用户的加载中提示。
+
+### 6. LCC SDK、appKey 与底部标识口径
+
+- 已确认本地、生产仓库、生产容器公开 SDK hash 一致，版本均为 LCC Web SDK `0.6.1`。
+- 已记录的 hash：
+  - `lcc-web-sdk.umd.js = 8adb7a0848b747e0f558e0f3ae0e35d4e87833e1801d197e111a5e4a300b29b6`
+  - `lcc-web-sdk.js = 419b770edd6e08c302f64ea9c3bb0b09c218ff109ad5778c9f6a3fd37055a885`
+- 线上出现 `Warning: No appKey provided to the WebSDK!` 与 `watermark info ---> shujingspace.com undefined` 时，优先按 `NEXT_PUBLIC_LCC_APP_KEY` 未在 web 构建阶段注入、域名未白名单或授权配置缺失排查。
+- 禁止方案：不改 SDK 混淆代码、不 DOM 删除、不 CSS 硬遮官方标识、不恢复旧的 `8px` 裁切 + `16px` 黑边作为正式方案。
+- 用户暂时拿不到 appKey 时，允许作为临时体验兜底使用轻量底部虚化安全条；该兜底必须 `pointer-events-none`，不得影响工具栏、测量点线、剖切面板和模型交互。
+
+### 7. 性能优化口径
+
+- `lcc-viewer.tsx` 的资源跟踪已收口：`performance.getEntriesByType("resource")` 只跟踪到首帧/loaded，首帧后不再每帧扫描资源或持续写大量 debug 属性。
+- 首帧后会一次性把 `data-lcc-detail-loading=false`，并关闭 detail loading 活跃状态。
+- 测量线与标签重投影已节流，当前口径约 `33ms` 一次，避免每帧 React state 更新导致浏览卡顿。
+- 测量预览 raycast 已节流，当前口径约 `120ms` 一次，避免鼠标移动时高频 raycast。
+- 放大镜曾尝试读取 canvas 像素，但 `getImageData` 成本高且 LCC/跨源 canvas 场景不稳定；当前不再依赖像素读取作为严谨测量能力。
+
+### 8. 当前未做与禁止回归
+
+- 不做面积测量真实计算，不伪造面积结果。
+- 不做模型旋转/高度/平移真实变换，除非后续先确认 SDK translation/rotation API 并明确 owner-only 运行时规则。
+- 不改 `LCCRender.load` 入参。
+- 不改 `entryUrl / dataPath` 规则。
+- 不改默认视角链：`launchView > sdkInitialCamera > explicitPackageDefaultView > boundsCenterHomeView > bounds fallback`。
+- 不为了测量或剖切修改手机分享页摇杆、触控、`mobile=1`、全屏降级逻辑。
+
+### 9. 验收入口
+
+建议后续回归继续覆盖：
+
+```txt
+直接 viewer：
+/viewer/lcc/35?t=viewer-tools-regression
+/viewer/lcc/77?t=viewer-tools-regression
+
+详情页：
+/models/35?t=viewer-tools-regression
+/models/77?t=viewer-tools-regression
+
+分享页：
+/models/35/view?t=viewer-tools-regression
+
+手机分享页：
+/models/35/view?t=mobile-share-keep
+```
+
+重点验收：
+
+- 92% 外层 Loading 不残留。
+- “模型细节加载中...”不再出现。
+- 点云切换、环境开关、测量多段线、左右/上下剖切均可用。
+- 测量完成后可正常旋转/浏览，线段与标签稳定重投影。
+- owner-only 工具不出现在 readonly 分享页。
+- 手机分享页仍走 `mobile=1`，摇杆/触控/工具菜单不受影响。
+
 ## 🚩 最终检查点（重开新对话前，先读本节）
 
 > 本节为「重开新对话」的交接快照。下方各节为历史明细，可按需深入。
@@ -238,7 +345,7 @@ ModelViewerShell：
 
 - ⚠️ **非 LCC Viewer 延迟挂载兜底仍有缺口**：`model-detail-page.tsx` 的 `viewerReady` 检查在达到最大 `requestAnimationFrame` 尝试次数后只会停止轮询，但不会强制挂载 `ModelViewerShell`；若布局稳定慢于预期，普通模型可能一直停在外层 Loading。
 - ⚠️ **LCC iframe 外层 Loading 会遮住内层 error 态**：当前外层只在子文档满足 `data-lcc-loaded=true + completeReason=onLoadedStable` 时才隐藏；如果 iframe 内部真实进入 `error`，外层仍会继续显示 Loading，用户看不到子文档错误信息。
-- ℹ️ **LCC 运行时调试属性当前仍保留在生产 DOM**：`lcc-viewer.tsx` 会持续写入 `data-lcc-debug-*` 诊断属性，便于继续排查加载链问题，但会增加少量 DOM 变更噪音；后续如确认稳定，可考虑按环境变量再做收口。
+- ℹ️ **LCC 运行时诊断属性已做性能收口**：首帧/loaded 前仍可写入必要 `data-lcc-*` 状态用于父层 Loading 与排查；首帧后资源扫描与高频 detail-loading/debug 写入已停止，避免持续 DOM 变更噪音。
 - ℹ️ **主详情页 LCC 延迟挂载实验代码仍保留**：`viewerReady / viewerMountSeed` 等逻辑对 LCC 已不再挂载 `ModelViewerShell`（改走 iframe），下一轮可在 iframe 稳定后清理，本轮 intentionally 保留以降低回归风险。
 - ⚠️ **手机分享待真机验收**：iPhone Safari / 微信内置浏览器 / Android Chrome 触屏与 WebGL 手感尚未签字确认（见下方「手机分享已知风险」）。
 - ⚠️ **手机竖屏 hydration 闪帧**：`useMobileViewer` mount 前可能短暂渲染非 `mobile=1` iframe（P2，待优化）。

@@ -27,6 +27,7 @@ import { useParams, useSearchParams } from "next/navigation";
 import { LccViewer } from "@/components/models/lcc-viewer";
 import {
   ModelMeasureOverlay,
+  type ModelMeasureAxisLine,
   type ModelMeasurePoint,
 } from "@/components/models/model-measure-overlay";
 import { ModelLoadingOverlay } from "@/components/models/model-loading-overlay";
@@ -44,7 +45,9 @@ import type { ModelDetail, ModelLaunchView } from "@/lib/types";
 import type {
   ModelViewerHandle,
   ModelViewerControlMode,
+  ModelViewerMeasureAxis,
   ModelViewerMovementInput,
+  ModelViewerPickResult,
   ModelViewerPoint,
   ModelHeightClipOptions,
 } from "@/components/models/viewers/types";
@@ -78,6 +81,224 @@ function cloneEmptyMovementInput(): ModelViewerMovementInput {
 
 function calculateMeasureDistance(a: ModelViewerPoint, b: ModelViewerPoint) {
   return Math.sqrt((b.x - a.x) ** 2 + (b.y - a.y) ** 2 + (b.z - a.z) ** 2);
+}
+
+function calculateTotalMeasureDistance(points: ModelMeasurePoint[]) {
+  if (points.length < 2) {
+    return null;
+  }
+
+  let total = 0;
+  for (let startIndex = 0; startIndex + 1 < points.length; startIndex += 2) {
+    total += calculateMeasureDistance(
+      getMeasureWorldPoint(points[startIndex]),
+      getMeasureWorldPoint(points[startIndex + 1]),
+    );
+  }
+
+  return total;
+}
+
+function areMeasureScreensClose(a: ModelMeasurePoint["screenPoint"], b: ModelMeasurePoint["screenPoint"]) {
+  return (
+    Math.abs(a.x - b.x) < 0.25 &&
+    Math.abs(a.y - b.y) < 0.25 &&
+    (a.visible ?? true) === (b.visible ?? true)
+  );
+}
+
+function getMeasureWorldPoint(point: ModelMeasurePoint) {
+  return point.projectedPoint ?? point.lockedWorldPoint;
+}
+
+const MEASURE_AXIS_DIRECTION_SAMPLE_LENGTHS = [0.2, 0.5, 1, 2, 4, 8, 16, 36, 72];
+const MEASURE_AXIS_DIRECTION_TARGET_PX = 160;
+const MEASURE_AXIS_DIRECTION_MIN_PX = 6;
+const MEASURE_AXIS_SCREEN_PADDING_PX = 120;
+const MEASURE_AXIS_SNAP_LINE_PX = 18;
+const MEASURE_AXIS_SNAP_POINT_PX = 64;
+const MEASURE_PREVIEW_PICK_INTERVAL_MS = 120;
+const MEASURE_REPROJECT_INTERVAL_MS = 33;
+const FALLBACK_MEASURE_PLANE_AXES: ModelViewerMeasureAxis[] = [
+  { id: "model-x", direction: { x: -1, y: 0, z: 0, coordinateSpace: "render" } },
+  { id: "model-y", direction: { x: 0, y: 0, z: 1, coordinateSpace: "render" } },
+  { id: "model-z", direction: { x: 0, y: 1, z: 0, coordinateSpace: "render" } },
+];
+
+function normalizeMeasureAxisDirection(direction: ModelViewerPoint): ModelViewerPoint | null {
+  const length = Math.hypot(direction.x, direction.y, direction.z);
+  if (!Number.isFinite(length) || length < 1e-6) {
+    return null;
+  }
+
+  return {
+    x: direction.x / length,
+    y: direction.y / length,
+    z: direction.z / length,
+    coordinateSpace: direction.coordinateSpace ?? "render",
+  };
+}
+
+function offsetMeasureWorldPointByDirection(
+  point: ModelViewerPoint,
+  direction: ModelViewerPoint,
+  delta: number,
+): ModelViewerPoint {
+  return {
+    ...point,
+    x: point.x + direction.x * delta,
+    y: point.y + direction.y * delta,
+    z: point.z + direction.z * delta,
+    coordinateSpace: point.coordinateSpace ?? "render",
+  };
+}
+
+function areMeasureAxisLinesClose(a: ModelMeasureAxisLine[], b: ModelMeasureAxisLine[]) {
+  if (a.length !== b.length) {
+    return false;
+  }
+
+  return a.every((line, index) => {
+    const nextLine = b[index];
+    return (
+      line.id === nextLine.id &&
+      Math.abs(line.start.x - nextLine.start.x) < 1.5 &&
+      Math.abs(line.start.y - nextLine.start.y) < 1.5 &&
+      Math.abs(line.end.x - nextLine.end.x) < 1.5 &&
+      Math.abs(line.end.y - nextLine.end.y) < 1.5
+    );
+  });
+}
+
+function createExtendedMeasureAxisLine(
+  id: ModelMeasureAxisLine["id"],
+  direction: ModelMeasureAxisLine["direction"],
+  anchorScreen: ModelMeasurePoint["screenPoint"],
+  sampleScreen: ModelMeasurePoint["screenPoint"],
+  measureArea: HTMLElement,
+): ModelMeasureAxisLine | null {
+  const dx = sampleScreen.x - anchorScreen.x;
+  const dy = sampleScreen.y - anchorScreen.y;
+  const length = Math.hypot(dx, dy);
+  if (length < MEASURE_AXIS_DIRECTION_MIN_PX) {
+    return null;
+  }
+
+  const rect = measureArea.getBoundingClientRect();
+  const extendLength = Math.hypot(rect.width, rect.height) + MEASURE_AXIS_SCREEN_PADDING_PX;
+  const unitX = dx / length;
+  const unitY = dy / length;
+
+  return {
+    id,
+    direction,
+    start: {
+      x: anchorScreen.x - unitX * extendLength,
+      y: anchorScreen.y - unitY * extendLength,
+      visible: anchorScreen.visible && sampleScreen.visible,
+    },
+    end: {
+      x: anchorScreen.x + unitX * extendLength,
+      y: anchorScreen.y + unitY * extendLength,
+      visible: anchorScreen.visible && sampleScreen.visible,
+    },
+  };
+}
+
+function getScreenDistanceToSegment(
+  point: ModelMeasurePoint["screenPoint"],
+  start: ModelMeasurePoint["screenPoint"],
+  end: ModelMeasurePoint["screenPoint"],
+) {
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  const lengthSq = dx * dx + dy * dy;
+  if (lengthSq <= 0) {
+    return Math.hypot(point.x - start.x, point.y - start.y);
+  }
+
+  const t = Math.max(0, Math.min(1, ((point.x - start.x) * dx + (point.y - start.y) * dy) / lengthSq));
+  const closestX = start.x + dx * t;
+  const closestY = start.y + dy * t;
+  return Math.hypot(point.x - closestX, point.y - closestY);
+}
+
+function projectMeasureWorldPointToAxis(
+  anchor: ModelViewerPoint,
+  target: ModelViewerPoint,
+  direction: ModelViewerPoint,
+): ModelViewerPoint {
+  const normalizedDirection = normalizeMeasureAxisDirection(direction);
+  if (!normalizedDirection) {
+    return { ...target };
+  }
+
+  const dx = target.x - anchor.x;
+  const dy = target.y - anchor.y;
+  const dz = target.z - anchor.z;
+  const scalar =
+    dx * normalizedDirection.x + dy * normalizedDirection.y + dz * normalizedDirection.z;
+
+  return {
+    x: anchor.x + normalizedDirection.x * scalar,
+    y: anchor.y + normalizedDirection.y * scalar,
+    z: anchor.z + normalizedDirection.z * scalar,
+    coordinateSpace: anchor.coordinateSpace ?? target.coordinateSpace ?? "render",
+  };
+}
+
+function projectMeasureScreenPointToAxis(
+  anchor: ModelViewerPoint,
+  direction: ModelViewerPoint,
+  pointerScreen: ModelMeasurePoint["screenPoint"],
+  projectScreen: (worldPoint: ModelViewerPoint) => ModelMeasurePoint["screenPoint"] | null,
+): {
+  projectedPoint: ModelViewerPoint;
+  screenPoint: ModelMeasurePoint["screenPoint"];
+  screenDistance: number;
+} | null {
+  const normalizedDirection = normalizeMeasureAxisDirection(direction);
+  const anchorScreen = projectScreen(anchor);
+  if (!normalizedDirection || !anchorScreen) {
+    return null;
+  }
+
+  return MEASURE_AXIS_DIRECTION_SAMPLE_LENGTHS.flatMap((length) => [length, -length])
+    .map((delta) => {
+      const samplePoint = offsetMeasureWorldPointByDirection(anchor, normalizedDirection, delta);
+      const sampleScreen = projectScreen(samplePoint);
+      if (!sampleScreen) {
+        return null;
+      }
+
+      const axisX = sampleScreen.x - anchorScreen.x;
+      const axisY = sampleScreen.y - anchorScreen.y;
+      const axisLengthSq = axisX * axisX + axisY * axisY;
+      if (axisLengthSq < MEASURE_AXIS_DIRECTION_MIN_PX * MEASURE_AXIS_DIRECTION_MIN_PX) {
+        return null;
+      }
+
+      const pointerX = pointerScreen.x - anchorScreen.x;
+      const pointerY = pointerScreen.y - anchorScreen.y;
+      const screenRatio = (pointerX * axisX + pointerY * axisY) / axisLengthSq;
+      const projectedPoint = offsetMeasureWorldPointByDirection(anchor, normalizedDirection, delta * screenRatio);
+      const projectedScreen = projectScreen(projectedPoint);
+      if (!projectedScreen) {
+        return null;
+      }
+
+      return {
+        projectedPoint,
+        screenPoint: projectedScreen,
+        screenDistance: Math.hypot(projectedScreen.x - pointerScreen.x, projectedScreen.y - pointerScreen.y),
+      };
+    })
+    .filter((candidate): candidate is {
+      projectedPoint: ModelViewerPoint;
+      screenPoint: ModelMeasurePoint["screenPoint"];
+      screenDistance: number;
+    } => Boolean(candidate))
+    .sort((a, b) => a.screenDistance - b.screenDistance)[0] ?? null;
 }
 
 /** 判断当前聚焦元素是否为输入框/文本域/可编辑元素 */
@@ -332,8 +553,14 @@ export default function LccViewerIframePage() {
   const [saveLaunchViewPending, setSaveLaunchViewPending] = useState(false);
   // 测量模式：仅桌面工具栏触发，手机分享页不渲染入口
   const [isMeasuring, setIsMeasuring] = useState(false);
+  const [isMeasurePanelOpen, setIsMeasurePanelOpen] = useState(false);
   const [measurePoints, setMeasurePoints] = useState<ModelMeasurePoint[]>([]);
-  const [measureDistance, setMeasureDistance] = useState<number | null>(null);
+  const [measurePreviewPoint, setMeasurePreviewPoint] = useState<ModelMeasurePoint | null>(null);
+  const [measureAxisLines, setMeasureAxisLines] = useState<ModelMeasureAxisLine[]>([]);
+  const [, setMeasureDistance] = useState<number | null>(null);
+  const measurePointsRef = useRef<ModelMeasurePoint[]>([]);
+  const measurePreviewSeqRef = useRef(0);
+  const lastMeasurePreviewAtRef = useRef(0);
   /** mobile=1 首次 ready 后是否已应用默认 walk（避免用户切 orbit 后被 effect 打回） */
   const hasAppliedMobileDefaultModeRef = useRef(false);
   /** 详情 embed 竖屏预览：首次 ready 后默认 orbit */
@@ -344,6 +571,10 @@ export default function LccViewerIframePage() {
   const [fullscreenSupported, setFullscreenSupported] = useState(false);
   /** 全屏有效性延迟复核定时器（避免 fullscreenchange 过早误判） */
   const fullscreenVerifyTimerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    measurePointsRef.current = measurePoints;
+  }, [measurePoints]);
 
   /* ---- 自动聚焦 viewer 容器（确保 iframe / 独立页面获得键盘焦点，WASD 可用） ---- */
   const viewerContainerRef = useRef<HTMLDivElement | null>(null);
@@ -661,9 +892,279 @@ export default function LccViewerIframePage() {
 
   /* ---- 测量模式 ---- */
   const handleClearMeasure = useCallback(() => {
+    measurePreviewSeqRef.current += 1;
+    measurePointsRef.current = [];
+    setIsMeasurePanelOpen(true);
     setMeasurePoints([]);
+    setMeasurePreviewPoint(null);
+    setMeasureAxisLines([]);
     setMeasureDistance(null);
   }, []);
+
+  const resolveProjectedMeasureScreen = useCallback(
+    (world: ModelViewerPoint, measureArea: HTMLElement): ModelMeasurePoint["screenPoint"] | null => {
+      const projected = viewerHandleRef.current?.projectPoint?.(world);
+      if (!projected) {
+        return null;
+      }
+
+      const rect = measureArea.getBoundingClientRect();
+      return {
+        x: projected.clientX - rect.left,
+        y: projected.clientY - rect.top,
+        visible: projected.visible,
+      };
+    },
+    [],
+  );
+
+  const resolveMeasureAxisLines = useCallback(
+    (anchorPoint: ModelMeasurePoint | null, measureArea: HTMLElement): ModelMeasureAxisLine[] => {
+      if (!anchorPoint) {
+        return [];
+      }
+
+      const anchorWorldPoint = getMeasureWorldPoint(anchorPoint);
+      const anchorScreen = resolveProjectedMeasureScreen(anchorWorldPoint, measureArea);
+      if (!anchorScreen) {
+        return [];
+      }
+
+      const axes = (viewerHandleRef.current?.getMeasurePlaneAxes?.() ?? FALLBACK_MEASURE_PLANE_AXES)
+        .map((axis) => {
+          const direction = normalizeMeasureAxisDirection(axis.direction);
+          return direction ? { ...axis, direction } : null;
+        })
+        .filter((axis): axis is ModelViewerMeasureAxis => Boolean(axis));
+
+      return axes.map((axis) => {
+        const sample = MEASURE_AXIS_DIRECTION_SAMPLE_LENGTHS.flatMap((length) => [
+          offsetMeasureWorldPointByDirection(anchorWorldPoint, axis.direction, length),
+          offsetMeasureWorldPointByDirection(anchorWorldPoint, axis.direction, -length),
+        ])
+          .map((worldPoint) => {
+            const screen = resolveProjectedMeasureScreen(worldPoint, measureArea);
+            if (!screen) {
+              return null;
+            }
+
+            const screenDistance = Math.hypot(screen.x - anchorScreen.x, screen.y - anchorScreen.y);
+            if (screenDistance < MEASURE_AXIS_DIRECTION_MIN_PX) {
+              return null;
+            }
+
+            return {
+              screen,
+              score: Math.abs(screenDistance - MEASURE_AXIS_DIRECTION_TARGET_PX),
+            };
+          })
+          .filter((item): item is { screen: ModelMeasurePoint["screenPoint"]; score: number } =>
+            Boolean(item),
+          )
+          .sort((a, b) => a.score - b.score)[0];
+
+        if (!sample) {
+          return null;
+        }
+
+        return createExtendedMeasureAxisLine(axis.id, axis.direction, anchorScreen, sample.screen, measureArea);
+      }).filter((line): line is ModelMeasureAxisLine => Boolean(line));
+    },
+    [resolveProjectedMeasureScreen],
+  );
+
+  const resolveMeasureAxisSnap = useCallback(
+    (
+      pickResult: ModelViewerPickResult,
+      measureArea: HTMLElement,
+      fallbackClient: { clientX: number; clientY: number },
+      anchorPoint: ModelMeasurePoint | null,
+    ): {
+      projectedPoint: ModelViewerPoint;
+      screenPoint: ModelMeasurePoint["screenPoint"];
+      axisId: ModelMeasureAxisLine["id"];
+    } | null => {
+      if (!anchorPoint) {
+        return null;
+      }
+
+      const rect = measureArea.getBoundingClientRect();
+      const pointerScreen = {
+        x: fallbackClient.clientX - rect.left,
+        y: fallbackClient.clientY - rect.top,
+        visible: true,
+      };
+      const axisLines = resolveMeasureAxisLines(anchorPoint, measureArea);
+      const anchorWorldPoint = getMeasureWorldPoint(anchorPoint);
+
+      const candidates = axisLines
+        .flatMap((line) => {
+          const lineDistance = getScreenDistanceToSegment(pointerScreen, line.start, line.end);
+          if (lineDistance > MEASURE_AXIS_SNAP_LINE_PX) {
+            return [];
+          }
+
+          const lineCandidates: Array<{
+            axisId: ModelMeasureAxisLine["id"];
+            projectedPoint: ModelViewerPoint;
+            screenPoint: ModelMeasurePoint["screenPoint"];
+            score: number;
+          }> = [];
+          const projectedPoint = projectMeasureWorldPointToAxis(
+            anchorWorldPoint,
+            pickResult.lockedWorldPoint,
+            line.direction,
+          );
+          const screenPoint = resolveProjectedMeasureScreen(projectedPoint, measureArea);
+          if (screenPoint) {
+            const pointDistance = Math.hypot(screenPoint.x - pointerScreen.x, screenPoint.y - pointerScreen.y);
+            if (pointDistance <= MEASURE_AXIS_SNAP_POINT_PX) {
+              lineCandidates.push({
+                axisId: line.id,
+                projectedPoint,
+                screenPoint,
+                score: lineDistance * 0.35 + pointDistance,
+              });
+            }
+          }
+
+          const pointerProjected = projectMeasureScreenPointToAxis(
+            anchorWorldPoint,
+            line.direction,
+            pointerScreen,
+            (worldPoint) => resolveProjectedMeasureScreen(worldPoint, measureArea),
+          );
+          if (pointerProjected && pointerProjected.screenDistance <= MEASURE_AXIS_SNAP_POINT_PX) {
+            lineCandidates.push({
+              axisId: line.id,
+              projectedPoint: pointerProjected.projectedPoint,
+              screenPoint: pointerProjected.screenPoint,
+              score: lineDistance * 0.35 + pointerProjected.screenDistance * 0.75,
+            });
+          }
+
+          return lineCandidates;
+        })
+        .sort((a, b) => a.score - b.score);
+
+      return candidates[0]
+        ? {
+            axisId: candidates[0].axisId,
+            projectedPoint: candidates[0].projectedPoint,
+            screenPoint: candidates[0].screenPoint,
+          }
+        : null;
+    },
+    [resolveMeasureAxisLines, resolveProjectedMeasureScreen],
+  );
+
+  const createMeasurePoint = useCallback(
+    (
+      pickResult: ModelViewerPickResult,
+      measureArea: HTMLElement,
+      fallbackClient: { clientX: number; clientY: number },
+      anchorPoint: ModelMeasurePoint | null = null,
+    ): ModelMeasurePoint => {
+      const rect = measureArea.getBoundingClientRect();
+      const axisSnap = resolveMeasureAxisSnap(pickResult, measureArea, fallbackClient, anchorPoint);
+      const projectedPoint = axisSnap?.projectedPoint ?? pickResult.projectedPoint ?? null;
+      const screenWorldPoint = projectedPoint ?? pickResult.lockedWorldPoint;
+      return {
+        rawHitPoint: pickResult.rawHitPoint,
+        lockedWorldPoint: pickResult.lockedWorldPoint,
+        projectedPoint,
+        snapAxisId: axisSnap?.axisId ?? null,
+        screenPoint:
+          axisSnap?.screenPoint ??
+          resolveProjectedMeasureScreen(screenWorldPoint, measureArea) ?? {
+            x: fallbackClient.clientX - rect.left,
+            y: fallbackClient.clientY - rect.top,
+            visible: true,
+          },
+      };
+    },
+    [resolveMeasureAxisSnap, resolveProjectedMeasureScreen],
+  );
+
+  const reprojectMeasurePoint = useCallback(
+    (point: ModelMeasurePoint, measureArea: HTMLElement): ModelMeasurePoint => {
+      const screen = resolveProjectedMeasureScreen(getMeasureWorldPoint(point), measureArea);
+      if (!screen) {
+        return point.screenPoint.visible === false
+          ? point
+          : { ...point, screenPoint: { ...point.screenPoint, visible: false } };
+      }
+
+      if (areMeasureScreensClose(point.screenPoint, screen)) {
+        return point;
+      }
+
+      return { ...point, screenPoint: screen };
+    },
+    [resolveProjectedMeasureScreen],
+  );
+
+  const syncMeasureProjection = useCallback(() => {
+    const measureArea = viewerContainerRef.current;
+    if (!measureArea) {
+      return;
+    }
+
+    setMeasurePoints((current) => {
+      if (current.length === 0) {
+        return current;
+      }
+
+      let changed = false;
+      const next = current.map((point) => {
+        const reprojected = reprojectMeasurePoint(point, measureArea);
+        if (reprojected !== point) {
+          changed = true;
+        }
+        return reprojected;
+      });
+
+      return changed ? next : current;
+    });
+
+    setMeasurePreviewPoint((current) => {
+      if (!current) {
+        return current;
+      }
+
+      return reprojectMeasurePoint(current, measureArea);
+    });
+
+    const axisAnchorPoint =
+      measurePointsRef.current.length % 2 === 1
+        ? measurePointsRef.current[measurePointsRef.current.length - 1]
+        : null;
+    const nextAxisLines = axisAnchorPoint ? resolveMeasureAxisLines(axisAnchorPoint, measureArea) : [];
+    setMeasureAxisLines((current) =>
+      areMeasureAxisLinesClose(current, nextAxisLines) ? current : nextAxisLines,
+    );
+  }, [reprojectMeasurePoint, resolveMeasureAxisLines]);
+
+  useEffect(() => {
+    if (!isMeasuring && measurePoints.length === 0) {
+      return;
+    }
+
+    let frameId = 0;
+    let lastSyncAt = Date.now();
+    const tick = () => {
+      const now = Date.now();
+      if (now - lastSyncAt >= MEASURE_REPROJECT_INTERVAL_MS) {
+        lastSyncAt = now;
+        syncMeasureProjection();
+      }
+      frameId = window.requestAnimationFrame(tick);
+    };
+
+    syncMeasureProjection();
+    frameId = window.requestAnimationFrame(tick);
+    return () => window.cancelAnimationFrame(frameId);
+  }, [isMeasuring, measurePoints.length, syncMeasureProjection]);
 
   const handleToggleMeasure = useCallback(() => {
     if (processingBlocked) {
@@ -673,15 +1174,56 @@ export default function LccViewerIframePage() {
 
     setIsMeasuring((current) => {
       const next = !current;
+      setIsMeasurePanelOpen(true);
       if (next) {
         clearMovementState();
         setIsHelpOpen(false);
-        setMeasurePoints([]);
-        setMeasureDistance(null);
+        setMeasurePreviewPoint(null);
+        setMeasureAxisLines([]);
+      } else {
+        measurePreviewSeqRef.current += 1;
+        const currentPoints = measurePointsRef.current;
+        const nextPoints = currentPoints.length % 2 === 1 ? currentPoints.slice(0, -1) : currentPoints;
+        measurePointsRef.current = nextPoints;
+        setMeasurePoints(nextPoints);
+        setMeasurePreviewPoint(null);
+        setMeasureAxisLines([]);
+        setMeasureDistance(calculateTotalMeasureDistance(nextPoints));
       }
       return next;
     });
   }, [clearMovementState, processingBlocked]);
+
+  const handleFinishMeasure = useCallback(() => {
+    measurePreviewSeqRef.current += 1;
+    const currentPoints = measurePointsRef.current;
+    const nextPoints = currentPoints.length % 2 === 1 ? currentPoints.slice(0, -1) : currentPoints;
+    measurePointsRef.current = nextPoints;
+    setIsMeasuring(false);
+    setIsMeasurePanelOpen(true);
+    setMeasurePoints(nextPoints);
+    setMeasurePreviewPoint(null);
+    setMeasureAxisLines([]);
+    setMeasureDistance(calculateTotalMeasureDistance(nextPoints));
+  }, []);
+
+  const handleUndoMeasure = useCallback(() => {
+    measurePreviewSeqRef.current += 1;
+    const currentPoints = measurePointsRef.current;
+    if (currentPoints.length === 0) {
+      setMeasurePreviewPoint(null);
+      setMeasureAxisLines([]);
+      return;
+    }
+
+    const nextPoints = currentPoints.slice(0, -1);
+    measurePointsRef.current = nextPoints;
+    setIsMeasurePanelOpen(true);
+    setMeasurePoints(nextPoints);
+    setMeasurePreviewPoint(null);
+    setMeasureAxisLines([]);
+    setMeasureDistance(calculateTotalMeasureDistance(nextPoints));
+  }, []);
 
   const handleMeasurePickAt = useCallback(
     async (
@@ -694,33 +1236,37 @@ export default function LccViewerIframePage() {
         return;
       }
 
+      measurePreviewSeqRef.current += 1;
       const point = await viewerHandleRef.current?.pickPoint?.(clientX, clientY, nativeEvent);
       if (!point) {
         toast.warning("未拾取到模型点，请点击模型表面");
         return;
       }
 
-      const rect = measureArea.getBoundingClientRect();
-      const nextPoint: ModelMeasurePoint = {
-        world: point,
-        screen: {
-          x: clientX - rect.left,
-          y: clientY - rect.top,
-        },
-      };
-      const nextPoints = measurePoints.length >= 2 ? [nextPoint] : [...measurePoints, nextPoint];
+      const anchorPoint = measurePoints.length % 2 === 1 ? measurePoints[measurePoints.length - 1] : null;
+      const nextPoint = createMeasurePoint(point, measureArea, { clientX, clientY }, anchorPoint);
+      const nextPoints = [...measurePoints, nextPoint];
+      measurePointsRef.current = nextPoints;
       setMeasurePoints(nextPoints);
-      setMeasureDistance(
-        nextPoints.length === 2
-          ? calculateMeasureDistance(nextPoints[0].world, nextPoints[1].world)
-          : null,
+      setMeasurePreviewPoint(null);
+      setMeasureAxisLines(
+        nextPoints.length % 2 === 1
+          ? resolveMeasureAxisLines(nextPoints[nextPoints.length - 1] ?? null, measureArea)
+          : [],
       );
+      setMeasureDistance(calculateTotalMeasureDistance(nextPoints));
     },
-    [isMeasuring, measurePoints, processingBlocked],
+    [
+      createMeasurePoint,
+      isMeasuring,
+      measurePoints,
+      processingBlocked,
+      resolveMeasureAxisLines,
+    ],
   );
 
   const handleMeasurePick = useCallback(
-    async (event: ReactMouseEvent<HTMLDivElement> | ReactPointerEvent<HTMLDivElement>) => {
+    async (event: ReactMouseEvent<HTMLDivElement>) => {
       event.preventDefault();
       event.stopPropagation();
       await handleMeasurePickAt(event.clientX, event.clientY, event.nativeEvent, event.currentTarget);
@@ -728,62 +1274,108 @@ export default function LccViewerIframePage() {
     [handleMeasurePickAt],
   );
 
-  useEffect(() => {
-    const measureArea = viewerContainerRef.current;
-    if (
-      !measureArea ||
-      !isMeasuring ||
-      processingBlocked ||
-      isHelpOpen ||
-      isMobileViewer ||
-      isEmbeddedMobilePreview
-    ) {
-      return;
-    }
-
-    let lastPointerPickAt = 0;
-    const shouldIgnoreTarget = (target: EventTarget | null) =>
-      target instanceof HTMLElement &&
-      Boolean(target.closest("button,a,input,textarea,select,[data-measure-panel='true']"));
-    const pickFromNativeEvent = (event: MouseEvent | PointerEvent) => {
-      if (shouldIgnoreTarget(event.target)) {
+  const handleMeasurePreviewAt = useCallback(
+    async (
+      clientX: number,
+      clientY: number,
+      nativeEvent: PointerEvent,
+      measureArea: HTMLElement,
+    ) => {
+      if (
+        !isMeasuring ||
+        processingBlocked ||
+        isHelpOpen ||
+        isMobileViewer ||
+        isEmbeddedMobilePreview
+      ) {
+        setMeasurePreviewPoint(null);
         return;
       }
+
+      const now = Date.now();
+      if (now - lastMeasurePreviewAtRef.current < MEASURE_PREVIEW_PICK_INTERVAL_MS) {
+        return;
+      }
+
+      lastMeasurePreviewAtRef.current = now;
+      const seq = measurePreviewSeqRef.current + 1;
+      measurePreviewSeqRef.current = seq;
+      const point = await viewerHandleRef.current?.pickPoint?.(clientX, clientY, nativeEvent);
+
+      if (seq !== measurePreviewSeqRef.current) {
+        return;
+      }
+
+      if (!point) {
+        setMeasurePreviewPoint(null);
+        return;
+      }
+
+      const anchorPoint = measurePoints.length % 2 === 1 ? measurePoints[measurePoints.length - 1] : null;
+      setMeasurePreviewPoint(createMeasurePoint(point, measureArea, { clientX, clientY }, anchorPoint));
+    },
+    [
+      isEmbeddedMobilePreview,
+      isHelpOpen,
+      isMeasuring,
+      isMobileViewer,
+      measurePoints,
+      processingBlocked,
+      createMeasurePoint,
+    ],
+  );
+
+  const handleMeasurePreview = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>) => {
       event.preventDefault();
       event.stopPropagation();
-      void handleMeasurePickAt(event.clientX, event.clientY, event, measureArea);
-    };
-    const handlePointerDown = (event: PointerEvent) => {
-      lastPointerPickAt = Date.now();
-      pickFromNativeEvent(event);
-    };
-    const handleClick = (event: MouseEvent) => {
-      if (Date.now() - lastPointerPickAt < 350) {
-        return;
-      }
-      pickFromNativeEvent(event);
-    };
-
-    measureArea.addEventListener("pointerdown", handlePointerDown, true);
-    measureArea.addEventListener("click", handleClick, true);
-    return () => {
-      measureArea.removeEventListener("pointerdown", handlePointerDown, true);
-      measureArea.removeEventListener("click", handleClick, true);
-    };
-  }, [
-    handleMeasurePickAt,
-    isEmbeddedMobilePreview,
-    isHelpOpen,
-    isMeasuring,
-    isMobileViewer,
-    processingBlocked,
-  ]);
+      void handleMeasurePreviewAt(event.clientX, event.clientY, event.nativeEvent, event.currentTarget);
+    },
+    [handleMeasurePreviewAt],
+  );
 
   const handleExitMeasure = useCallback(() => {
+    measurePreviewSeqRef.current += 1;
+    measurePointsRef.current = [];
     setIsMeasuring(false);
+    setIsMeasurePanelOpen(false);
     setMeasurePoints([]);
+    setMeasurePreviewPoint(null);
+    setMeasureAxisLines([]);
     setMeasureDistance(null);
   }, []);
+
+  useEffect(() => {
+    const handleMeasureShortcutKeyDown = (event: KeyboardEvent) => {
+      if (isTypingElement(event.target) || isHelpOpen || (!isMeasuring && !isMeasurePanelOpen)) {
+        return;
+      }
+
+      if (event.key === "Enter" && isMeasuring) {
+        event.preventDefault();
+        event.stopPropagation();
+        handleFinishMeasure();
+        return;
+      }
+
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        clearMovementState();
+        handleExitMeasure();
+      }
+    };
+
+    document.addEventListener("keydown", handleMeasureShortcutKeyDown, true);
+    return () => document.removeEventListener("keydown", handleMeasureShortcutKeyDown, true);
+  }, [
+    clearMovementState,
+    handleExitMeasure,
+    handleFinishMeasure,
+    isHelpOpen,
+    isMeasurePanelOpen,
+    isMeasuring,
+  ]);
 
   /* ---- 保存启动视图 ---- */
   const handleSaveLaunchView = useCallback(async () => {
@@ -943,6 +1535,19 @@ export default function LccViewerIframePage() {
       };
       const movementKey = movementKeyMap[key];
 
+      if (!isHelpOpen && isMeasuring && event.key === "Enter") {
+        event.preventDefault();
+        handleFinishMeasure();
+        return;
+      }
+
+      if (!isHelpOpen && (isMeasuring || isMeasurePanelOpen) && event.key === "Escape") {
+        event.preventDefault();
+        clearMovementState();
+        handleExitMeasure();
+        return;
+      }
+
       // 帮助面板打开时不响应移动键和 Shift
       if (isHelpOpen && (key === "shift" || movementKey)) return;
 
@@ -1047,7 +1652,18 @@ export default function LccViewerIframePage() {
       document.removeEventListener("visibilitychange", handleVisibilityChange);
       clearMovementState();
     };
-  }, [clearMovementState, controlMode, handleResetView, isHelpOpen, isMobileShareViewer, isViewerFullscreen]);
+  }, [
+    clearMovementState,
+    controlMode,
+    handleExitMeasure,
+    handleFinishMeasure,
+    handleResetView,
+    isHelpOpen,
+    isMeasurePanelOpen,
+    isMeasuring,
+    isMobileShareViewer,
+    isViewerFullscreen,
+  ]);
 
   /* ---- 关闭帮助时清除移动状态 ---- */
   useEffect(() => {
@@ -1061,7 +1677,11 @@ export default function LccViewerIframePage() {
     clearMovementState();
     setIsHelpOpen(false);
     setIsMeasuring(false);
+    setIsMeasurePanelOpen(false);
+    measurePointsRef.current = [];
     setMeasurePoints([]);
+    setMeasurePreviewPoint(null);
+    setMeasureAxisLines([]);
     setMeasureDistance(null);
     setControlMode(isEmbeddedMobilePreview ? "orbit" : "walk");
   }, [clearMovementState, detail?.id, isEmbeddedMobilePreview]);
@@ -1138,14 +1758,25 @@ export default function LccViewerIframePage() {
         active={
           !isMobileViewer &&
           !isEmbeddedMobilePreview &&
+          (isMeasurePanelOpen || isMeasuring || measurePoints.length > 0) &&
+          !processingBlocked &&
+          !isHelpOpen
+        }
+        picking={
+          !isMobileViewer &&
+          !isEmbeddedMobilePreview &&
           isMeasuring &&
           !processingBlocked &&
           !isHelpOpen
         }
         points={measurePoints}
-        distance={measureDistance}
+        previewPoint={measurePreviewPoint}
+        axisLines={measureAxisLines}
+        onPreview={handleMeasurePreview}
         onPick={handleMeasurePick}
         onClear={handleClearMeasure}
+        onFinish={handleFinishMeasure}
+        onUndo={handleUndoMeasure}
         onExit={handleExitMeasure}
       />
 
@@ -1208,7 +1839,7 @@ export default function LccViewerIframePage() {
               canUseEnvironment={!processingBlocked}
               onToggleMeasure={handleToggleMeasure}
               canMeasure={!processingBlocked}
-              isMeasuring={isMeasuring}
+              isMeasuring={isMeasurePanelOpen || isMeasuring}
               onSetHeightClipPlane={handleSetHeightClipPlane}
               onClearHeightClipPlane={handleClearHeightClipPlane}
               canUseHeightClipPlane={!processingBlocked}
