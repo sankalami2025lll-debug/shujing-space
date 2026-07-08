@@ -110,6 +110,7 @@ cp deploy/.env.prod.example deploy/.env.prod
 | `OSS_PRESIGN_EXPIRES` | 预签名 PUT 有效期（秒） | `900` |
 | `MAX_MODEL_SIZE_MB` | 模型上传大小上限 | `500` |
 | `MAX_COVER_SIZE_MB` | 封面上传大小上限 | `10` |
+| `LCC_ZIP_AUTO_EXTRACT_MAX_MB` | LCC/LCC2 ZIP 成果包自动解包上限（MB），超过则提示改传 `.lcc/.lcc2` 入口文件或在线查看链接 | `2048` |
 | `NEXT_PUBLIC_LCC_APP_KEY` | LCC WebSDK 前端授权 appKey（build-time public 变量） | 留空占位，生产填真实值 |
 | `VIEWER_URL_ALLOWED_HOSTS` | 外链 viewer 域名白名单 | `sketchfab.com,www.sketchfab.com` |
 

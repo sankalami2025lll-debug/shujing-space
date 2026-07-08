@@ -37,14 +37,13 @@ const LCC_ZIP_ALLOWED_EXTENSIONS = new Set([
 ]);
 
 const MAX_ZIP_FILE_COUNT = 2000;
-const MAX_ZIP_SINGLE_FILE_BYTES = 1024 * 1024 * 1024;
-const MAX_ZIP_TOTAL_UNCOMPRESSED_BYTES = 1024 * 1024 * 1024;
 const MAX_ZIP_DIRECTORY_DEPTH = 8;
 const UPLOAD_CONCURRENCY = 3;
 // processUploadedZip 中 downloadObject 会将整个 ZIP 加载到内存，
-// MAX_ZIP_SIZE_BYTES 限制 ZIP 文件本身的大小，防止 OOM。
+// 自动解包上限限制 ZIP 文件本身及解压后总大小，防止 OOM。
+// 上限改为可配置（LCC_ZIP_AUTO_EXTRACT_MAX_MB，默认 2048MB），不再写死 512MB。
 // 未来可改为流式下载 + 流式解压，彻底消除内存峰值。
-const MAX_ZIP_SIZE_BYTES = 512 * 1024 * 1024;
+const DEFAULT_LCC_ZIP_AUTO_EXTRACT_MAX_BYTES = 2048 * 1024 * 1024;
 
 interface ExtractedZipFile {
   absolutePath: string;
@@ -75,18 +74,28 @@ export class LccZipService {
     const extractDir = path.join(tempRoot, 'extracted');
 
     try {
-      // 下载前先通过 headObject 检查 ZIP 文件大小，防止超大文件 OOM
+      // 自动解包上限（字节）：优先读取配置（LCC_ZIP_AUTO_EXTRACT_MAX_MB），缺省回退默认值。
+      const maxAutoExtractBytes = this.resolveAutoExtractMaxBytes();
+      const maxAutoExtractMb = Math.round(maxAutoExtractBytes / 1024 / 1024);
+
+      // 下载前先通过 headObject 检查 ZIP 文件大小，超过自动解包上限时不再笼统失败，
+      // 给出明确指引：改传已解包 .lcc/.lcc2 入口文件或填写在线查看链接。
       const head = await this.storage.headObject(objectKey);
-      if (head.size > MAX_ZIP_SIZE_BYTES) {
+      if (head.size > maxAutoExtractBytes) {
         throw new BadRequestException(
-          `压缩包文件过大（最大 ${Math.round(MAX_ZIP_SIZE_BYTES / 1024 / 1024)}MB）`,
+          `压缩包超过自动解包上限（最大 ${maxAutoExtractMb}MB），请上传已解包后的 .lcc/.lcc2 入口文件，或填写在线查看链接。`,
         );
       }
       const archiveBuffer = await this.storage.downloadObject(objectKey);
       await writeFile(zipPath, archiveBuffer);
       await mkdir(extractDir, { recursive: true });
 
-      const extractedFiles = await this.extractZipSafely(zipPath, extractDir);
+      const extractedFiles = await this.extractZipSafely(
+        zipPath,
+        extractDir,
+        maxAutoExtractBytes,
+        maxAutoExtractMb,
+      );
       const lccEntries = extractedFiles.filter((file) => {
         const ext = path.extname(file.relativePath).toLowerCase();
         return ext === '.lcc' || ext === '.lcc2';
@@ -182,6 +191,15 @@ export class LccZipService {
     }
   }
 
+  // 读取 LCC/LCC2 ZIP 自动解包上限（字节）：来自 configuration 的 upload.lccZipAutoExtractMaxBytes；
+  // 配置缺失或非法时回退默认 2048MB。同时约束 ZIP 文件大小与解压后总大小。
+  private resolveAutoExtractMaxBytes(): number {
+    const fromConfig = this.config.get<number>('upload.lccZipAutoExtractMaxBytes');
+    return typeof fromConfig === 'number' && fromConfig > 0
+      ? fromConfig
+      : DEFAULT_LCC_ZIP_AUTO_EXTRACT_MAX_BYTES;
+  }
+
   private get storage(): ObjectStorageService {
     return (this.config.get<'oss-compatible' | 'oss'>('storage.driver') ?? 'oss') === 'oss'
       ? this.oss
@@ -219,7 +237,12 @@ export class LccZipService {
     }
   }
 
-  private async extractZipSafely(zipPath: string, extractDir: string): Promise<ExtractedZipFile[]> {
+  private async extractZipSafely(
+    zipPath: string,
+    extractDir: string,
+    maxUncompressedBytes: number,
+    maxUncompressedMb: number,
+  ): Promise<ExtractedZipFile[]> {
     const zipFile = await this.openZip(zipPath);
     const extractedFiles: ExtractedZipFile[] = [];
     let fileCount = 0;
@@ -264,14 +287,15 @@ export class LccZipService {
             if (fileCount > MAX_ZIP_FILE_COUNT) {
               throw new BadRequestException(`压缩包文件数量超过限制（最多 ${MAX_ZIP_FILE_COUNT} 个）`);
             }
-            if (size > MAX_ZIP_SINGLE_FILE_BYTES) {
+            // 单文件与解压后总大小共用自动解包上限（LCC 成果包多为已压缩二进制，解压体积≈压缩体积）
+            if (size > maxUncompressedBytes) {
               throw new BadRequestException(
-                `压缩包内存在超过限制的大文件（单文件最大 ${Math.round(MAX_ZIP_SINGLE_FILE_BYTES / 1024 / 1024)}MB）`,
+                `压缩包内存在超过限制的大文件（单文件最大 ${maxUncompressedMb}MB）`,
               );
             }
-            if (totalSize > MAX_ZIP_TOTAL_UNCOMPRESSED_BYTES) {
+            if (totalSize > maxUncompressedBytes) {
               throw new BadRequestException(
-                `压缩包解压后总大小超过限制（最大 ${Math.round(MAX_ZIP_TOTAL_UNCOMPRESSED_BYTES / 1024 / 1024)}MB）`,
+                `压缩包解压后总大小超过自动解包上限（最大 ${maxUncompressedMb}MB），请上传已解包后的 .lcc/.lcc2 入口文件，或填写在线查看链接。`,
               );
             }
           },

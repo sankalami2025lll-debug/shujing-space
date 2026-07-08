@@ -52,6 +52,9 @@ export function configuration() {
     upload: {
       maxModelBytes: Number(env.MAX_MODEL_SIZE_MB) * 1024 * 1024,
       maxCoverBytes: Number(env.MAX_COVER_SIZE_MB) * 1024 * 1024,
+      // LCC/LCC2 ZIP 成果包自动解包上限（字节）：LccZipService 读取此值做 ZIP 大小闸门。
+      lccZipAutoExtractMaxBytes:
+        Number(env.LCC_ZIP_AUTO_EXTRACT_MAX_MB) * 1024 * 1024,
     },
     // viewerUrl 域名白名单（外链发布安全校验 2D）：
     //   env 配置优先；未配置（解析后为空）时回退默认安全列表，避免「空列表」歧义。

@@ -316,8 +316,12 @@ export class ModelsService {
       dto.visibility === ModelVisibility.review
         ? ModelStatus.pending
         : ModelStatus.published;
+    // 直传单独的 .lcc / .lcc2 入口文件：无需 ZIP 解包，modelUrl 已保存，
+    // 直接置为 ready（viewerType 上一步已判定为 native，前端按 lcc/lcc2 走 LccViewer）。
+    // 其它上传文件（含 zip / glb / ply 等）保持 processing，等待后台解析或既有流程。
+    const isDirectLccEntry = fileFormat === 'lcc' || fileFormat === 'lcc2';
     const processingStatus =
-      dto.modelFileId != null
+      dto.modelFileId != null && !isDirectLccEntry
         ? ModelProcessingStatus.processing
         : ModelProcessingStatus.ready;
     const processedAt =

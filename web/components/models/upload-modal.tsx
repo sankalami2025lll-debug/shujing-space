@@ -192,6 +192,10 @@ export function UploadModal({ onClose, onPublished }: UploadModalProps) {
             <p className="text-[12px] text-gray-500 mt-1">
               支持 lcc / lcc2 / ply / sog 等；也可在下方仅填写在线查看链接
             </p>
+            {/* 超大成果包提示：1GB 以上 ZIP 解析慢，建议先解包上传 OSS 再填入口文件在线链接 */}
+            <p className="text-[12px] text-gray-500 mt-1">
+              1GB 以上 LCC/LCC2 成果包解析时间较长，超大成果包建议先解包上传至 OSS，再填写 .lcc/.lcc2 入口文件在线查看链接。
+            </p>
           </div>
 
           <div>
