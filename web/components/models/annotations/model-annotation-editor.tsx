@@ -50,6 +50,8 @@ interface ModelAnnotationEditorProps {
   onCaptureCurrentView?: () => ModelLaunchView | null;
   /** 保存/删除成功后回传最新标注（或删除后 null） */
   onSaved: (annotation: ModelAnnotation) => void;
+  /** 媒体（图片）上传/删除成功后回传最新标注；与 onSaved 不同：保持编辑器打开、只刷新媒体 */
+  onMediaUpdated: (annotation: ModelAnnotation) => void;
   onDeleted: (annotationId: number) => void;
   onClose: () => void;
 }
@@ -61,6 +63,7 @@ export function ModelAnnotationEditor({
   onRequestRepick,
   onCaptureCurrentView,
   onSaved,
+  onMediaUpdated,
   onDeleted,
   onClose,
 }: ModelAnnotationEditorProps) {
@@ -183,7 +186,11 @@ export function ModelAnnotationEditor({
 
   return (
     <div
-      className="pointer-events-auto absolute left-1/2 top-4 z-40 w-[340px] -translate-x-1/2 rounded-2xl border border-white/12 bg-[rgba(10,12,16,0.92)] p-4 text-white shadow-2xl backdrop-blur-md"
+      // 标注编辑信息栏：左上角浮层，留约 20px 视觉间距，不贴死边缘，最大限度释放中间模型视野。
+      // 桌面端 sm 以上 left-5/top-5（约 20px）/w-380，完整圆角 rounded-2xl；
+      // 移动端默认 left-4/top-16/w-calc(100vw-32px) 避免小屏溢出。
+      // 面板 max-h 受限、内部滚动，避免遮挡左下工具栏；外层 overlay 为 absolute inset-0，此处用 absolute 定位。
+      className="pointer-events-auto absolute left-4 top-16 z-40 w-[calc(100vw-32px)] max-h-[calc(100vh-128px)] overflow-y-auto rounded-2xl border border-white/12 bg-[rgba(10,12,16,0.92)] p-4 text-white shadow-2xl backdrop-blur-md sm:left-3 sm:top-3 sm:w-[380px]"
       data-annotation-editor="true"
     >
       <div className="mb-3 flex items-center justify-between">
@@ -224,7 +231,7 @@ export function ModelAnnotationEditor({
             modelId={modelId}
             annotationId={annotation.id}
             media={annotation.media}
-            onUpdated={(refreshed) => onSaved(refreshed)}
+            onUpdated={(refreshed) => onMediaUpdated(refreshed)}
             onBusyChange={setBusy}
           />
         ) : (

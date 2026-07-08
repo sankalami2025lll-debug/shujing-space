@@ -33,6 +33,7 @@ import {
 import { ModelLoadingOverlay } from "@/components/models/model-loading-overlay";
 import { ModelViewerToolbar } from "@/components/models/model-viewer-toolbar";
 import { ModelViewerHelp } from "@/components/models/model-viewer-help";
+import { ModelScreenshotDialog } from "@/components/models/model-screenshot-dialog";
 import { MobileLccGameControls } from "@/components/models/mobile-lcc-game-controls";
 import { MobileLccHelpOverlay } from "@/components/models/mobile-lcc-help-overlay";
 import { MobileLccViewerChrome } from "@/components/models/mobile-lcc-viewer-chrome";
@@ -563,6 +564,10 @@ export default function LccViewerIframePage() {
   const [isHelpOpen, setIsHelpOpen] = useState(false);
   // saveLaunchViewPending：保存启动视图 loading 态
   const [saveLaunchViewPending, setSaveLaunchViewPending] = useState(false);
+  // 拍照对话框：显隐 / 保存中态 / 默认文件名（仅本地保存，不上传 OSS、不写库）
+  const [screenshotDialogOpen, setScreenshotDialogOpen] = useState(false);
+  const [screenshotPending, setScreenshotPending] = useState(false);
+  const [screenshotDefaultName, setScreenshotDefaultName] = useState("");
   // 测量模式：仅桌面工具栏触发，手机分享页不渲染入口
   const [isMeasuring, setIsMeasuring] = useState(false);
   const [isMeasurePanelOpen, setIsMeasurePanelOpen] = useState(false);
@@ -1445,6 +1450,107 @@ export default function LccViewerIframePage() {
     });
   }, [clearMovementState]);
 
+  /* ---- 拍照：生成默认文件名并打开保存对话框 ---- */
+  const handleOpenScreenshotDialog = useCallback(() => {
+    // 默认文件名：shujing-model-{modelId}-{yyyyMMdd-HHmmss}.png
+    const pad = (n: number) => String(n).padStart(2, "0");
+    const d = new Date();
+    const ts = `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+    setScreenshotDefaultName(`shujing-model-${numericId}-${ts}.png`);
+    setScreenshotDialogOpen(true);
+  }, [numericId]);
+
+  /** 清理文件名非法字符并确保 .png 后缀；空文件名回退默认名 */
+  const sanitizeScreenshotFileName = useCallback(
+    (raw: string, fallback: string) => {
+      const cleaned = raw.trim().replace(/[\\/:*?"<>|]/g, "").replace(/\s+/g, " ").trim();
+      const base = cleaned || fallback;
+      return /\.png$/i.test(base) ? base : `${base}.png`;
+    },
+    [],
+  );
+
+  /** 将 Blob 保存到本地：优先 showSaveFilePicker（Chrome/Edge），降级 a.download（Safari/Firefox） */
+  const saveScreenshotBlob = useCallback(
+    async (blob: Blob, fileName: string) => {
+      const w = window as unknown as {
+        showSaveFilePicker?: (opts: {
+          suggestedName?: string;
+          types?: Array<{ description?: string; accept: Record<string, string[]> }>;
+        }) => Promise<{
+          createWritable: () => Promise<{
+            write: (data: Blob | BufferSource | string) => Promise<void>;
+            close: () => Promise<void>;
+          }>;
+        }>;
+      };
+      if (typeof w.showSaveFilePicker === "function") {
+        const handle = await w.showSaveFilePicker({
+          suggestedName: fileName,
+          types: [{ description: "PNG 图片", accept: { "image/png": [".png"] } }],
+        });
+        const writable = await handle.createWritable();
+        try {
+          await writable.write(blob);
+        } finally {
+          await writable.close();
+        }
+        return;
+      }
+      // 降级：ObjectURL + a.click 触发浏览器下载
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      // 释放 ObjectURL（下一轮微任务，确保下载已触发）
+      setTimeout(() => URL.revokeObjectURL(url), 0);
+    },
+    [],
+  );
+
+  /** 确认保存：调用 viewerHandle.captureScreenshot 截图并保存到本地 */
+  const handleConfirmScreenshot = useCallback(
+    async (rawFileName: string) => {
+      const handle = viewerHandleRef.current;
+      if (!handle?.captureScreenshot) {
+        toast.error("当前模型暂不支持拍照");
+        setScreenshotDialogOpen(false);
+        return;
+      }
+      setScreenshotPending(true);
+      try {
+        const blob = await handle.captureScreenshot({
+          mimeType: "image/png",
+          clean: true,
+        });
+        if (!blob) {
+          toast.error("截图失败，请稍后重试");
+          return;
+        }
+        const fileName = sanitizeScreenshotFileName(
+          rawFileName,
+          screenshotDefaultName,
+        );
+        await saveScreenshotBlob(blob, fileName);
+        toast.success("图片已保存");
+        setScreenshotDialogOpen(false);
+      } catch (error) {
+        // 用户取消系统保存位置选择（AbortError）不算错误
+        if (error instanceof DOMException && error.name === "AbortError") {
+          toast.info("已取消保存");
+        } else {
+          toast.error("图片保存失败，请重试");
+        }
+      } finally {
+        setScreenshotPending(false);
+      }
+    },
+    [sanitizeScreenshotFileName, saveScreenshotBlob, screenshotDefaultName],
+  );
+
   /** 打开手机端帮助：清零移动输入，隐藏触控层 */
   const handleOpenMobileHelp = useCallback(() => {
     clearMovementState();
@@ -1627,6 +1733,16 @@ export default function LccViewerIframePage() {
     });
     setEditorDraft(null);
     setEditingAnnotation(null);
+  }, []);
+
+  /** 媒体（图片）上传/删除成功：合并到列表并刷新编辑态标注，但保持编辑器打开。
+   *  与 handleAnnotationSaved 的区别：不关闭编辑器，避免上传成功后编辑器被卸载、
+   *  上传组件 finally 中的状态清理落到已卸载实例而无效（导致按钮卡在「上传中 100%」）。 */
+  const handleAnnotationMediaUpdated = useCallback((annotation: ModelAnnotation) => {
+    setAnnotations((current) =>
+      current.map((item) => (item.id === annotation.id ? annotation : item)),
+    );
+    setEditingAnnotation(annotation);
   }, []);
 
   /** 编辑器删除成功：从列表移除 */
@@ -2034,6 +2150,7 @@ export default function LccViewerIframePage() {
           annotation={editingAnnotation}
           onCaptureCurrentView={handleCaptureCurrentView}
           onSaved={handleAnnotationSaved}
+          onMediaUpdated={handleAnnotationMediaUpdated}
           onDeleted={handleAnnotationDeleted}
           onClose={handleCloseEditor}
         />
@@ -2119,10 +2236,20 @@ export default function LccViewerIframePage() {
               manageMode={manageMode}
               onToggleManageMode={handleToggleManageMode}
               canManageAnnotations={canManageAnnotations}
+              onTakeScreenshot={handleOpenScreenshotDialog}
             />
           </div>
         </div>
       )}
+
+      {/* 拍照保存对话框：仅本地保存当前视角 PNG，不上传 OSS、不写库 */}
+      <ModelScreenshotDialog
+        open={screenshotDialogOpen}
+        defaultFileName={screenshotDefaultName}
+        pending={screenshotPending}
+        onCancel={() => setScreenshotDialogOpen(false)}
+        onConfirm={handleConfirmScreenshot}
+      />
     </div>
   );
 }

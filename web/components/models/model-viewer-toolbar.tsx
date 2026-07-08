@@ -392,6 +392,7 @@ export function ModelViewerToolbar({
   manageMode = false,
   onToggleManageMode,
   canManageAnnotations = false,
+  onTakeScreenshot,
 }: ModelViewerToolbarProps) {
   const [isToolbarOpen, setIsToolbarOpen] = useState(true);
   const [activeMenu, setActiveMenu] = useState<ActiveToolbarMenu>("none");
@@ -436,6 +437,8 @@ export function ModelViewerToolbar({
   const canUseCleanMode = typeof onToggleCleanMode === "function";
   const canUseAnnotationManage =
     canManageAnnotations && typeof onToggleManageMode === "function";
+  const canUseScreenshot =
+    capabilities.screenshot && typeof onTakeScreenshot === "function";
 
   const handleToolbarToggle = () => {
     setIsToolbarOpen((current) => {
@@ -584,7 +587,7 @@ export function ModelViewerToolbar({
             : "纯净模式（隐藏标注）"
           : "纯净模式（暂不可用）",
       },
-      { key: "screenshot", name: "拍照", icon: Camera, disabled: true, tooltip: getDisabledTooltip("拍照") },
+      { key: "screenshot", name: "拍照", icon: Camera, action: onTakeScreenshot, disabled: !canUseScreenshot, tooltip: canUseScreenshot ? "拍照（保存当前视角图片）" : getDisabledTooltip("拍照") },
       {
         key: "measure",
         name: "测量",
@@ -632,12 +635,14 @@ export function ModelViewerToolbar({
       canUsePointCloudToggle,
       canUseReset,
       canUseSection,
+      canUseScreenshot,
       cleanMode,
       controlMode,
       sectionState.enabled,
       isMeasuring,
       isHelpOpen,
       onResetView,
+      onTakeScreenshot,
       onToggleCleanMode,
       onToggleMeasure,
       onTogglePointsDisplayMode,

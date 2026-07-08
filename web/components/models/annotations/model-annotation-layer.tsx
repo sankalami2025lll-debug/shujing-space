@@ -26,6 +26,7 @@ import {
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
+import { createPortal } from "react-dom";
 import { Crosshair, Plus, X } from "lucide-react";
 import type { ModelViewerHandle, ModelViewerPoint } from "@/components/models/viewers/types";
 import type { ModelAnnotation, ModelLaunchView } from "@/lib/types";
@@ -503,6 +504,8 @@ function AnnotationCard({
 }) {
   const images = annotation.media.filter((m) => m.mediaType === "image");
   const ref = useRef<HTMLDivElement>(null);
+  // 图片大图预览：点击缩略图后放大查看的图片 URL（null 表示未打开预览）
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   // 首次挂载 / 内容变化时测量一次真实高度，回填给 layer 用于在标注点上方定位。
   // 不在 rAF 投影循环里调用，避免每帧 getBoundingClientRect。
   useLayoutEffect(() => {
@@ -520,6 +523,24 @@ function AnnotationCard({
       imgs.forEach((img) => img.removeEventListener("load", handle));
     };
   }, [annotation, onMeasureHeight]);
+  // Esc 关闭图片预览：capture 阶段拦截并 stopPropagation，避免冒泡到页面级 Esc（关闭帮助/全屏），
+  // 保证「关闭预览后标注内容框仍然展开」。
+  useEffect(() => {
+    if (!previewUrl) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        setPreviewUrl(null);
+      }
+    };
+    document.addEventListener("keydown", handler, true);
+    return () => document.removeEventListener("keydown", handler, true);
+  }, [previewUrl]);
+  // 根据图片数量决定网格列数与统一缩略图高度，避免横图/竖图高度不一致撑变形内容框
+  const thumbCols =
+    images.length === 1 ? "grid-cols-1" : images.length === 2 ? "grid-cols-2" : "grid-cols-3";
+  const thumbHeight = images.length === 1 ? "h-28" : "h-24";
   return (
     <div
       ref={ref}
@@ -567,15 +588,26 @@ function AnnotationCard({
       ) : null}
 
       {images.length > 0 ? (
-        <div className="mt-3 flex flex-col gap-2 px-4 pb-4">
+        <div className={`mt-3 grid ${thumbCols} gap-2 px-4 pb-4`}>
           {images.map((m) => (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
+            <button
               key={m.id}
-              src={m.url}
-              alt={m.fileName ?? "标注图片"}
-              className="w-full rounded-md border border-white/10 object-contain"
-            />
+              type="button"
+              title="点击查看大图"
+              // 点击图片打开大图预览；stopPropagation 避免冒泡触发内容框/标注点/视角飞行
+              onClick={(e) => {
+                e.stopPropagation();
+                setPreviewUrl(m.url);
+              }}
+              className={`group relative overflow-hidden rounded-xl border border-white/10 bg-white/5 ${thumbHeight} cursor-zoom-in`}
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={m.url}
+                alt={m.fileName ?? "标注图片"}
+                className="h-full w-full object-cover transition-opacity group-hover:opacity-90"
+              />
+            </button>
           ))}
         </div>
       ) : (
@@ -597,6 +629,38 @@ function AnnotationCard({
           borderTop: `${ANNOTATION_VISUAL.arrowSize}px solid ${ANNOTATION_VISUAL.bgCard}`,
         }}
       />
+
+      {/* 图片大图预览：portal 到 document.body，fixed 定位脱离标注层 stacking context，
+          z-[80] 高于内容框/工具栏/编辑器；Esc/遮罩/关闭按钮均可关闭，不影响标注内容框与视角飞行 */}
+      {previewUrl
+        ? createPortal(
+            <div
+              className="fixed inset-0 z-[80] flex items-center justify-center bg-black/72 p-4 backdrop-blur-sm"
+              onClick={() => setPreviewUrl(null)}
+            >
+              <button
+                type="button"
+                aria-label="关闭预览"
+                title="关闭预览（Esc）"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setPreviewUrl(null);
+                }}
+                className="absolute right-4 top-4 inline-flex h-9 w-9 items-center justify-center rounded-full bg-white/10 text-white transition-colors hover:bg-white/20"
+              >
+                <X className="h-5 w-5" />
+              </button>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={previewUrl}
+                alt="标注图片预览"
+                onClick={(e) => e.stopPropagation()}
+                className="max-h-[80vh] max-w-[min(90vw,960px)] rounded-2xl object-contain shadow-2xl"
+              />
+            </div>,
+            document.body,
+          )
+        : null}
     </div>
   );
 }

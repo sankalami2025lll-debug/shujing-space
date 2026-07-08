@@ -109,7 +109,7 @@ cp deploy/.env.prod.example deploy/.env.prod
 | `OSS_FORCE_PATH_STYLE` | 阿里云 OSS 一般为 false | `false` |
 | `OSS_PRESIGN_EXPIRES` | 预签名 PUT 有效期（秒） | `900` |
 | `MAX_MODEL_SIZE_MB` | 模型上传大小上限 | `500` |
-| `MAX_COVER_SIZE_MB` | 封面上传大小上限 | `5` |
+| `MAX_COVER_SIZE_MB` | 封面上传大小上限 | `10` |
 | `NEXT_PUBLIC_LCC_APP_KEY` | LCC WebSDK 前端授权 appKey（build-time public 变量） | 留空占位，生产填真实值 |
 | `VIEWER_URL_ALLOWED_HOSTS` | 外链 viewer 域名白名单 | `sketchfab.com,www.sketchfab.com` |
 

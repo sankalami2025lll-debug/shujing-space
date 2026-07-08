@@ -329,7 +329,7 @@
 | `OSS_REGION` | 区域 | 当前 `cn-shenzhen` |
 | `OSS_FORCE_PATH_STYLE` | S3 兼容参数 | 当前 `false` |
 | `MAX_MODEL_SIZE_MB` | 模型文件大小限制 | 当前 500；ZIP 特殊规则在服务端额外放宽 |
-| `MAX_COVER_SIZE_MB` | 封面大小限制 | 当前 5 |
+| `MAX_COVER_SIZE_MB` | 封面大小限制 | 当前 10 |
 
 ### 7.2 前端当前常用变量
 

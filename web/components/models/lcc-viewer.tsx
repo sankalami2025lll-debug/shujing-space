@@ -3003,6 +3003,40 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
         }
       },
       getViewerBounds: () => getRuntimeInstance(lccInstanceRef.current)?.getBounds?.() ?? null,
+      /** 拍照：强制同步渲染一帧后从 WebGL canvas 导出 Blob。
+       *  preserveDrawingBuffer 已在 renderer 创建时开启，toBlob 可稳定获取当前画面。
+       *  只读取 renderer.domElement，DOM 工具栏/标注/编辑器/帮助面板不会被截入（纯净截图）。
+       *  不改变相机视角、不改变纯净模式状态、不销毁 viewer。失败返回 null。 */
+      captureScreenshot: async (options) => {
+        const renderer = rendererRef.current;
+        const scene = sceneRef.current;
+        const camera = cameraRef.current;
+        const lccRender = lccRenderRef.current;
+        if (!renderer || !scene || !camera) {
+          logLccWarn("captureScreenshot 失败：renderer/scene/camera 未就绪");
+          return null;
+        }
+        try {
+          // 强制同步渲染一次当前画面，避免截到上一帧/空白
+          lccRender?.update?.();
+          renderer.render(scene, camera);
+          const canvas = renderer.domElement;
+          const mimeType = options?.mimeType ?? "image/png";
+          const quality =
+            typeof options?.quality === "number" ? options.quality : undefined;
+          const blob = await new Promise<Blob | null>((resolve) =>
+            canvas.toBlob(resolve, mimeType, quality),
+          );
+          if (!blob) {
+            logLccWarn("captureScreenshot：canvas.toBlob 返回空");
+            return null;
+          }
+          return blob;
+        } catch (error) {
+          logLccWarn("captureScreenshot 异常", error);
+          return null;
+        }
+      },
       getCurrentView: () => {
         const result = buildLaunchViewSaveResult();
         return result.ok ? result.view : null;

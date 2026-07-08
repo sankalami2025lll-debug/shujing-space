@@ -65,7 +65,7 @@ const envSchema = z.object({
   OSS_PRESIGN_EXPIRES: z.coerce.number().int().positive().default(900),
   // —— 上传大小上限（MB）——
   MAX_MODEL_SIZE_MB: z.coerce.number().int().positive().default(500),
-  MAX_COVER_SIZE_MB: z.coerce.number().int().positive().default(5),
+  MAX_COVER_SIZE_MB: z.coerce.number().int().positive().default(10),
   // —— viewerUrl 域名白名单（上线前安全修复 2D）——
   // 逗号分隔的允许 host 列表（只写 host，不写完整 URL，例如 sketchfab.com,lcc-viewer.xgrids.cloud）；
   // 为空时由 configuration 回退到默认安全列表（DEFAULT_VIEWER_ALLOWED_HOSTS）。

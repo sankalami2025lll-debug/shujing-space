@@ -94,6 +94,17 @@ export async function putFileToPresignedUrl(
   }
   const total = file.size;
 
+  // 解析 uploadUrl 的 host + pathname（脱敏，不含签名 query），用于错误诊断时定位 OSS/CORS/endpoint
+  let ossHost = "unknown";
+  let ossPath = "";
+  try {
+    const u = new URL(uploadUrl);
+    ossHost = u.host;
+    ossPath = u.pathname;
+  } catch {
+    /* ignore */
+  }
+
   await new Promise<void>((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     const onAbort = () => {
@@ -111,6 +122,9 @@ export async function putFileToPresignedUrl(
     }
 
     xhr.open("PUT", uploadUrl, true);
+    // 超时保护：标注图片等直传场景。upload.onprogress=100% 只代表浏览器发送缓冲已清空，
+    // 慢上行下 7MB 实际传输 + OSS 响应可能超过 120s，故取 300s 兼顾慢网络；超时后 abort 并清理状态。
+    xhr.timeout = 300_000;
     headers.forEach((value, key) => {
       xhr.setRequestHeader(key, value);
     });
@@ -126,6 +140,7 @@ export async function putFileToPresignedUrl(
 
     xhr.onload = () => {
       cleanup();
+      // 200/201/204 均视为成功（OSS PUT 成功通常返回 200/204）
       if (xhr.status >= 200 && xhr.status < 300) {
         options.onProgress?.({
           loaded: total,
@@ -135,17 +150,54 @@ export async function putFileToPresignedUrl(
         resolve();
         return;
       }
-      reject(new ApiError(`文件上传到对象存储失败（HTTP ${xhr.status}）`, -1, xhr.status));
+      // status===0：响应被浏览器拦截（典型为 CORS 缺失 Access-Control-Allow-Origin）
+      if (xhr.status === 0) {
+        reject(
+          new ApiError(
+            `OSS 直传被浏览器拦截（疑似 CORS）：host=${ossHost}`,
+            -1,
+            0,
+          ),
+        );
+        return;
+      }
+      // 非 2xx：带 status + 响应片段 + host，便于定位 403 SignatureDoesNotMatch / 413 等
+      const snippet = (xhr.responseText || "").slice(0, 200).replace(/\s+/g, " ");
+      reject(
+        new ApiError(
+          `文件上传到对象存储失败（HTTP ${xhr.status}）host=${ossHost}${snippet ? `；响应：${snippet}` : ""}`,
+          -1,
+          xhr.status,
+        ),
+      );
     };
 
     xhr.onerror = () => {
       cleanup();
-      reject(new ApiError("文件上传到对象存储失败，请检查网络或稍后重试。", -1, 0));
+      // 网络层失败或 CORS 预检失败：带 host 便于排查
+      reject(
+        new ApiError(
+          `上传到对象存储失败（网络或 CORS）：host=${ossHost}`,
+          -1,
+          0,
+        ),
+      );
     };
 
     xhr.onabort = () => {
       cleanup();
       reject(new UploadAbortedError());
+    };
+
+    xhr.ontimeout = () => {
+      cleanup();
+      reject(
+        new ApiError(
+          `上传到对象存储超时（300s）：host=${ossHost} path=${ossPath}，请检查网络或 OSS CORS 配置后重试`,
+          -1,
+          0,
+        ),
+      );
     };
 
     if (options.signal) {

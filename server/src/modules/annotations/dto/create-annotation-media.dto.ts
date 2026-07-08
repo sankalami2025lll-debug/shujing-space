@@ -13,12 +13,20 @@ import {
   IsInt,
   IsOptional,
   IsString,
+  Max,
   MaxLength,
   Min,
 } from 'class-validator';
 
 export const ANNOTATION_MEDIA_TYPES = ['image', 'panorama', 'video'] as const;
 export type AnnotationMediaTypeValue = (typeof ANNOTATION_MEDIA_TYPES)[number];
+
+/**
+ * 标注单张图片大小上限（字节）。
+ * V1.1.1：与 uploads 模块 cover 上限 MAX_COVER_SIZE_MB（默认 10MB）对齐，
+ * 标注图片复用 cover 上传链路，故此处软上限取 10MB。
+ */
+export const ANNOTATION_IMAGE_MAX_BYTES = 10 * 1024 * 1024;
 
 export class CreateAnnotationMediaDto {
   @ApiProperty({ description: 'uploads/callback 返回的 fileId' })
@@ -48,6 +56,7 @@ export class CreateAnnotationMediaDto {
   @IsOptional()
   @IsInt()
   @Min(0)
+  @Max(ANNOTATION_IMAGE_MAX_BYTES, { message: '单张图片不超过 10MB' })
   size?: number;
 
   @ApiPropertyOptional({ description: '排序权重' })

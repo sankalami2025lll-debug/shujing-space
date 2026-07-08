@@ -180,10 +180,20 @@ export class AnnotationsService {
     return { id: Number(existing.id), deleted: true };
   }
 
+  // V1.1 标注图片：每个标注最多 3 张 image；允许的 MIME（与 cover 直传链路一致，去掉非标准 image/jpg）
+  private static readonly ANNOTATION_MAX_IMAGES = 3;
+  private static readonly ANNOTATION_IMAGE_MIMES = new Set([
+    'image/jpeg',
+    'image/png',
+    'image/webp',
+  ]);
+
   /**
    * 为标注新增媒体（仅 owner）。
-   * V1 仅完整支持 image：mediaType 必须为 image（panorama/video 为类型预留，V1 不开放写入）。
-   * fileId 反查 model_files，校验归属当前用户 + kind=cover（复用封面图直传链路）。
+   * V1.1 仅完整支持 image：mediaType 必须为 image（panorama/video 为类型预留，不开放写入）。
+   * fileId 反查 model_files，校验归属当前用户 + kind=cover（复用封面图直传链路，对象只存 OSS）。
+   * 额外校验：每个标注最多 3 张 image；cover 文件 MIME 必须为 image/jpeg|png|webp；
+   * sortOrder 缺省按「当前 image 数量」回填，保证按上传顺序排列。
    */
   async addMedia(
     modelId: bigint,
@@ -198,12 +208,30 @@ export class AnnotationsService {
       throw new BadRequestException('V1 暂仅支持图片媒体');
     }
 
+    // 3 张上限：统计该标注已有的 image 媒体数
+    const existingImageCount = await this.prisma.modelAnnotationMedia.count({
+      where: { annotationId: annotation.id, mediaType: 'image' },
+    });
+    if (existingImageCount >= AnnotationsService.ANNOTATION_MAX_IMAGES) {
+      throw new BadRequestException(
+        `每个标注最多 ${AnnotationsService.ANNOTATION_MAX_IMAGES} 张图片`,
+      );
+    }
+
     const file = await this.prisma.modelFile.findFirst({
       where: { id: BigInt(dto.fileId), userId, kind: FileKind.cover },
     });
     if (!file) {
       throw new BadRequestException(
         '媒体文件不存在或无权限（必须为本人上传的图片）',
+      );
+    }
+
+    // 二次校验对象存储文件 MIME（cover 链路已限制扩展名，这里按 MIME 收紧到 jpeg/png/webp）
+    const fileMime = (file.mime ?? '').split(';')[0]?.trim().toLowerCase() ?? '';
+    if (!AnnotationsService.ANNOTATION_IMAGE_MIMES.has(fileMime)) {
+      throw new BadRequestException(
+        '标注图片仅支持 jpg / png / webp',
       );
     }
 
@@ -214,9 +242,10 @@ export class AnnotationsService {
         url: file.url,
         objectKey: file.r2Key,
         fileName: dto.fileName ?? file.originalName,
-        mimeType: dto.mimeType ?? file.mime,
+        mimeType: fileMime,
         size: file.size,
-        sortOrder: dto.sortOrder ?? 0,
+        // 缺省按上传顺序排列：已有一张则新图 sortOrder=1，以此类推（0~2）
+        sortOrder: dto.sortOrder ?? existingImageCount,
       },
     });
 

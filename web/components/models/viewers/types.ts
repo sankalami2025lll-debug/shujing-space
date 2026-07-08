@@ -100,6 +100,14 @@ export type ModelViewerHandle = {
     view: ModelLaunchView,
     options?: { duration?: number },
   ) => Promise<void>;
+  /** 拍照/当前视角截图：直接从 WebGL renderer canvas 导出图片 Blob。
+   *  只截取模型 canvas 画面，不含 DOM 工具栏/标注 overlay/编辑器/帮助面板等任何 UI（纯净截图）。
+   *  clean 选项为语义占位：因只读取 WebGL canvas，DOM overlay 天然不会被截入。 */
+  captureScreenshot?: (options?: {
+    mimeType?: "image/png" | "image/jpeg";
+    quality?: number;
+    clean?: boolean;
+  }) => Promise<Blob | null>;
   moveForward?: (delta?: number) => void;
   moveBackward?: (delta?: number) => void;
   moveLeft?: (delta?: number) => void;
@@ -175,6 +183,7 @@ export const LCC_VIEWER_CAPABILITIES: ModelViewerCapabilities = {
   walk: true,
   measure: true,
   section: true,
+  screenshot: true,
   fullscreen: true,
   saveView: true,
 };

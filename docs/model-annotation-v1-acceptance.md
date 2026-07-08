@@ -268,3 +268,117 @@ interface AnnotationCameraSnapshot {
 - 前端：`cd web && pnpm build`。
 - 后端：`cd server && pnpm build`。
 - 数据库环境需执行：`pnpm prisma migrate deploy`，并确保 Prisma Client 已 `generate`。
+
+---
+
+## 17. V1.1 图片上传与展示封板
+
+> 在 V1 基础上为标注增加图片媒体能力。V1.1 已测试通过并封板，本节记录口径与红线。
+
+### 17.1 功能与权限
+
+- owner 可为标注上传 / 删除图片。
+- 游客 / readonly 分享页只读查看图片，不可上传 / 删除。
+- 图片存阿里云 OSS，不落服务器本地磁盘。
+- 单个标注最多 3 张图片。
+- 支持 `jpg` / `jpeg` / `png` / `webp`。
+- 单张图片上限为 **10MB**（前端校验、后端 DTO、env、部署文档均按 10MB 口径）。
+- 不改 OSS `objectKey` 规则，不改数据库结构。
+
+### 17.2 上传链路与配置
+
+- 复用 `cover` 上传链路：`presign` → `PUT OSS` → `callback/register` → `create annotation media`。
+- 实际运行环境需要 `MAX_COVER_SIZE_MB=10`。
+  - `server/.env` 为本地环境文件，**不入库**。
+  - 生产 `deploy/.env.prod` 如显式设置 `MAX_COVER_SIZE_MB`，必须改为 `10`。
+- 不改 OSS `objectKey` 规则、不改数据库结构。
+
+### 17.3 上传状态与错误处理
+
+- 上传失败时必须恢复「添加图片」按钮，不允许卡在「上传中 100%」。
+- XHR PUT `timeout = 300s`（5 分钟），超时按失败处理。
+- `xhr.status === 0` 或 `ontimeout` 优先排查 OSS CORS 或网络问题。
+- 前端分阶段上传状态：`presigning` → `uploading` → `registering`，每阶段有对应文案与超时保护。
+- `presignUpload` 30s 超时、`uploadCallback` 60s 超时、`createAnnotationMedia` 30s 超时（`Promise.race` 实现）。
+- 区分本地预览与真实持久化：媒体以后端 `create annotation media` 成功为准，前端不提前计为已上传。
+
+### 17.4 OSS CORS 推荐配置
+
+- Origins：`localhost` / `127.0.0.1` / `shujingspace.com`（及实际业务域名）。
+- Methods：`GET` / `PUT` / `POST` / `HEAD` / `OPTIONS`。
+- Headers：`*`。
+- Expose：`ETag` / `x-oss-request-id`。
+
+### 17.5 内容框图片展示
+
+- 缩略图统一尺寸：
+  - 1 张：`h-28`。
+  - 2 / 3 张：`h-24`。
+  - 统一 `object-cover`，CSS `grid` 排列（`grid-cols-1` / `grid-cols-2` / `grid-cols-3`）。
+- 点击缩略图打开大图预览：
+  - `createPortal` 到 `document.body`，`fixed` 全屏遮罩。
+  - 图片 `object-contain` 原比例显示，最大 `min(90vw, 960px)` / `80vh`。
+  - Esc / 点击遮罩 / 关闭按钮关闭预览。
+- 点击图片不触发标注飞行、不关闭内容框、不影响纯净模式。
+- 纯净模式隐藏内容框与图片。
+- 手机分享页只读可预览图片。
+
+### 17.6 V1.1 红线
+
+- 不改 OSS `objectKey` 规则、不改标注接口结构、不改数据库 schema。
+- 不把本地预览当作上传成功。
+- 不为 V1.1 引入视频 / 全景播放器。
+- 不破坏 V1 标注飞行、纯净模式、内容框定位、owner-only 规则。
+
+### 17.7 V1.1 主要文件
+
+- `web/components/models/annotations/model-annotation-media-uploader.tsx` — 图片上传 / 删除、分阶段状态、超时与错误恢复。
+- `web/components/models/annotations/model-annotation-editor.tsx` — 编辑器内嵌媒体上传器，`onMediaUpdated` 保持编辑器打开。
+- `web/components/models/annotations/model-annotation-layer.tsx` — 内容框图片 grid 展示与大图预览（portal）。
+- `web/lib/api/uploads.ts` — XHR PUT 超时 300s 与 CORS 诊断。
+- `server/src/modules/annotations/annotations.service.ts` — 3 张上限、image MIME 校验、sortOrder。
+- `server/src/modules/annotations/dto/create-annotation-media.dto.ts` — `ANNOTATION_IMAGE_MAX_BYTES = 10MB`。
+- `server/src/modules/uploads/upload.constants.ts` / `server/src/modules/uploads/uploads.service.ts` / `server/config/env.validation.ts` — `MAX_COVER_SIZE_MB = 10`。
+
+---
+
+## 18. 标注编辑器面板位置优化封板
+
+> owner 标注添加 / 编辑面板定位规则的最终口径，已测试通过并封板。
+
+### 18.1 影响范围
+
+- 只影响 owner 标注添加 / 编辑面板。
+- 游客内容框不受影响。
+
+### 18.2 桌面端定位（`sm:` 及以上）
+
+- `sm:left-3`（约 12px 左边距）。
+- `sm:top-3`（约 12px 上边距）。
+- `sm:w-[380px]`。
+- 保留 `rounded-2xl` 完整圆角。
+
+### 18.3 移动端定位（默认）
+
+- `left-4`。
+- `top-16`。
+- `w-[calc(100vw-32px)]`（避免小屏横向溢出）。
+
+### 18.4 容器行为
+
+- `max-h-[calc(100vh-128px)]`。
+- `overflow-y-auto`（面板内容超高时内部滚动）。
+- 不遮挡中间模型主体视野，不遮挡左下角工具栏。
+
+### 18.5 不受影响项
+
+- 上传 / 删除 / 预览图片。
+- 标注飞行。
+- 纯净模式。
+- 内容框展示。
+- 后端接口与数据结构。
+
+### 18.6 主要文件
+
+- `web/components/models/annotations/model-annotation-editor.tsx` — 编辑器外层容器 className。
+
