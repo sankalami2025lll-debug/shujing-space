@@ -62,6 +62,10 @@ interface ModelLibraryProps {
 // MODEL_TYPES：模型分类「降级」静态数组；正常情况下分类来自后端 GET /api/categories，
 //   接口失败时回退到此数组保证筛选栏不空白。发布弹窗的分类下拉也复用其（去掉首项「全部模型」）。
 const MODEL_TYPES = ["全部模型", "实景三维", "BIM 模型", "构件级模型", "具身智能机器人训练场景"];
+// SHOW_MODEL_TYPE_FILTER：模型类型筛选 UI 显隐开关。
+// 当前平台只上线「实景三维模型」，其它类型暂不对外展示；仅隐藏筛选按钮整行，
+// 不删除 MODEL_TYPES / activeType / categoryNames / category/type 查询逻辑，后续恢复时改回 true 即可。
+const SHOW_MODEL_TYPE_FILTER = false;
 // SORT_OPTIONS：排序方式中文按钮文案（展示用）
 const SORT_OPTIONS = ["最新发布", "热门浏览", "最多收藏", "推荐模型"];
 // SORT_MAP：排序中文按钮 → 后端 sort 英文枚举（对应 GET /api/models?sort=）
@@ -716,7 +720,7 @@ function UploadModal({
             <p className="text-[14px] text-gray-300">
               {modelFile ? modelFile.name : "拖拽模型文件到这里，或点击上传"}
             </p>
-            <p className="text-[12px] text-gray-500 mt-1">支持 glb / gltf / ifc / 点云等；也可在下方仅填写在线查看链接</p>
+            <p className="text-[12px] text-gray-500 mt-1">支持 lcc / lcc2 / ply / sog 等；也可在下方仅填写在线查看链接</p>
           </div>
 
           <div>
@@ -1519,18 +1523,21 @@ export default function ModelLibrary({ onNavigateHome, onNavigateCommunity, onNa
               </button>
             </div>
 
-            {/* 分类筛选：分类来自后端 GET /api/categories（失败回退静态）；点击调用 setActiveType 切换，触发后端查询 */}
-            <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-none -mx-1 px-1">
-              {categoryNames.map(t => (
-                <button
-                  key={t}
-                  onClick={() => setActiveType(t)}
-                  className={`px-3 py-1.5 rounded-full text-[13px] whitespace-nowrap flex-shrink-0 transition-all border ${activeType === t ? "bg-white text-black border-white" : "bg-white/5 border-white/10 text-gray-400 hover:border-white/20"}`}
-                >
-                  {t}
-                </button>
-              ))}
-            </div>
+            {/* 模型类型筛选按钮模块：当前仅上线实景三维，其它类型暂不展示，整体隐藏。
+                恢复方式：把文件顶部 SHOW_MODEL_TYPE_FILTER 改回 true。搜索框/排序/列表不受影响。 */}
+            {SHOW_MODEL_TYPE_FILTER ? (
+              <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-none -mx-1 px-1">
+                {categoryNames.map(t => (
+                  <button
+                    key={t}
+                    onClick={() => setActiveType(t)}
+                    className={`px-3 py-1.5 rounded-full text-[13px] whitespace-nowrap flex-shrink-0 transition-all border ${activeType === t ? "bg-white text-black border-white" : "bg-white/5 border-white/10 text-gray-400 hover:border-white/20"}`}
+                  >
+                    {t}
+                  </button>
+                ))}
+              </div>
+            ) : null}
           </div>
         </div>
 

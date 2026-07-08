@@ -190,7 +190,7 @@ export function UploadModal({ onClose, onPublished }: UploadModalProps) {
               {modelFile ? modelFile.name : "拖拽模型文件到这里，或点击上传"}
             </p>
             <p className="text-[12px] text-gray-500 mt-1">
-              支持 glb / gltf / ifc / 点云等；也可在下方仅填写在线查看链接
+              支持 lcc / lcc2 / ply / sog 等；也可在下方仅填写在线查看链接
             </p>
           </div>
 

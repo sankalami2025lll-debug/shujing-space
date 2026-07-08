@@ -28,6 +28,16 @@ import {
 import { ApiError } from "@/lib/http";
 import type { ModelListItem } from "@/lib/types";
 
+/**
+ * 分类筛选模块显隐开关。
+ * 当前平台仅上线「实景三维模型」，其它模型类型暂不展示，故隐藏顶部「全部模型 / 实景三维 /
+ * BIM 模型 / 构件级模型 / 具身智能机器人训练场景」这一排分类筛选按钮。
+ * 仅隐藏 UI：activeType 状态、categoryNames、handleCategoryClick、MODEL_TYPES 与后端
+ * category/type 字段全部保留，后续恢复时把本常量改回 true 即可。
+ * 搜索框、排序模块、模型列表不受影响。
+ */
+const SHOW_MODEL_TYPE_FILTER = false;
+
 export default function ModelLibraryPage() {
   const router = useRouter();
   const { isAuthed, bootstrapping } = useAuth();
@@ -222,22 +232,26 @@ export default function ModelLibraryPage() {
               </button>
             </div>
 
-            <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-none -mx-1 px-1">
-              {categoryNames.map((t) => (
-                <button
-                  key={t}
-                  type="button"
-                  onClick={() => handleCategoryClick(t)}
-                  className={`px-3 py-1.5 rounded-full text-[13px] whitespace-nowrap flex-shrink-0 transition-all border ${
-                    activeType === t
-                      ? "bg-white text-black border-white"
-                      : "bg-white/5 border-white/10 text-gray-400 hover:border-white/20"
-                  }`}
-                >
-                  {t}
-                </button>
-              ))}
-            </div>
+            {/* 分类筛选按钮模块：当前仅上线实景三维，其它类型暂不展示，整体隐藏。
+                恢复方式：把文件顶部 SHOW_MODEL_TYPE_FILTER 改回 true。搜索框/排序/列表不受影响。 */}
+            {SHOW_MODEL_TYPE_FILTER ? (
+              <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-none -mx-1 px-1">
+                {categoryNames.map((t) => (
+                  <button
+                    key={t}
+                    type="button"
+                    onClick={() => handleCategoryClick(t)}
+                    className={`px-3 py-1.5 rounded-full text-[13px] whitespace-nowrap flex-shrink-0 transition-all border ${
+                      activeType === t
+                        ? "bg-white text-black border-white"
+                        : "bg-white/5 border-white/10 text-gray-400 hover:border-white/20"
+                    }`}
+                  >
+                    {t}
+                  </button>
+                ))}
+              </div>
+            ) : null}
           </div>
         </div>
 
