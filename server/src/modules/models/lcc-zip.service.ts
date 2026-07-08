@@ -40,10 +40,11 @@ const MAX_ZIP_FILE_COUNT = 2000;
 const MAX_ZIP_DIRECTORY_DEPTH = 8;
 const UPLOAD_CONCURRENCY = 3;
 // processUploadedZip 中 downloadObject 会将整个 ZIP 加载到内存，
-// 自动解包上限限制 ZIP 文件本身及解压后总大小，防止 OOM。
-// 上限改为可配置（LCC_ZIP_AUTO_EXTRACT_MAX_MB，默认 2048MB），不再写死 512MB。
+// 自动解包上限限制 ZIP 文件本身及解压后总大小，防止 OOM 与 CPU/IO 打满。
+// 上限改为可配置（LCC_ZIP_AUTO_EXTRACT_MAX_MB，默认 512MB）。
+// 2C4G 生产服务器不建议调高；512MB 以上成果包请改传 .lcc/.lcc2 入口文件在线链接。
 // 未来可改为流式下载 + 流式解压，彻底消除内存峰值。
-const DEFAULT_LCC_ZIP_AUTO_EXTRACT_MAX_BYTES = 2048 * 1024 * 1024;
+const DEFAULT_LCC_ZIP_AUTO_EXTRACT_MAX_BYTES = 512 * 1024 * 1024;
 
 interface ExtractedZipFile {
   absolutePath: string;
@@ -78,12 +79,13 @@ export class LccZipService {
       const maxAutoExtractBytes = this.resolveAutoExtractMaxBytes();
       const maxAutoExtractMb = Math.round(maxAutoExtractBytes / 1024 / 1024);
 
-      // 下载前先通过 headObject 检查 ZIP 文件大小，超过自动解包上限时不再笼统失败，
-      // 给出明确指引：改传已解包 .lcc/.lcc2 入口文件或填写在线查看链接。
+      // 下载前先通过 headObject 检查 ZIP 文件大小，超过自动解包上限时快速失败：
+      // 不下载 ZIP、不解压、不扫描内部文件、不上传 processed/lcc、不进入长时间 CPU/IO 任务。
+      // 直接抛错 → processLccZip → markFailed，提示用户改用 OSS 解包目录 + .lcc/.lcc2 入口链接。
       const head = await this.storage.headObject(objectKey);
       if (head.size > maxAutoExtractBytes) {
         throw new BadRequestException(
-          `压缩包超过自动解包上限（最大 ${maxAutoExtractMb}MB），请上传已解包后的 .lcc/.lcc2 入口文件，或填写在线查看链接。`,
+          `大模型 ZIP 已上传成功，但超过自动解包上限（最大 ${maxAutoExtractMb}MB）。请先将成果包解压上传至 OSS，再填写 .lcc/.lcc2 入口文件在线查看链接。`,
         );
       }
       const archiveBuffer = await this.storage.downloadObject(objectKey);
@@ -192,7 +194,7 @@ export class LccZipService {
   }
 
   // 读取 LCC/LCC2 ZIP 自动解包上限（字节）：来自 configuration 的 upload.lccZipAutoExtractMaxBytes；
-  // 配置缺失或非法时回退默认 2048MB。同时约束 ZIP 文件大小与解压后总大小。
+  // 配置缺失或非法时回退默认 512MB。同时约束 ZIP 文件大小与解压后总大小。
   private resolveAutoExtractMaxBytes(): number {
     const fromConfig = this.config.get<number>('upload.lccZipAutoExtractMaxBytes');
     return typeof fromConfig === 'number' && fromConfig > 0
@@ -295,7 +297,7 @@ export class LccZipService {
             }
             if (totalSize > maxUncompressedBytes) {
               throw new BadRequestException(
-                `压缩包解压后总大小超过自动解包上限（最大 ${maxUncompressedMb}MB），请上传已解包后的 .lcc/.lcc2 入口文件，或填写在线查看链接。`,
+                `大模型 ZIP 解压后总大小超过自动解包上限（最大 ${maxUncompressedMb}MB）。请先将成果包解压上传至 OSS，再填写 .lcc/.lcc2 入口文件在线查看链接。`,
               );
             }
           },

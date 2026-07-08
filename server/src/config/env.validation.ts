@@ -69,8 +69,9 @@ const envSchema = z.object({
   // —— LCC/LCC2 ZIP 成果包自动解包上限（MB）——
   // 后端下载整包到内存再解压，超过该上限的 ZIP 不再自动解包，
   // 提示用户改为上传已解包的 .lcc/.lcc2 入口文件或填写在线查看链接。
-  // 默认 2048（2GB）；生产可按服务器内存调整，不再写死 512MB。
-  LCC_ZIP_AUTO_EXTRACT_MAX_MB: z.coerce.number().int().positive().default(2048),
+  // 默认 512（MB）：2C4G 生产服务器不建议调高该值，否则大包解析会打满 CPU/IO 拖死服务器。
+  // 512MB 以上 LCC/LCC2 成果包请先本地解包并上传整个目录到 OSS，再填写 .lcc/.lcc2 入口文件在线链接。
+  LCC_ZIP_AUTO_EXTRACT_MAX_MB: z.coerce.number().int().positive().default(512),
   // —— viewerUrl 域名白名单（上线前安全修复 2D）——
   // 逗号分隔的允许 host 列表（只写 host，不写完整 URL，例如 sketchfab.com,lcc-viewer.xgrids.cloud）；
   // 为空时由 configuration 回退到默认安全列表（DEFAULT_VIEWER_ALLOWED_HOSTS）。

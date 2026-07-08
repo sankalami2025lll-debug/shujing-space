@@ -337,11 +337,19 @@ export class UploadTasksService {
       modelFileId: task.modelFileId == null ? undefined : Number(task.modelFileId),
       coverFileId: task.coverFileId == null ? undefined : Number(task.coverFileId),
       ...(!task.modelFileId && task.viewerUrl
-        ? {
-            viewerUrl: task.viewerUrl,
-            viewerType: 'iframe' as const,
-            allowIframe: true,
-          }
+        ? (() => {
+            // 在线链接若为 .lcc/.lcc2 入口文件，按原生 LCC/LCC2 发布（viewerType=native），
+            // 否则按 iframe 外链发布。create() 内部也会按后缀强制 native，此处保持入参一致。
+            const ext = (task.viewerUrl.split(/[?#]/)[0] ?? '').split(/[\\/]/).pop() ?? '';
+            const dot = ext.lastIndexOf('.');
+            const urlExt = dot >= 0 ? ext.slice(dot + 1).toLowerCase() : '';
+            const isLccEntry = urlExt === 'lcc' || urlExt === 'lcc2';
+            return {
+              viewerUrl: task.viewerUrl,
+              viewerType: (isLccEntry ? 'native' : 'iframe') as 'native' | 'iframe',
+              allowIframe: !isLccEntry,
+            };
+          })()
         : {}),
     });
 

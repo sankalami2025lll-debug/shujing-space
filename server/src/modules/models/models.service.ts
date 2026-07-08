@@ -293,6 +293,12 @@ export class ModelsService {
       // 无上传文件但提供外部 Viewer 链接：先校验域名白名单（2D），通过后作为 modelUrl
       this.assertViewerUrlAllowed(dto.viewerUrl);
       modelUrl = dto.viewerUrl;
+      // 在线链接若为 .lcc/.lcc2 入口文件，按原生 LCC/LCC2 模型处理（不走 iframe 外链）：
+      // fileFormat 回填 lcc/lcc2，后续 viewerType 置 native、processingStatus 置 ready。
+      const urlExt = extractExtension(dto.viewerUrl.split(/[?#]/)[0] ?? '');
+      if (urlExt === 'lcc' || urlExt === 'lcc2') {
+        fileFormat = urlExt;
+      }
     }
 
     // 3. 封面文件：按 fileId 反查并校验归属与用途
@@ -302,24 +308,28 @@ export class ModelsService {
       coverUrl = coverFile.url;
     }
 
-    // 4. 查看器类型：优先用入参；否则上传文件→native、外链→iframe、都无→none
-    const viewerType: ViewerType =
-      dto.viewerType ??
-      (dto.modelFileId != null
-        ? ViewerType.native
-        : dto.viewerUrl
-          ? ViewerType.iframe
-          : ViewerType.none);
+    // 4. 查看器类型：
+    //  - 入口文件后缀为 .lcc/.lcc2（无论直传还是在线链接）：强制 native，按 LccViewer 打开
+    //  - 否则优先用入参；上传文件→native、外链→iframe、都无→none
+    const isLccEntryFormat = fileFormat === 'lcc' || fileFormat === 'lcc2';
+    const viewerType: ViewerType = isLccEntryFormat
+      ? ViewerType.native
+      : (dto.viewerType ??
+        (dto.modelFileId != null
+          ? ViewerType.native
+          : dto.viewerUrl
+            ? ViewerType.iframe
+            : ViewerType.none));
 
     // 5. 状态：由可见性推导（review 进待审核，其余直接发布）
     const status =
       dto.visibility === ModelVisibility.review
         ? ModelStatus.pending
         : ModelStatus.published;
-    // 直传单独的 .lcc / .lcc2 入口文件：无需 ZIP 解包，modelUrl 已保存，
-    // 直接置为 ready（viewerType 上一步已判定为 native，前端按 lcc/lcc2 走 LccViewer）。
+    // 直传单独的 .lcc/.lcc2 入口文件，或填写 .lcc/.lcc2 在线入口链接：
+    // 无需 ZIP 解包，modelUrl 已是入口 URL，直接置为 ready（viewerType 已为 native，前端按 lcc/lcc2 走 LccViewer）。
     // 其它上传文件（含 zip / glb / ply 等）保持 processing，等待后台解析或既有流程。
-    const isDirectLccEntry = fileFormat === 'lcc' || fileFormat === 'lcc2';
+    const isDirectLccEntry = isLccEntryFormat;
     const processingStatus =
       dto.modelFileId != null && !isDirectLccEntry
         ? ModelProcessingStatus.processing
