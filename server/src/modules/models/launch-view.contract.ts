@@ -20,6 +20,20 @@ export interface ModelLaunchView {
   snapshot: ModelLaunchViewSnapshot;
 }
 
+/**
+ * 标注保存视角（扁平结构）。
+ * 与 annotations DTO 一致：position/target/up 为长度 3 的数字数组，near/far 为数字。
+ * 区别于 ModelLaunchView 的包装结构 {version, viewerKind, snapshot}。
+ * 标注落库与接口传输统一使用该扁平结构；applyView 时再转回 ModelLaunchView。
+ */
+export interface AnnotationCameraSnapshot {
+  position: ModelLaunchViewVector3;
+  target: ModelLaunchViewVector3;
+  up: ModelLaunchViewVector3;
+  near: number;
+  far: number;
+}
+
 function isFiniteNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
 }
@@ -82,4 +96,37 @@ export function parseModelLaunchView(value: unknown): ModelLaunchView | null {
       far,
     },
   };
+}
+
+/**
+ * 解析标注保存视角（扁平结构）。
+ * 兼容两种输入：
+ *  - 新格式（规范）：{ position:[x,y,z], target:[x,y,z], up:[x,y,z], near, far }
+ *  - 旧/误存包装格式：{ version, viewerKind, snapshot:{ position:{x,y,z}|[..], ... } }
+ * 返回统一的扁平 AnnotationCameraSnapshot；非法返回 null。
+ */
+export function parseAnnotationCameraSnapshot(
+  value: unknown,
+): AnnotationCameraSnapshot | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null;
+  }
+  const root = value as Record<string, unknown>;
+  // 兼容包装结构：取 snapshot 子对象作为扁平源
+  const flatSource =
+    root.snapshot && typeof root.snapshot === 'object' && !Array.isArray(root.snapshot)
+      ? (root.snapshot as Record<string, unknown>)
+      : root;
+  const position = toVector3(flatSource.position);
+  const target = toVector3(flatSource.target);
+  const up = toVector3(flatSource.up);
+  const near = flatSource.near;
+  const far = flatSource.far;
+  if (!position || !target || !up || !isFiniteNumber(near) || !isFiniteNumber(far)) {
+    return null;
+  }
+  if (near <= 0 || far <= 0 || far < near) {
+    return null;
+  }
+  return { position, target, up, near, far };
 }

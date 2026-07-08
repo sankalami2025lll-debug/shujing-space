@@ -37,11 +37,12 @@ import { MobileLccGameControls } from "@/components/models/mobile-lcc-game-contr
 import { MobileLccHelpOverlay } from "@/components/models/mobile-lcc-help-overlay";
 import { MobileLccViewerChrome } from "@/components/models/mobile-lcc-viewer-chrome";
 import { getModelDetail } from "@/lib/api/models";
+import { listModelAnnotations } from "@/lib/api/annotations";
 import { getModelViewerKind } from "@/lib/model-viewer-kind";
 import { http, ApiError } from "@/lib/http";
 import { AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
-import type { ModelDetail, ModelLaunchView } from "@/lib/types";
+import type { ModelDetail, ModelLaunchView, ModelAnnotation } from "@/lib/types";
 import type {
   ModelViewerHandle,
   ModelViewerControlMode,
@@ -52,6 +53,18 @@ import type {
   ModelHeightClipOptions,
 } from "@/components/models/viewers/types";
 import { LCC_VIEWER_CAPABILITIES } from "@/components/models/viewers/types";
+import {
+  ModelAnnotationLayer,
+} from "@/components/models/annotations/model-annotation-layer";
+import {
+  ModelAnnotationEditor,
+  type AnnotationDraft,
+} from "@/components/models/annotations/model-annotation-editor";
+import {
+  readCleanModePref,
+  writeCleanModePref,
+  annotationCameraSnapshotToLaunchView,
+} from "@/components/models/annotations/model-annotation-types";
 
 /* ---------- 类型定义 ---------- */
 
@@ -571,6 +584,28 @@ export default function LccViewerIframePage() {
   /** 全屏有效性延迟复核定时器（避免 fullscreenchange 过早误判） */
   const fullscreenVerifyTimerRef = useRef<number | null>(null);
 
+  /* ---- 模型空间热点标注 V1 状态 ---- */
+  // annotations：当前模型标注列表（owner 可见 active+hidden，其他人只见 active）
+  const [annotations, setAnnotations] = useState<ModelAnnotation[]>([]);
+  // annotationsLoading：标注列表拉取中
+  const [annotationsLoading, setAnnotationsLoading] = useState(false);
+  // activeAnnotationId：当前展开内容框的标注 id（点击标题跳视角后展开；收起后置 null）
+  const [activeAnnotationId, setActiveAnnotationId] = useState<number | null>(null);
+  // flyingAnnotationId：正在飞行到该标注视角的 id；飞行期间保持标题态、不展开内容框，避免卡片随飞行飘动
+  const [flyingAnnotationId, setFlyingAnnotationId] = useState<number | null>(null);
+  // cleanMode：纯净模式，隐藏所有标注 overlay（仅查看者 UI 偏好，写 localStorage）
+  const [cleanMode, setCleanMode] = useState<boolean>(() => readCleanModePref());
+  // manageMode：owner 标注管理模式（临时关闭纯净模式以显示标注层）
+  const [manageMode, setManageMode] = useState(false);
+  // 进入管理前保存的纯净模式状态，退出管理时恢复
+  const prevCleanModeRef = useRef<boolean>(cleanMode);
+  // picking：选点模式（点击模型表面拾取 anchor）
+  const [picking, setPicking] = useState(false);
+  // editorDraft：新建态草稿（含拾取到的 anchorPosition + cameraSnapshot）
+  const [editorDraft, setEditorDraft] = useState<AnnotationDraft | null>(null);
+  // editingAnnotation：编辑态目标标注
+  const [editingAnnotation, setEditingAnnotation] = useState<ModelAnnotation | null>(null);
+
   useEffect(() => {
     measurePointsRef.current = measurePoints;
   }, [measurePoints]);
@@ -754,6 +789,9 @@ export default function LccViewerIframePage() {
     !processingBlocked &&
     Boolean(detail?.canSaveLaunchView) &&
     viewerCapabilities.saveView;
+  // owner 可管理标注：登录所有者 + 非只读分享 + viewer 支持 pick/project/getCurrentView
+  const canManageAnnotations =
+    !isReadonly && Boolean(detail?.canSaveLaunchView);
 
   /* ---- 清除移动状态（窗口失焦/关闭帮助/退出漫游时调用） ---- */
   const clearMovementState = useCallback(() => {
@@ -1442,6 +1480,174 @@ export default function LccViewerIframePage() {
     setControlMode((current) => (current === "orbit" ? "walk" : "orbit"));
   }, [clearMovementState]);
 
+  /* ---- 模型空间热点标注 V1 ---- */
+  /** 切换纯净模式：写 localStorage 持久化偏好 */
+  const handleToggleCleanMode = useCallback(() => {
+    setCleanMode((current) => {
+      const next = !current;
+      writeCleanModePref(next);
+      // 开启纯净模式时清空已展开内容框
+      if (next) setActiveAnnotationId(null);
+      return next;
+    });
+  }, []);
+
+  /** 切换标注管理模式：进入时临时关闭纯净模式，退出时恢复进入前状态 */
+  const handleToggleManageMode = useCallback(() => {
+    setManageMode((current) => {
+      const next = !current;
+      if (next) {
+        // 进入管理：记住当前纯净模式偏好，临时显示标注层
+        prevCleanModeRef.current = cleanMode;
+        setCleanMode(false);
+        setActiveAnnotationId(null);
+      } else {
+        // 退出管理：恢复进入前的纯净模式状态，关闭编辑/选点
+        setCleanMode(prevCleanModeRef.current);
+        setPicking(false);
+        setEditorDraft(null);
+        setEditingAnnotation(null);
+      }
+      return next;
+    });
+  }, [cleanMode]);
+
+  /** 新增标注：进入选点模式 */
+  const handleAddAnnotation = useCallback(() => {
+    setEditingAnnotation(null);
+    setEditorDraft(null);
+    setActiveAnnotationId(null);
+    setPicking(true);
+  }, []);
+
+  /** 取消选点 */
+  const handleCancelPick = useCallback(() => {
+    setPicking(false);
+  }, []);
+
+  /** 选点模式下点击模型表面：拾取 anchor + 当前视角，打开编辑器新建态 */
+  const handleAnnotationPick = useCallback(
+    async (clientX: number, clientY: number, nativeEvent: MouseEvent | PointerEvent) => {
+      const pickResult = await viewerHandleRef.current?.pickPoint?.(clientX, clientY, nativeEvent);
+      if (!pickResult) {
+        toast.warning("未拾取到模型点，请点击模型表面");
+        return;
+      }
+      const view = viewerHandleRef.current?.getCurrentView?.();
+      if (!view) {
+        toast.error("当前视角暂不支持保存");
+        return;
+      }
+      const wp = pickResult.lockedWorldPoint;
+      setEditorDraft({
+        anchorPosition: [wp.x, wp.y, wp.z],
+        anchorNormal: null,
+        cameraSnapshot: view,
+      });
+      setPicking(false);
+    },
+    [],
+  );
+
+  /** owner 点击已有点/标题进入编辑 */
+  const handleEditAnnotation = useCallback((annotation: ModelAnnotation) => {
+    setEditorDraft(null);
+    setEditingAnnotation(annotation);
+    setActiveAnnotationId(null);
+  }, []);
+
+  /** 游客点击标题/标注点：快速漫游到保存视角后再展开内容框。
+   *  - 飞行期间保持标题态（activeAnnotationId 置 null），避免内容框随飞行飘动。
+   *  - 优先调用 viewerHandle.flyToView；不存在或异常时 fallback 到 applyView 闪现。
+   *  - 飞行完成（或被用户操作取消）后再展开内容框。
+   *  - 连续点击不同标注时，用 token 守卫：旧飞行的 finally 不再覆盖新点击的 flying/active 状态，
+   *    避免旧飞行被取消后误把第一个标注展开、或把 flyingAnnotationId 提前清空。 */
+  const selectAnnotationTokenRef = useRef(0);
+  const handleSelectAnnotationTitle = useCallback(
+    async (annotation: ModelAnnotation) => {
+      const myToken = ++selectAnnotationTokenRef.current;
+      if (process.env.NODE_ENV === "development") {
+        console.log("[annotation] select start", annotation.id, myToken);
+      }
+      // annotation.cameraSnapshot 为扁平结构，applyView/flyToView 需要 ModelLaunchView，转换后再传
+      const view = annotationCameraSnapshotToLaunchView(annotation.cameraSnapshot);
+      const handle = viewerHandleRef.current;
+      setFlyingAnnotationId(annotation.id);
+      // 飞行期间不展开内容框
+      setActiveAnnotationId(null);
+      try {
+        if (view && handle?.flyToView) {
+          await handle.flyToView(view, { duration: 550 });
+        } else if (view) {
+          handle?.applyView?.(view);
+        }
+      } catch {
+        // 飞行异常：兜底闪现到目标视角
+        if (view) handle?.applyView?.(view);
+      } finally {
+        if (process.env.NODE_ENV === "development") {
+          console.log(
+            "[annotation] fly done",
+            annotation.id,
+            myToken,
+            selectAnnotationTokenRef.current,
+          );
+        }
+        // 仅当本次仍是最新一次点击时才落地展开，避免被更新的点击覆盖
+        if (selectAnnotationTokenRef.current === myToken) {
+          setFlyingAnnotationId(null);
+          // 先让 AnnotationLayer 从 isFlying=false 恢复一帧投影，再打开内容框。
+          // 否则 projected 仍为空时会被 layer 的“不可见自动收起”逻辑立即关闭。
+          window.requestAnimationFrame(() => {
+            if (selectAnnotationTokenRef.current === myToken) {
+              if (process.env.NODE_ENV === "development") {
+                console.log("[annotation] open card", annotation.id);
+              }
+              setActiveAnnotationId(annotation.id);
+            }
+          });
+        }
+      }
+    },
+    [],
+  );
+
+  /** 收起内容框 */
+  const handleCollapseAnnotation = useCallback(() => {
+    setActiveAnnotationId(null);
+  }, []);
+
+  /** 编辑器保存成功：合并到列表并关闭编辑器 */
+  const handleAnnotationSaved = useCallback((annotation: ModelAnnotation) => {
+    setAnnotations((current) => {
+      const exists = current.some((item) => item.id === annotation.id);
+      return exists
+        ? current.map((item) => (item.id === annotation.id ? annotation : item))
+        : [...current, annotation];
+    });
+    setEditorDraft(null);
+    setEditingAnnotation(null);
+  }, []);
+
+  /** 编辑器删除成功：从列表移除 */
+  const handleAnnotationDeleted = useCallback((annotationId: number) => {
+    setAnnotations((current) => current.filter((item) => item.id !== annotationId));
+    setActiveAnnotationId((current) => (current === annotationId ? null : current));
+    setEditingAnnotation(null);
+    setEditorDraft(null);
+  }, []);
+
+  /** 关闭编辑器 */
+  const handleCloseEditor = useCallback(() => {
+    setEditorDraft(null);
+    setEditingAnnotation(null);
+  }, []);
+
+  /** 编辑器「重新保存当前视角」：读取 viewer 当前视角 */
+  const handleCaptureCurrentView = useCallback((): ModelLaunchView | null => {
+    return viewerHandleRef.current?.getCurrentView?.() ?? null;
+  }, []);
+
   /* ---- 拉取模型详情 ---- */
   useEffect(() => {
     if (!idValid) {
@@ -1680,6 +1886,30 @@ export default function LccViewerIframePage() {
     setControlMode(isEmbeddedMobilePreview ? "orbit" : "walk");
   }, [clearMovementState, detail?.id, isEmbeddedMobilePreview]);
 
+  /* ---- 拉取标注列表：模型详情就绪后请求 GET /api/models/:id/annotations ---- */
+  useEffect(() => {
+    if (!idValid || !detail) return;
+    let active = true;
+    setAnnotationsLoading(true);
+    listModelAnnotations(numericId)
+      .then((list) => {
+        if (!active) return;
+        setAnnotations(list);
+      })
+      .catch((error) => {
+        if (!active) return;
+        // 标注加载失败不阻断模型查看，仅静默 + 控制台告警
+        console.warn("[Annotations] load failed:", error);
+        setAnnotations([]);
+      })
+      .finally(() => {
+        if (active) setAnnotationsLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [idValid, numericId, detail]);
+
   /* ---- 详情页 embed 竖屏预览：首次 ready 后默认枢轴 orbit ---- */
   useEffect(() => {
     if (!isEmbeddedMobilePreview || !detail || processingBlocked) return;
@@ -1774,6 +2004,41 @@ export default function LccViewerIframePage() {
         onExit={handleExitMeasure}
       />
 
+      {/* 模型空间热点标注层：embed 竖屏预览不渲染；纯净模式且非管理态隐藏 */}
+      {!isEmbeddedMobilePreview && (
+        <ModelAnnotationLayer
+          annotations={annotations}
+          visible={(!cleanMode || manageMode) && !annotationsLoading}
+          containerRef={viewerContainerRef}
+          viewerHandleRef={viewerHandleRef}
+          onSelectTitle={handleSelectAnnotationTitle}
+          onCollapse={handleCollapseAnnotation}
+          expandedId={activeAnnotationId}
+          flyingId={flyingAnnotationId}
+          isFlying={flyingAnnotationId !== null}
+          canManage={canManageAnnotations}
+          manageMode={manageMode}
+          onAddAnnotation={handleAddAnnotation}
+          onEditAnnotation={handleEditAnnotation}
+          picking={picking}
+          onPick={handleAnnotationPick}
+          onCancelPick={handleCancelPick}
+        />
+      )}
+
+      {/* 标注编辑器：owner 新建/编辑态 */}
+      {canManageAnnotations && (editorDraft || editingAnnotation) && (
+        <ModelAnnotationEditor
+          modelId={numericId}
+          draft={editorDraft}
+          annotation={editingAnnotation}
+          onCaptureCurrentView={handleCaptureCurrentView}
+          onSaved={handleAnnotationSaved}
+          onDeleted={handleAnnotationDeleted}
+          onClose={handleCloseEditor}
+        />
+      )}
+
       {/* 帮助面板：分享 mobile=1 用触屏帮助；embed 预览不展示工具栏/帮助 */}
       {!isEmbeddedMobilePreview &&
         (isMobileViewer ? (
@@ -1803,6 +2068,8 @@ export default function LccViewerIframePage() {
           fullscreenSupported={fullscreenSupported}
           onResetView={handleMobileResetView}
           onOpenHelp={handleOpenMobileHelp}
+          cleanMode={cleanMode}
+          onToggleCleanMode={handleToggleCleanMode}
         />
       )}
 
@@ -1847,6 +2114,11 @@ export default function LccViewerIframePage() {
               controlMode={controlMode}
               onToggleControlMode={handleToggleControlMode}
               canToggleControlMode={!processingBlocked}
+              cleanMode={cleanMode}
+              onToggleCleanMode={handleToggleCleanMode}
+              manageMode={manageMode}
+              onToggleManageMode={handleToggleManageMode}
+              canManageAnnotations={canManageAnnotations}
             />
           </div>
         </div>

@@ -137,6 +137,19 @@ enum VerificationScene {
   reset
 }
 
+// 模型空间标注状态：启用 / 隐藏（V1 默认 active，隐藏开关预留）
+enum AnnotationStatus {
+  active
+  hidden
+}
+
+// 标注媒体类型：图片 / 全景照片 / 视频（V1 仅完整支持 image，其余为类型预留）
+enum AnnotationMediaType {
+  image
+  panorama
+  video
+}
+
 // ============================== 数据表 ==============================
 
 /// users：用户 / 账号表
@@ -220,6 +233,7 @@ model Model {
   uploadTask UploadTask? @relation("UploadTaskModel")
   favorites  Favorite[]
   likes      Like[]
+  annotations ModelAnnotation[]
 
   @@index([type, status])
   @@index([status, createdAt])
@@ -450,4 +464,50 @@ model SiteConfig {
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   @@map("site_configs")
+}
+
+/// model_annotations：模型空间热点标注主表
+/// 用途：模型所有者在模型表面选点并绑定真实三维世界坐标 + 视角快照，供空间导览。
+/// 红线：anchorPosition / anchorNormal / cameraSnapshot / displayOffset 仅存可序列化 JSON（坐标/视角），不存二进制。
+model ModelAnnotation {
+  id             BigInt           @id @default(autoincrement())
+  modelId        BigInt           @map("model_id")
+  ownerId        BigInt           @map("owner_id") // 标注创建者（= 模型 owner）
+  title          String           @db.VarChar(120) // 标题胶囊文案
+  description    String           @default("") @db.Text // 描述（可空）
+  anchorPosition Json             @map("anchor_position") // [x,y,z] 模型世界坐标（render 空间）
+  anchorNormal   Json?            @map("anchor_normal") // [x,y,z] 法线，可空
+  cameraSnapshot Json             @map("camera_snapshot") // 该标注对应视角（ModelLaunchView 结构）
+  displayOffset  Json?            @map("display_offset") // 内容框屏幕偏移，可空，预留
+  status         AnnotationStatus @default(active) // active / hidden
+  sortOrder      Int              @default(0) @map("sort_order")
+  createdAt      DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  model Model                  @relation(fields: [modelId], references: [id], onDelete: Cascade)
+  media ModelAnnotationMedia[]
+
+  @@index([modelId, status, sortOrder])
+  @@map("model_annotations")
+}
+
+/// model_annotation_media：标注媒体表
+/// 用途：标注绑定的图片/全景/视频；只存 OSS objectKey + url，不存二进制。
+/// V1 仅完整支持 image（复用 /uploads/presign+callback，kind=cover）；panorama/video 为类型预留。
+model ModelAnnotationMedia {
+  id           BigInt              @id @default(autoincrement())
+  annotationId BigInt              @map("annotation_id")
+  mediaType    AnnotationMediaType @map("media_type") // image / panorama / video
+  url          String              @db.VarChar(255) // OSS 访问地址
+  objectKey    String              @map("object_key") @db.VarChar(255) // OSS object key
+  fileName     String?             @map("file_name") @db.VarChar(255) // 原始文件名（可空）
+  mimeType     String?             @map("mime_type") @db.VarChar(80) // MIME（可空）
+  size         BigInt?             // 字节（可空）
+  sortOrder    Int                 @default(0) @map("sort_order")
+  createdAt    DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  annotation ModelAnnotation @relation(fields: [annotationId], references: [id], onDelete: Cascade)
+
+  @@index([annotationId, sortOrder])
+  @@map("model_annotation_media")
 }

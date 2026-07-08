@@ -75,6 +75,19 @@ export interface ModelLaunchView {
   snapshot: ModelLaunchViewSnapshot;
 }
 
+/**
+ * 标注保存视角（扁平结构，与后端 annotations DTO 一致）。
+ * position/target/up 为长度 3 的数字数组，near/far 为数字。
+ * 区别于 ModelLaunchView 的包装结构；applyView 时需转回 ModelLaunchView。
+ */
+export interface AnnotationCameraSnapshot {
+  position: [number, number, number];
+  target: [number, number, number];
+  up: [number, number, number];
+  near: number;
+  far: number;
+}
+
 /** 保存启动视图前的校验结果（LCC Viewer getLaunchViewForSave） */
 export type LaunchViewSaveResult =
   | { ok: true; view: ModelLaunchView }
@@ -488,4 +501,82 @@ export interface UpdateAdminSiteConfigPayload {
     key: SiteConfigFieldKey;
     value: string;
   }>;
+}
+
+// ============================== Model Annotations ==============================
+
+/** 标注状态（后端 Prisma enum AnnotationStatus） */
+export type AnnotationStatus = "active" | "hidden";
+
+/** 标注媒体类型（后端 Prisma enum AnnotationMediaType；V1 仅完整支持 image） */
+export type AnnotationMediaType = "image" | "panorama" | "video";
+
+/** 标注媒体视图（GET /api/models/:id/annotations 返回的 media 项） */
+export interface ModelAnnotationMedia {
+  id: number;
+  annotationId: number;
+  mediaType: AnnotationMediaType;
+  url: string;
+  objectKey: string;
+  fileName: string | null;
+  mimeType: string | null;
+  size: number | null;
+  sortOrder: number;
+  createdAt: string;
+}
+
+/** 模型空间热点标注视图 */
+export interface ModelAnnotation {
+  id: number;
+  modelId: number;
+  ownerId: number;
+  title: string;
+  description: string;
+  /** 锚点模型世界坐标 [x,y,z]（render 空间，与 LccViewer pickPoint.lockedWorldPoint 一致） */
+  anchorPosition: [number, number, number];
+  /** 锚点法线 [x,y,z]，可空 */
+  anchorNormal: [number, number, number] | null;
+  /** 该标注对应视角（扁平结构，与后端 annotations DTO 一致） */
+  cameraSnapshot: AnnotationCameraSnapshot;
+  /** 内容框屏幕偏移（预留），可空 */
+  displayOffset: Record<string, unknown> | null;
+  status: AnnotationStatus;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+  media: ModelAnnotationMedia[];
+}
+
+/** 新增标注入参（POST /api/models/:id/annotations） */
+export interface CreateModelAnnotationPayload {
+  title: string;
+  description?: string;
+  anchorPosition: [number, number, number];
+  anchorNormal?: [number, number, number];
+  cameraSnapshot: AnnotationCameraSnapshot;
+  displayOffset?: Record<string, unknown>;
+  status?: AnnotationStatus;
+  sortOrder?: number;
+}
+
+/** 更新标注入参（PATCH /api/models/:id/annotations/:annotationId） */
+export interface UpdateModelAnnotationPayload {
+  title?: string;
+  description?: string;
+  anchorPosition?: [number, number, number];
+  anchorNormal?: [number, number, number];
+  cameraSnapshot?: AnnotationCameraSnapshot;
+  displayOffset?: Record<string, unknown>;
+  status?: AnnotationStatus;
+  sortOrder?: number;
+}
+
+/** 新增标注媒体入参（POST .../annotations/:annotationId/media） */
+export interface CreateAnnotationMediaPayload {
+  fileId: number;
+  mediaType: AnnotationMediaType;
+  fileName?: string;
+  mimeType?: string;
+  size?: number;
+  sortOrder?: number;
 }

@@ -25,6 +25,9 @@ export interface MobileLccViewerChromeProps {
   onResetView: () => void;
   /** 打开帮助面板 */
   onOpenHelp: () => void;
+  /** 纯净模式：隐藏所有标注 overlay（手机分享页只读，仅切换显示） */
+  cleanMode?: boolean;
+  onToggleCleanMode?: () => void;
 }
 
 const chromeButtonStyle: React.CSSProperties = {
@@ -47,6 +50,8 @@ export function MobileLccViewerChrome({
   fullscreenSupported = true,
   onResetView,
   onOpenHelp,
+  cleanMode = false,
+  onToggleCleanMode,
 }: MobileLccViewerChromeProps) {
   /** 控制右上角按钮组展开 / 收起；默认收起仅显示「工具」 */
   const [isExpanded, setIsExpanded] = useState(false);
@@ -75,6 +80,12 @@ export function MobileLccViewerChrome({
 
   const handleOpenHelp = () => {
     onOpenHelp();
+    collapse();
+  };
+
+  const handleToggleCleanMode = () => {
+    if (!onToggleCleanMode) return;
+    onToggleCleanMode();
     collapse();
   };
 
@@ -116,6 +127,12 @@ export function MobileLccViewerChrome({
           />
           <ChromeButton label="重置" onClick={handleResetView} />
           <ChromeButton label="帮助" onClick={handleOpenHelp} />
+          <ChromeButton
+            label={cleanMode ? "显示标注" : "纯净模式"}
+            active={cleanMode}
+            disabled={!onToggleCleanMode}
+            onClick={handleToggleCleanMode}
+          />
         </>
       )}
     </div>

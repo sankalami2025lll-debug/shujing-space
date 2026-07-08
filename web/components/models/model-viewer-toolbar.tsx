@@ -2,6 +2,7 @@
 
 import {
   Camera,
+  EyeOff,
   Focus,
   Footprints,
   HelpCircle,
@@ -54,6 +55,13 @@ interface ModelViewerToolbarProps {
   controlMode?: ModelViewerControlMode;
   onToggleControlMode?: () => void;
   canToggleControlMode?: boolean;
+  /** 纯净模式：隐藏所有标注 overlay（游客/登录用户/owner 均可见） */
+  cleanMode?: boolean;
+  onToggleCleanMode?: () => void;
+  /** 标注管理：仅 owner 可见，进入后开启标注层 + 选点/编辑入口 */
+  manageMode?: boolean;
+  onToggleManageMode?: () => void;
+  canManageAnnotations?: boolean;
 }
 
 type ActiveToolbarMenu = "none" | "operation" | "settings" | "section";
@@ -379,6 +387,11 @@ export function ModelViewerToolbar({
   controlMode = "orbit",
   onToggleControlMode,
   canToggleControlMode = false,
+  cleanMode = false,
+  onToggleCleanMode,
+  manageMode = false,
+  onToggleManageMode,
+  canManageAnnotations = false,
 }: ModelViewerToolbarProps) {
   const [isToolbarOpen, setIsToolbarOpen] = useState(true);
   const [activeMenu, setActiveMenu] = useState<ActiveToolbarMenu>("none");
@@ -420,6 +433,9 @@ export function ModelViewerToolbar({
     typeof onSaveLaunchView === "function" &&
     !saveLaunchViewPending;
   const canManageModel = showSaveLaunchView && canShowSaveLaunchView;
+  const canUseCleanMode = typeof onToggleCleanMode === "function";
+  const canUseAnnotationManage =
+    canManageAnnotations && typeof onToggleManageMode === "function";
 
   const handleToolbarToggle = () => {
     setIsToolbarOpen((current) => {
@@ -555,7 +571,19 @@ export function ModelViewerToolbar({
         disabled: !canUsePointCloudToggle,
         tooltip: canUsePointCloudToggle ? "点云切换" : "当前模型不支持",
       },
-      { key: "annotation", name: "标注", icon: MessageSquare, disabled: true, tooltip: getDisabledTooltip("标注") },
+      {
+        key: "clean-mode",
+        name: "纯净模式",
+        icon: EyeOff,
+        action: onToggleCleanMode,
+        active: cleanMode,
+        disabled: !canUseCleanMode,
+        tooltip: canUseCleanMode
+          ? cleanMode
+            ? "关闭纯净模式"
+            : "纯净模式（隐藏标注）"
+          : "纯净模式（暂不可用）",
+      },
       { key: "screenshot", name: "拍照", icon: Camera, disabled: true, tooltip: getDisabledTooltip("拍照") },
       {
         key: "measure",
@@ -597,17 +625,20 @@ export function ModelViewerToolbar({
     [
       ModeIcon,
       activeMenu,
+      canUseCleanMode,
       canUseControlMode,
       canUseHelp,
       canUseMeasure,
       canUsePointCloudToggle,
       canUseReset,
       canUseSection,
+      cleanMode,
       controlMode,
       sectionState.enabled,
       isMeasuring,
       isHelpOpen,
       onResetView,
+      onToggleCleanMode,
       onToggleMeasure,
       onTogglePointsDisplayMode,
       onToggleHelp,
@@ -629,11 +660,25 @@ export function ModelViewerToolbar({
             : "保存视角暂不可用",
         tone: "owner",
       },
+      {
+        key: "annotation-manage",
+        name: "标注管理",
+        icon: MessageSquare,
+        action: onToggleManageMode,
+        active: manageMode,
+        disabled: !canUseAnnotationManage,
+        tooltip: canUseAnnotationManage
+          ? manageMode
+            ? "退出标注管理"
+            : "标注管理"
+          : "标注管理（暂不可用）",
+        tone: "owner",
+      },
       { key: "model-rotate", name: "模型旋转", icon: Rotate3d, disabled: true, tooltip: getDisabledTooltip("模型旋转"), tone: "owner" },
       { key: "model-height", name: "模型高度", icon: MoveVertical, disabled: true, tooltip: getDisabledTooltip("模型高度"), tone: "owner" },
       { key: "model-move", name: "模型平移", icon: Move, disabled: true, tooltip: getDisabledTooltip("模型平移"), tone: "owner" },
     ],
-    [canUseSaveLaunchView, onSaveLaunchView, saveLaunchViewPending],
+    [canUseSaveLaunchView, canUseAnnotationManage, manageMode, onSaveLaunchView, onToggleManageMode, saveLaunchViewPending],
   );
 
   return (

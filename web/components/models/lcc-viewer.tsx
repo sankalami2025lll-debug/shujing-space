@@ -2148,6 +2148,12 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
   const controlModeRef = useRef<ModelViewerControlMode>(controlMode);
   const yawRef = useRef(0);
   const pitchRef = useRef(0);
+  // 标注飞行动画令牌：每次新的 flyToView 自增；rAF 帧校验令牌一致才继续，否则停止。
+  // 用于「新飞行取消旧飞行」「用户手动操作取消飞行」。
+  const flyTokenRef = useRef(0);
+  // 飞行态开关：渲染循环读取此 ref，飞行期间跳过 controls.update() / applyYawPitchToCamera，
+  // 避免独立渲染循环每帧覆盖 flyToView 的 position/quaternion/up 插值。飞行结束恢复。
+  const flyActiveRef = useRef(false);
   const isLookingRef = useRef(false);
   /** walk 右键平移状态（与左键转头互斥） */
   const isPanningRef = useRef(false);
@@ -2457,6 +2463,26 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
     }
 
     return true;
+  };
+
+  /** 低层相机落点：把相机精确设置到某个 snapshot 对应 pose，复用已验证正确的 applyLaunchViewSnapshotToCamera。
+   *  与 applyLaunchView 的区别：不写 defaultViewRef / launchViewSnapshotRef、不触发可见性 rollback、不改 reset 目标。
+   *  flyToView 末帧调用此函数，保证最终视角与 applyView 完全一致；applyView 自身语义保持不变。 */
+  const applyCameraSnapshotPoseExact = (snapshot: CameraSnapshot) => {
+    const camera = cameraRef.current;
+    const controls = controlsRef.current;
+    if (!camera) return;
+    const maxDim = lastBoundsMaxDimRef.current;
+    applyLaunchViewSnapshotToCamera(camera, snapshot, controls, {
+      controlMode: controlModeRef.current,
+      maxDim,
+      updateControls: controlModeRef.current !== "walk",
+    });
+    if (controlModeRef.current === "walk") {
+      syncYawPitchFromCamera(camera, yawRef, pitchRef);
+      if (controls) syncWalkControlsTarget(camera, controls);
+    }
+    syncViewerCamera();
   };
 
   const buildLaunchViewSaveResult = (): LaunchViewSaveResult => {
@@ -2991,6 +3017,155 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
         }
       },
       applyView: (view) => applyLaunchView(view),
+      /** 标注点击飞行：用 rAF 在 duration 内对 position/target/up/near/far 做 lerp + easeOutCubic，
+       *  每帧 camera.lookAt(插值 target) 决定朝向（渲染循环飞行期间已跳过 controls.update/applyYawPitch，不会被覆盖）；
+       *  末帧调用 applyCameraSnapshotPoseExact 精确落点（与 applyView 共享同一套已验证相机设置逻辑），
+       *  保证最终视角与原 applyView 完全一致，不飞到天空。不支持或异常时 fallback 到 applyView。
+       *  新 flyToView / 用户 pointerdown/wheel/移动键 会令 token 失效，取消旧飞行。 */
+      flyToView: (view, options) => {
+        return new Promise<void>((resolve) => {
+          const camera = cameraRef.current;
+          const controls = controlsRef.current;
+          // 兜底：无相机 / 视图非法 / 组件已销毁 → 直接 applyView
+          if (isDisposedRef.current || !camera) {
+            applyLaunchView(view, { allowRollback: false });
+            resolve();
+            return;
+          }
+          const snapshot = parseLaunchViewSnapshot(view);
+          if (!snapshot) {
+            applyLaunchView(view, { allowRollback: false });
+            resolve();
+            return;
+          }
+
+          const maxDim = lastBoundsMaxDimRef.current;
+          const planes = sanitizeLaunchViewPlanes(snapshot.near, snapshot.far, maxDim);
+          const endPos = new THREE.Vector3(...snapshot.position);
+          const endTarget = new THREE.Vector3(...snapshot.target);
+          const endUp = new THREE.Vector3(...snapshot.up).normalize();
+          const startPos = camera.position.clone();
+          const startUp = camera.up.clone().normalize();
+          const startTarget = controls
+            ? controls.target.clone()
+            : camera.position.clone().add(new THREE.Vector3(0, 0, -10));
+          const startNear = camera.near;
+          const startFar = camera.far;
+          const endNear = planes.near;
+          const endFar = planes.far;
+          const mode = controlModeRef.current;
+          // 动画时长限制 250~1200ms，默认 550ms
+          const duration = Math.max(250, Math.min(1200, options?.duration ?? 550));
+
+          const token = ++flyTokenRef.current;
+          flyActiveRef.current = true;
+          const startTime = performance.now();
+          const easeOutCubic = (t: number) => 1 - Math.pow(1 - t, 3);
+
+          // 开发环境日志：便于核对起止 pose 与最终落点是否与目标 snapshot 一致
+          logLccDebug("flyToView start", {
+            startPosition: startPos.toArray(),
+            startTarget: startTarget.toArray(),
+            startUp: startUp.toArray(),
+            targetSnapshotPosition: endPos.toArray(),
+            targetSnapshotTarget: endTarget.toArray(),
+            targetSnapshotUp: endUp.toArray(),
+            mode,
+            duration,
+          });
+
+          // 用户手动操作取消飞行：pointerdown / wheel / 移动键(WASD QE Shift 方向键)
+          const isMovementKey = (e: KeyboardEvent) => {
+            const k = e.key.toLowerCase();
+            return (
+              k === "w" || k === "a" || k === "s" || k === "d" ||
+              k === "q" || k === "e" || k === "shift" ||
+              k.startsWith("arrow")
+            );
+          };
+          const onUserInteract = () => {
+            // 令牌失效，当前 rAF 帧会自动停止并 resolve
+            flyTokenRef.current = token + 1;
+          };
+          const onKeyDown = (e: KeyboardEvent) => {
+            if (isMovementKey(e)) onUserInteract();
+          };
+          window.addEventListener("pointerdown", onUserInteract);
+          window.addEventListener("wheel", onUserInteract, { passive: true });
+          window.addEventListener("keydown", onKeyDown);
+          const removeListeners = () => {
+            window.removeEventListener("pointerdown", onUserInteract);
+            window.removeEventListener("wheel", onUserInteract);
+            window.removeEventListener("keydown", onKeyDown);
+          };
+
+          // 飞行结束统一收尾：调用与 applyView 共享的低层落点函数，保证最终视角与原 applyView 一致；
+          // 不自行设置 quaternion，避免与项目相机落点逻辑不一致（曾用 Object3D 推导 endQuat 导致飞到天空）。
+          const finalizeAtTarget = () => {
+            applyCameraSnapshotPoseExact(snapshot);
+            flyActiveRef.current = false;
+            flyTokenRef.current = token + 1;
+            const finalSave = buildLaunchViewSaveResult();
+            logLccDebug("flyToView final", {
+              finalPosition: camera.position.toArray(),
+              finalTarget: controls ? controls.target.toArray() : null,
+              finalUp: camera.up.toArray(),
+              finalGetCurrentView: finalSave.ok ? finalSave.view?.snapshot : null,
+            });
+          };
+
+          const tmpPos = new THREE.Vector3();
+          const tmpTarget = new THREE.Vector3();
+          const tmpUp = new THREE.Vector3();
+
+          const tick = () => {
+            // 令牌已失效（被新飞行 / 用户操作 / 卸载取消）→ 停止飞行
+            if (flyTokenRef.current !== token || isDisposedRef.current) {
+              removeListeners();
+              // 取消时把当前 pose 同步到 walk 的 yaw/pitch，避免恢复渲染循环时 applyYawPitchToCamera 跳回旧姿态
+              if (mode === "walk") {
+                syncYawPitchFromCamera(camera, yawRef, pitchRef);
+                if (controls) syncWalkControlsTarget(camera, controls);
+              }
+              flyActiveRef.current = false;
+              resolve();
+              return;
+            }
+            const elapsed = performance.now() - startTime;
+            const t = Math.min(1, elapsed / duration);
+            const e = easeOutCubic(t);
+
+            // 方案 A：position + target + up 插值，每帧 camera.lookAt(插值 target) 决定朝向。
+            // 渲染循环飞行期间已跳过 controls.update()/applyYawPitchToCamera，此 lookAt 不会被覆盖。
+            // 不调用 controls.update()/applyOrbitDistanceLimits，避免覆盖姿态/距离。
+            tmpPos.lerpVectors(startPos, endPos, e);
+            tmpTarget.lerpVectors(startTarget, endTarget, e);
+            tmpUp.lerpVectors(startUp, endUp, e).normalize();
+
+            camera.position.copy(tmpPos);
+            camera.up.copy(tmpUp);
+            camera.near = startNear + (endNear - startNear) * e;
+            camera.far = startFar + (endFar - startFar) * e;
+            camera.lookAt(tmpTarget);
+            camera.updateProjectionMatrix();
+            camera.updateMatrixWorld(true);
+            if (controls) {
+              controls.target.copy(tmpTarget);
+            }
+            syncViewerCamera();
+
+            if (t >= 1) {
+              removeListeners();
+              // 末帧用与 applyView 共享的低层函数精确落点，最终视角必然正确，且与上一帧接近无闪现
+              finalizeAtTarget();
+              resolve();
+              return;
+            }
+            window.requestAnimationFrame(tick);
+          };
+          window.requestAnimationFrame(tick);
+        });
+      },
       resetView: () => {
         const camera = cameraRef.current;
         const controls = controlsRef.current;
@@ -4323,23 +4498,28 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
             const activeControls = controlsRef.current;
             const activeCamera = cameraRef.current ?? camera;
 
-            if (controlModeRef.current === "orbit") {
-              if (activeControls) {
-                activeControls.enabled = true;
-                activeControls.update();
-              }
-            } else {
-              if (activeControls) {
-                activeControls.enabled = false;
-              }
+            // 飞行动画进行中：相机 pose 由 flyToView 的 rAF 直接插值（position + quaternion slerp + up），
+            // 这里跳过 controls.update() / applyYawPitchToCamera，避免独立渲染循环覆盖飞行插值导致姿态乱跳。
+            // 仍继续 lccRender.update() + renderer.render() 保证画面持续渲染。
+            if (!flyActiveRef.current) {
+              if (controlModeRef.current === "orbit") {
+                if (activeControls) {
+                  activeControls.enabled = true;
+                  activeControls.update();
+                }
+              } else {
+                if (activeControls) {
+                  activeControls.enabled = false;
+                }
 
-              applyYawPitchToCamera(activeCamera, yawRef.current, pitchRef.current);
-              if (activeControls) {
-                syncWalkControlsTarget(activeCamera, activeControls);
+                applyYawPitchToCamera(activeCamera, yawRef.current, pitchRef.current);
+                if (activeControls) {
+                  syncWalkControlsTarget(activeCamera, activeControls);
+                }
+                applyMovementFrameRef.current(deltaSeconds);
+                activeCamera.updateMatrixWorld(true);
+                syncViewerCamera();
               }
-              applyMovementFrameRef.current(deltaSeconds);
-              activeCamera.updateMatrixWorld(true);
-              syncViewerCamera();
             }
 
             lccRender.update();

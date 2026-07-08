@@ -21,6 +21,7 @@ import { TrainingModule } from './modules/training/training.module';
 import { AdminModule } from './modules/admin/admin.module';
 import { SiteConfigModule } from './modules/site-config/site-config.module';
 import { UploadTasksModule } from './modules/upload-tasks/upload-tasks.module';
+import { AnnotationsModule } from './modules/annotations/annotations.module';
 
 @Module({
   imports: [
@@ -56,6 +57,8 @@ import { UploadTasksModule } from './modules/upload-tasks/upload-tasks.module';
     UploadsModule,
     // 第 6 步补充：上传任务持久化 /api/upload-tasks/*
     UploadTasksModule,
+    // 模型空间热点标注 /api/models/:modelId/annotations/*
+    AnnotationsModule,
     // 第 7 步·第二阶段：个人中心 /api/users/me/*
     UsersModule,
     // 第 8 步·阶段一：联系线索 /api/contact/*（提交线索 + 表单选项）

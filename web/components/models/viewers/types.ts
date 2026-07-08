@@ -94,6 +94,12 @@ export type ModelViewerHandle = {
   /** 保存成功后仅更新内存默认视角，不重新应用相机 */
   commitSavedLaunchView?: (view: ModelLaunchView) => void;
   applyView?: (view: ModelLaunchView) => boolean;
+  /** 快速漫游/飞行到指定视角（标注点击跳转用）。不支持时调用方应 fallback 到 applyView。
+   *  动画期间用户手动操作（pointerdown/wheel/WASD 等）会取消当前飞行。 */
+  flyToView?: (
+    view: ModelLaunchView,
+    options?: { duration?: number },
+  ) => Promise<void>;
   moveForward?: (delta?: number) => void;
   moveBackward?: (delta?: number) => void;
   moveLeft?: (delta?: number) => void;
