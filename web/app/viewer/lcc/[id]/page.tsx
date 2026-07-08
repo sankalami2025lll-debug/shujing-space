@@ -539,6 +539,9 @@ export default function LccViewerIframePage() {
   const isEmbeddedMobilePreview = isEmbeddedPreview && isMobilePreview;
   /** 手机分享 iframe：外层 model-share-viewer-page 已负责 Loading，内层不再展示避免双层闪烁 */
   const isMobileShareViewer = isMobileViewer && isShareContext;
+  /** 手机端标注导览模式：mobile=1 时只做标注点击飞行跳转，不展开内容看板（屏幕小避免遮挡模型）。
+   *  桌面端恒为 false，行为不变（飞行后展开内容框）。 */
+  const isMobileAnnotationMode = isMobileViewer;
   /** embed iframe 内 html/body 高度链可能为 0，需直接使用 iframe viewport 兜底。 */
   const viewerShellClass = isEmbeddedPreview
     ? "h-[100dvh] min-h-[100vh] w-[100dvw]"
@@ -1675,6 +1678,8 @@ export default function LccViewerIframePage() {
       if (process.env.NODE_ENV === "development") {
         console.log("[annotation] select start", annotation.id, myToken);
       }
+      // 手机端标注导览模式：只飞行到保存视角，不展开内容看板（屏幕小避免遮挡模型）
+      const shouldOpenCardAfterFly = !isMobileAnnotationMode;
       // annotation.cameraSnapshot 为扁平结构，applyView/flyToView 需要 ModelLaunchView，转换后再传
       const view = annotationCameraSnapshotToLaunchView(annotation.cameraSnapshot);
       const handle = viewerHandleRef.current;
@@ -1702,20 +1707,25 @@ export default function LccViewerIframePage() {
         // 仅当本次仍是最新一次点击时才落地展开，避免被更新的点击覆盖
         if (selectAnnotationTokenRef.current === myToken) {
           setFlyingAnnotationId(null);
-          // 先让 AnnotationLayer 从 isFlying=false 恢复一帧投影，再打开内容框。
-          // 否则 projected 仍为空时会被 layer 的“不可见自动收起”逻辑立即关闭。
-          window.requestAnimationFrame(() => {
-            if (selectAnnotationTokenRef.current === myToken) {
-              if (process.env.NODE_ENV === "development") {
-                console.log("[annotation] open card", annotation.id);
+          if (shouldOpenCardAfterFly) {
+            // 桌面端：先让 AnnotationLayer 从 isFlying=false 恢复一帧投影，再打开内容框。
+            // 否则 projected 仍为空时会被 layer 的“不可见自动收起”逻辑立即关闭。
+            window.requestAnimationFrame(() => {
+              if (selectAnnotationTokenRef.current === myToken) {
+                if (process.env.NODE_ENV === "development") {
+                  console.log("[annotation] open card", annotation.id);
+                }
+                setActiveAnnotationId(annotation.id);
               }
-              setActiveAnnotationId(annotation.id);
-            }
-          });
+            });
+          } else {
+            // 手机端：飞行结束后不展开内容看板，仅恢复标题/点显示
+            setActiveAnnotationId(null);
+          }
         }
       }
     },
-    [],
+    [isMobileAnnotationMode],
   );
 
   /** 收起内容框 */
@@ -2139,6 +2149,7 @@ export default function LccViewerIframePage() {
           picking={picking}
           onPick={handleAnnotationPick}
           onCancelPick={handleCancelPick}
+          disableCards={isMobileAnnotationMode}
         />
       )}
 

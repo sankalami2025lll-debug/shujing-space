@@ -74,6 +74,9 @@ interface ModelAnnotationLayerProps {
   picking: boolean;
   onPick: (clientX: number, clientY: number, nativeEvent: MouseEvent | PointerEvent) => void;
   onCancelPick: () => void;
+  /** 禁用内容看板渲染：手机端屏幕小，内容框会遮挡模型，仅做标注导览跳转，不展开内容框。
+   *  标题/标注点仍可点击触发 flyToView；桌面端恒为 false，行为不变。 */
+  disableCards?: boolean;
 }
 
 const REPROJECT_INTERVAL_MS = 33;
@@ -99,6 +102,7 @@ export function ModelAnnotationLayer({
   picking,
   onPick,
   onCancelPick,
+  disableCards = false,
 }: ModelAnnotationLayerProps) {
   const [projected, setProjected] = useState<ProjectedAnnotation[]>([]);
   // 内容框已测量高度缓存（每 annotationId 一份）：由 AnnotationCard 首次挂载后通过 useLayoutEffect 测量回填，
@@ -279,7 +283,16 @@ export function ModelAnnotationLayer({
     position: "absolute",
     inset: 0,
     pointerEvents: "none",
-    zIndex: 25,
+    // z-35：高于手机 walk 触控层（MobileLccGameControls z-30，左半屏移动区/右半屏视角区 pointer-events-auto），
+    // 让标注标题/点可被点击；低于手机 chrome（z-40）避免遮挡右上菜单。
+    // 容器 pointer-events-none，仅标题/点 pointer-events-auto，其余区域事件穿透回触控层。
+    zIndex: 35,
+  };
+
+  /** 标注可点元素（标题/点）统一 pointerdown 拦截：阻止冒泡，避免触屏点击被手机触控层误识别为转头/移动。
+   *  touch-action: manipulation 由各按钮 style 设置，消除双击缩放延迟。 */
+  const handleAnnotationPointerDown = (e: ReactPointerEvent<HTMLElement>) => {
+    e.stopPropagation();
   };
 
   return (
@@ -326,6 +339,7 @@ export function ModelAnnotationLayer({
                   onSelectTitle(annotation);
                 }
               }}
+              onPointerDown={handleAnnotationPointerDown}
               className="absolute -translate-x-1/2 -translate-y-1/2 rounded-full border"
               style={{
                 left: p.anchor.x,
@@ -335,6 +349,7 @@ export function ModelAnnotationLayer({
                 background: ANNOTATION_VISUAL.cyan,
                 borderColor: "rgba(255,255,255,0.9)",
                 pointerEvents: "auto",
+                touchAction: "manipulation",
                 boxShadow: ANNOTATION_VISUAL.pinDarkOutline,
               }}
             >
@@ -370,6 +385,7 @@ export function ModelAnnotationLayer({
                       onSelectTitle(annotation);
                     }
                   }}
+                  onPointerDown={handleAnnotationPointerDown}
                   className="flex w-full items-center justify-center whitespace-nowrap rounded-full border backdrop-blur-md"
                   style={{
                     height: ANNOTATION_VISUAL.titleHeight,
@@ -383,6 +399,7 @@ export function ModelAnnotationLayer({
                     color: "white",
                     fontSize: ANNOTATION_VISUAL.titleFontSize,
                     boxShadow: ANNOTATION_VISUAL.titleShadow,
+                    touchAction: "manipulation",
                   }}
                 >
                   {annotation.title}
@@ -409,8 +426,9 @@ export function ModelAnnotationLayer({
             ) : null}
 
             {/* 展开内容框：以标注点为中心、固定屏幕尺寸、始终在标注点上方，
-                不随模型缩放放大；箭头在内容框底部指向标注点 */}
-            {isExpanded ? (() => {
+                不随模型缩放放大；箭头在内容框底部指向标注点。
+                手机端 disableCards=true 时不渲染内容框（屏幕小，仅做导览跳转）。 */}
+            {!disableCards && isExpanded ? (() => {
               const containerWidth =
                 containerRef.current?.getBoundingClientRect().width ??
                 ANNOTATION_VISUAL.cardWidth;
