@@ -899,3 +899,39 @@ web/components/models/
 4. 在"文件结构"Tab 中逐步接入不同格式的结构树
 5. 在"操作记录"Tab 中沉淀统一事件模型
 6. **手机分享后续**：真机验收签字；视结果优化 hydration 闪帧、CSS 旋转舞台触控坐标
+
+## 十五、模型社区 UI 与发布文案收口（2026-07）
+
+> 对应提交：`03c8c72` `fix: hide model type filters and update upload copy`
+
+### 15.1 分类筛选隐藏
+
+- 模型社区 / 模型库列表页：**整行分类筛选按钮 UI 隐藏**（「全部模型 / 实景三维 / BIM…」等）。
+- 实现：常量 `SHOW_MODEL_TYPE_FILTER = false` 包住筛选行；**不删除** category/type 数据结构与接口逻辑，恢复时改回 `true` 即可。
+- 保留：搜索框、排序、模型列表、发布入口、个人中心、卡片上的类型标签。
+- 落点：
+  - `web/components/pages/model-library-page.tsx`（Next.js 正式站）
+  - `src/app/ModelLibrary.tsx`（Vite 原型；线上若仍走原型必须同步隐藏）
+
+### 15.2 发布模型上传格式提示
+
+当前文案：
+
+```text
+支持 lcc / lcc2 / ply / sog 等；也可在下方仅填写在线查看链接
+512MB 以上 LCC/LCC2 成果包请先解包上传至 OSS，再填写 .lcc/.lcc2 入口文件链接；平台会按原生模型浏览器打开，不会作为 iframe 外链。
+```
+
+- 仅前端文案；**未改**上传格式校验与后端。
+- 与 ZIP 自动解包安全策略交叉引用：`docs/lcc-zip-auto-extract-safety.md`。
+
+## 十六、`.lcc/.lcc2` 入口链接原生分发（2026-07）
+
+- 后端 `create` / `upload-tasks.publish`：入口后缀为 `.lcc`/`.lcc2` 时强制 `viewerType=native`、`processingStatus=ready`。
+- 前端详情页仍：`/models/[id]` → iframe `/viewer/lcc/[id]`；分享页 `/models/[id]/view`；手机 `mobile=1` 不变。
+- 详见 `docs/lcc-zip-auto-extract-safety.md` §4。
+
+## 十七、拍照功能索引
+
+- 拍照 / 当前视角截图 V1 已单独封板：`docs/model-viewer-screenshot-v1-acceptance.md`。
+- 标注 V1 / V1.1 / 手机端标注交互：`docs/model-annotation-v1-acceptance.md`。

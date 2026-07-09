@@ -1963,3 +1963,38 @@
 #### 构建
 
 - `cd web && pnpm build` 通过（2026-06-21）
+
+---
+
+## 15. LCC/LCC2 ZIP 自动解包生产安全收口（2026-07-08 / 2026-07-09）
+
+> 详细封板：`docs/lcc-zip-auto-extract-safety.md`  
+> 提交：`54c4f9e`、`ac52985`
+
+### 15.1 策略摘要
+
+- `LCC_ZIP_AUTO_EXTRACT_MAX_MB` **默认 512**（曾短暂默认 2048，因 2C4G 生产事故收口回 512）。
+- 超过上限：仅 `headObject` 后快速失败，不下载、不解压、不上传 `processed/lcc`。
+- ≤ 上限：继续现有自动解包链路。
+- 直传或填写 `.lcc` / `.lcc2` 入口 URL：`fileFormat=lcc|lcc2`、`viewerType=native`、`processingStatus=ready`；不进 ZIP 解包、不按 iframe 外链。
+
+### 15.2 与 Viewer 的关系
+
+- 入口链接发布与平台自动解包成功后的模型，**共用同一套** `LccViewer` + `/viewer/lcc/[id]` iframe 架构。
+- 前端 `isLccModel` 按 `fileFormat` 或 URL 后缀识别，详情页挂载原生 LCC iframe，不走 IframeViewer。
+
+### 15.3 红线（本轮未改）
+
+- 未改 `LCCRender.load` 入口 URL 模式、未恢复 dataPath、未依赖 meta 文件。
+- 未改 OSS 上传主链路、未改数据库结构。
+
+### 15.4 LCC2 下载并发现状（待优化，非本轮已完成项）
+
+> 截至 2026-07-09 文档更新时，**代码尚未调整**桌面端并发；此处仅记录现状与待办，避免与已封板安全策略混淆。
+
+- 当前 `lcc-viewer.tsx` 在 `useLcc2 === true` 时仍固定：
+  - `maxConcurrentDownloads: 1`
+  - `workerPerFrameRequests: 1`
+- 历史原因见 §14.10（降低 worker 并发失败概率）。
+- 生产现象：通过 `.lcc2` 入口链接进入原生 Viewer 后，画质/高 LOD 加载偏慢，控制台可见 `MaxConcurrentDownloads: 1`、`WorkerPerFrameRequests: 1`、`recommandMaxLodLevel` 等。
+- **待办（未实现）**：桌面端非 mobile 提高并发（例如 Downloads=4、WorkerPerFrame=2）；`mobile=1` 保持保守；load 前补诊断日志。实现后应另开验收记录，并更新本节。

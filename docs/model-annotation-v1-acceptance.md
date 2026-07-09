@@ -242,12 +242,14 @@ interface AnnotationCameraSnapshot {
 - [ ] 不可编辑 / 新增 / 删除。
 - [ ] 点击标注可飞行并展开内容框。
 
-### 15.4 手机分享页
+### 15.4 手机分享页 / 手机端标注交互（已按 2026-07 口径更新）
 
-- [ ] 可见标注并点击导览。
-- [ ] 飞行结束后内容框展开。
+> 对应提交：`2c199e1` `fix(mobile): make annotation taps trigger flyToView and skip content card`
+
+- [ ] 可见标注；点击标题或标注点可触发 `flyToView` 导览。
+- [ ] **手机端飞行结束后不展开内容看板**（屏幕小会挡视图）；桌面端仍展开。
 - [ ] 右上工具支持纯净模式。
-- [ ] 摇杆与触控不受标注影响。
+- [ ] 摇杆与触控不受标注影响；标注层 `zIndex` 高于手机触控层，避免点击被拦截。
 - [ ] 飞行中触控可取消动画且标注层不永久隐藏。
 
 ### 15.5 核心 Viewer 功能回归
@@ -381,4 +383,32 @@ interface AnnotationCameraSnapshot {
 ### 18.6 主要文件
 
 - `web/components/models/annotations/model-annotation-editor.tsx` — 编辑器外层容器 className。
+
+---
+
+## 19. 手机端标注交互收口（2026-07）
+
+> 在 V1 / V1.1 封板后的体验修复：手机端标注可见但不可点 → 可点导览；手机端不展开内容框。
+
+### 19.1 行为差异
+
+| 端 | 点击标注 | 内容看板 |
+|---|---|---|
+| 桌面端 | `flyToView` → 展开内容框 | 展开 |
+| 手机端（`isMobileViewer` / `mobile=1` 等） | `flyToView` 导览 | **不展开**（`disableCards=true`） |
+
+### 19.2 触控拦截修复
+
+- 根因：`MobileLccGameControls` 触控层 `z-30` 覆盖视口，原标注层 `zIndex=25` 被挡住。
+- 修复：标注层容器 `zIndex` 提升到 `35`（仍低于手机 chrome `z-40`）；pin/title 增加 `touch-action: manipulation` 与 `pointerdown` 防冒泡。
+
+### 19.3 主要文件
+
+- `web/app/viewer/lcc/[id]/page.tsx` — `isMobileAnnotationMode`、`shouldOpenCardAfterFly`、`disableCards`
+- `web/components/models/annotations/model-annotation-layer.tsx` — `disableCards`、z-index、触控
+
+### 19.4 红线
+
+- 不改后端、数据库、OSS、标注数据结构。
+- 不破坏纯净模式、readonly 分享、桌面端内容框展开。
 

@@ -1,12 +1,20 @@
 # 数境空间官网 阶段开发检查点
 
-> 更新日期：2026-07-07（模型浏览器工具栏真实能力、测量多段线、setClipBox 剖切、Loading 同步与性能优化记录）
+> 更新日期：2026-07-09（补记：LCC ZIP 自动解包生产安全收口、模型社区分类筛选隐藏、手机端标注交互、标注/拍照封板索引；LCC2 桌面并发仍为待办）
 > 范围：仅记录已实际落地的改动与事实，供后续 Agent 续接。
 > 索引：LCC Web SDK 接入记录详见 `docs/lcc-web-sdk-integration.md`
 > 索引：模型浏览器统一架构详见 `docs/model-viewer-architecture.md`
+> 索引：LCC/LCC2 ZIP 自动解包生产安全策略详见 `docs/lcc-zip-auto-extract-safety.md`
+> 索引：模型空间热点标注 V1 / V1.1 / 手机端标注详见 `docs/model-annotation-v1-acceptance.md`
+> 索引：模型浏览器拍照 V1 详见 `docs/model-viewer-screenshot-v1-acceptance.md`
 > 最新总口径：当前对象存储实际使用 **阿里云 OSS**；本文件对象存储相关描述统一按 `OSS_* / objectKey / oss-compatible.service.ts` 口径理解。
 > 提醒：仓库中的 `.env.example / .env.prod.example` 已统一为 `OSS_*`；真实 `server/.env` 已完成从 `R2_*` 到 `OSS_*` 的切换并通过运行冒烟验证，数据库字段 `r2_key` 暂不迁移，后续第三阶段再规划 `r2_key -> object_key`。
 > 补记：LCC/LCC2 ZIP 成果包处理第一版进展详见 `docs/lcc-web-sdk-integration.md`
+> 补记：2026-07-08/09 **LCC ZIP 自动解包生产安全收口**已落地并推送：`LCC_ZIP_AUTO_EXTRACT_MAX_MB` 默认 **512**（曾短暂默认 2048，2C4G 事故后收口）；超限仅 `headObject` 后快速 `failed`，不下载不解压；`.lcc/.lcc2` 入口链接强制 `viewerType=native` + `ready`。提交 `54c4f9e`、`ac52985`。详见 `docs/lcc-zip-auto-extract-safety.md`。
+> 补记：2026-07 **模型社区分类筛选整行隐藏**（`SHOW_MODEL_TYPE_FILTER=false`，Next + Vite 原型均已隐藏）；发布弹窗格式提示改为 lcc/lcc2/ply/sog，并补充 512MB 以上入口链接指引。提交 `03c8c72`。详见 `docs/model-viewer-architecture.md` §十五。
+> 补记：2026-07 **手机端标注**：可点击触发 `flyToView`；手机端不展开内容看板（`disableCards`）；标注层 z-index 高于触控层。提交 `2c199e1`。详见 `docs/model-annotation-v1-acceptance.md` §19。
+> 补记：标注图片上传 V1.1、编辑器左上角定位、拍照截图 V1 已封板于 `docs/model-annotation-v1-acceptance.md` / `docs/model-viewer-screenshot-v1-acceptance.md`（提交 `f572ce7` 等）。
+> 补记：**待办（未改代码）**：LCC2 桌面端 `maxConcurrentDownloads/workerPerFrameRequests` 仍固定为 1，大模型高 LOD 加载偏慢；计划桌面提高并发、mobile 保持保守，并补 load 前诊断日志。现状见 `docs/lcc-web-sdk-integration.md` §15.4。
 > 补记：模型详情页 Viewer 分发修复与统一品牌 Loading 进展详见 `docs/lcc-web-sdk-integration.md`
 > 补记：统一模型 Loading 动画完成收口，自检通过，详见 `docs/model-viewer-architecture.md`
 > 补记：模型浏览器 UI 收口与无用代码清理完成，详见 `docs/model-viewer-architecture.md`
@@ -2899,7 +2907,19 @@ SDK **不提供** walk/orbit 鼠标交互；相机控制均在项目层 `lcc-vie
   9. 通用质量检查（跨页无断链、文案无乱码、视觉风格、弹窗关闭、控制台无报错、`pnpm build` 通过）。
 - **附带**：已知限制清单（非缺陷，验收不计失败）与验收结论汇总表。
 - **维护约定**：页面功能或交互变更后，应同步更新本清单对应条目。
+- **2026-07-09 补记**：L2 分类筛选 UI 已隐藏；L14b / L19 已同步发布文案与 `.lcc/.lcc2` 入口链接原生发布口径。
 
+### 其它封板 / 架构文档（2026-07 补齐索引）
+
+| 文档 | 用途 |
+|---|---|
+| `docs/lcc-zip-auto-extract-safety.md` | LCC/LCC2 ZIP 自动解包生产安全 + 入口链接原生发布封板 |
+| `docs/model-annotation-v1-acceptance.md` | 标注 V1 / V1.1 / 编辑器定位 / 手机端标注交互 |
+| `docs/model-viewer-screenshot-v1-acceptance.md` | 拍照 / 当前视角截图 V1 |
+| `docs/lcc-web-sdk-integration.md` | LCC SDK 接入与 ZIP 处理历史；§15 安全收口；§15.4 LCC2 并发现状待办 |
+| `docs/model-viewer-architecture.md` | Viewer 架构；§十五社区筛选隐藏；§十六入口链接分发 |
+| `docs/upload-system-final-acceptance.md` | 上传体系总归档；§九 ZIP 安全收口 |
+| `docs/backend-architecture-plan.md` | 含 `LCC_ZIP_AUTO_EXTRACT_MAX_MB` 环境变量表 |
 ## 七、后续 Agent 必须注意的规则
 
 - 开发前先读：`AGENTS.md` → `.cursor/rules` → `页面功能注释文档/00_文档索引.md` → 当前页面对应 MD → 目标源码。

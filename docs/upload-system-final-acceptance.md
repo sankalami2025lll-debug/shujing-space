@@ -109,6 +109,7 @@
 
 - `docs/dev-checkpoint.md`
 - `docs/upload-system-final-acceptance.md`
+- `docs/lcc-zip-auto-extract-safety.md`（ZIP 自动解包生产安全封板）
 - `tmp-browser-fixtures/results/postfix-acceptance-1780908337322.json`
 - `tmp-browser-fixtures/results/resume-ready-1780911174900.json`
 - `tmp-browser-fixtures/results/resume-missing-parts-1780914415706.json`
@@ -116,7 +117,38 @@
 - `tmp-browser-fixtures/verify-3b3b-resume-missing-parts.cjs`
 - `tmp-browser-fixtures/verify-3b3c-exception-regression.cjs`
 
+## 九、LCC/LCC2 ZIP 自动解包生产安全收口（2026-07-08 / 2026-07-09）
+
+> 详细封板见 `docs/lcc-zip-auto-extract-safety.md`。本节只记与上传/发布相关的口径变更。
+
+### 9.1 事故与收口
+
+- 2C4G 生产曾将 `LCC_ZIP_AUTO_EXTRACT_MAX_MB` 调到 `2048`，约 1GB ZIP 自动解包打满 CPU/IO，导致 SSH/官网不可用。
+- 正式代码默认值已收口为 **`512`**；超过上限 **快速失败**（`headObject` 后即失败，不下载、不解压、不上传 `processed/lcc`）。
+- 对应提交：`54c4f9e`（可配置上限）、`ac52985`（生产安全收口 + 入口链接原生发布）。
+
+### 9.2 发布路径口径
+
+| 发布方式 | 行为 |
+|---|---|
+| ≤512MB LCC/LCC2 ZIP | 继续自动解包 → `processed/lcc/...` 入口 URL → `ready` |
+| >512MB LCC/LCC2 ZIP | ZIP 可上传成功，但解析快速 `failed`，提示改用入口链接 |
+| 直传单独 `.lcc` / `.lcc2` | 不走 ZIP 解包；`viewerType=native`、`processingStatus=ready` |
+| 仅填 `.lcc` / `.lcc2` 在线入口链接 | `fileFormat=lcc/lcc2`、`viewerType=native`、`processingStatus=ready`；**不按 iframe 外链** |
+| 其它 https 外链 | 仍按 iframe 外链（域名白名单校验） |
+
+### 9.3 前端提示
+
+发布弹窗文案已明确：512MB 以上成果包请先解包上传 OSS，再填写 `.lcc/.lcc2` 入口链接；平台按原生模型浏览器打开。
+
+### 9.4 未改边界
+
+- 未改 OSS presign / callback / multipart 主链路。
+- 未改数据库结构。
+- 未改 `LCCRender.load` / dataPath / meta 依赖。
+
 ## 结论
 
 - 上传体系 3A 至 3B-3C 的实现、真实浏览器验收证据、阶段边界与后续事项均已归档。
 - 当前版本可作为上传体系阶段性总封板基线。
+- LCC/LCC2 ZIP 自动解包生产安全策略已单独封板于 `docs/lcc-zip-auto-extract-safety.md`，与本上传体系总归档交叉引用。

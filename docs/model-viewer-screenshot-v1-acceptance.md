@@ -162,3 +162,12 @@ captureScreenshot?: (options?: {
 - 不把 `LCC-Web-0.6.1/` / `reference/` / 临时图片素材误提交。
 - 不把 V2 功能混入本次封板。
 - 全景、视频、导览路线、云端截图相册、截图上传 OSS 均不属于本次范围。
+
+---
+
+## 11. 相关文档索引（2026-07-09 补记）
+
+- 标注 V1 / V1.1 / 手机端标注交互：`docs/model-annotation-v1-acceptance.md`
+- LCC ZIP 自动解包生产安全：`docs/lcc-zip-auto-extract-safety.md`
+- 模型浏览器架构（含社区筛选隐藏、入口链接原生分发）：`docs/model-viewer-architecture.md`
+- 阶段检查点：`docs/dev-checkpoint.md`

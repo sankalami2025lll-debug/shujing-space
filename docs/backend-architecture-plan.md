@@ -330,6 +330,7 @@
 | `OSS_FORCE_PATH_STYLE` | S3 兼容参数 | 当前 `false` |
 | `MAX_MODEL_SIZE_MB` | 模型文件大小限制 | 当前 500；ZIP 特殊规则在服务端额外放宽 |
 | `MAX_COVER_SIZE_MB` | 封面大小限制 | 当前 10 |
+| `LCC_ZIP_AUTO_EXTRACT_MAX_MB` | LCC/LCC2 ZIP 成果包自动解包上限（MB） | **默认 512**；2C4G 生产不建议调高。超过上限快速失败（不下载/不解压），提示改用 `.lcc/.lcc2` 入口链接发布。详见 `docs/lcc-zip-auto-extract-safety.md` |
 
 ### 7.2 前端当前常用变量
 

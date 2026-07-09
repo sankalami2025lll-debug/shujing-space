@@ -142,7 +142,7 @@
 | # | 类型 | 设备 | 操作步骤 | 预期结果 | 是否通过 | 备注 |
 |---|---|---|---|---|---|---|
 | L1 | 🔌 | 🔁 | 进入模型库 | 显示卡片网格；“共 N 个模型”N=`GET /models` 的 total | | |
-| L2 | 🔌 | 🔁 | 切换类型分类 | 列表按 `type` 过滤，N 更新；分类来自 `GET /categories`（失败用静态） | | |
+| L2 | 🔌 | 🔁 | 切换类型分类 | **当前 UI 已隐藏分类筛选整行**（`SHOW_MODEL_TYPE_FILTER=false`，提交 `03c8c72`）。验收时：页面上不应再出现「全部模型 / BIM 模型 / 构件级模型 / 具身智能…」筛选按钮；搜索框、排序、列表仍可用。接口 `GET /categories` 与 type 过滤逻辑保留，恢复筛选时改常量即可。 | | |
 | L3 | 🔌 | 🔁 | 搜索框输入关键词 | 点击搜索后按 `keyword` 请求过滤 | | |
 | L4 | 🔌 | 🔁 | 点击“搜索” | 失焦；结果与 keyword 一致 | | |
 | L5 | 🔌 | 🔁 | 切换四种排序 | 顺序随 `sort` 变化（recommended 当前等同 latest，属已知） | | |
@@ -211,12 +211,13 @@
 |---|---|---|---|---|---|---|
 | L13 | UI | 🔁 | 点击发布入口（须先登录） | `/models` 顶栏「发布模型」或 `/models/me`「我的模型」虚线卡（Next 8C）打开发布弹窗 | | |
 | L14 | UI | 🔁 | 发布弹窗关闭方式 | Esc/遮罩/关闭按钮正常 | | |
+| L14b | UI | 🔁 | 发布弹窗格式提示文案 | 可见「支持 lcc / lcc2 / ply / sog 等…」及「512MB 以上 LCC/LCC2 成果包请先解包上传至 OSS…按原生模型浏览器打开，不会作为 iframe 外链」 | | |
 | L15a | 🔌 | 🔁 | 训练申请弹窗内容与提交 | 仅机器人训练场景；`POST /training-applications` 成功态；失败 toast | | |
 | L15b | 🔌 | 🔁 | 登录后提交训练申请 | 「我的申请」可见该条（游客提交不进本人列表） | | |
 | L16 | 🔌 | 🔁 | 个人中心四 Tab | 数据来自 `users/me/*` + `me/stats` 角标 | | |
 | L17 | 🔌 | 🔁 | 我的模型/收藏卡片点击 | 进入对应详情；下架收藏灰显不可点 | | |
 | L18 | UI | 📱 | 各弹窗移动端 | 可滚动、可关闭、无横向溢出 | | |
-| L19 | 🔌 | 🔁 | **viewerUrl 发布**（不选文件） | 填 https 查看链接 + 必填项 → `POST /api/models` 成功 → `/models` 列表可见（**当前环境可完整验收**） | | |
+| L19 | 🔌 | 🔁 | **viewerUrl 发布**（不选文件） | 填 https 查看链接 + 必填项 → `POST /api/models` 成功 → `/models` 列表可见。**特例**：链接后缀为 `.lcc` / `.lcc2` 时，后端写入 `fileFormat=lcc|lcc2`、`viewerType=native`、`processingStatus=ready`，详情页走 `/viewer/lcc/[id]` 原生 Viewer，**不按 iframe 外链**（见 `docs/lcc-zip-auto-extract-safety.md`）。其它 https 外链仍为 `viewerType=iframe`。 | | |
 | L20 | 🔌 | 🔁 | **选模型/封面文件**（无 OSS 时） | presign **503**，提示对象存储未配置（当前固定文案仍可能显示 `OSS` 历史命名），不伪造成功（**当前环境可验收负向路径**） | | |
 | L21 | 🔌 | ➖ | **OSS 文件直传发布**（须真实凭证+CORS） | presign 200 → PUT → callback → 带 fileId 发布成功 | ➖ | **待 OSS 配置后验收，不计入当前 Next 用户侧收口** |
 
