@@ -21,6 +21,10 @@ import type {
   ModelHeightClipOptions,
 } from "@/components/models/viewers/types";
 import type { LaunchViewSaveResult, ModelLaunchView } from "@/lib/types";
+import {
+  getLccExternalConfigForRenderQuality,
+  type LccRenderQuality,
+} from "@/lib/lcc-render-quality";
 
 const LCC_WEB_VERSION = "0.6.1";
 const LCC_WEB_UMD_URL = `/vendor/lcc-web/${LCC_WEB_VERSION}/lcc-web-sdk.umd.js`;
@@ -55,6 +59,8 @@ interface LccLoadParams {
   useIndexDB?: boolean;
   useLoadingEffect?: boolean;
   useLcc2?: boolean;
+  maxHostCacheSize?: number;
+  maxGpuCacheSize?: number;
   maxConcurrentDownloads?: number;
   workerPerFrameRequests?: number;
   enableLoadingLog?: boolean;
@@ -63,6 +69,7 @@ interface LccLoadParams {
 interface Lcc2LoadConfigInput {
   isMobileViewer: boolean;
   saveDataEnabled: boolean;
+  renderQuality: LccRenderQuality;
 }
 
 interface LccRenderApi {
@@ -191,6 +198,12 @@ interface LccViewerProps {
   isHelpOpen?: boolean;
   /** 外层页面已承担 Loading（如手机分享 iframe）；隐藏本组件内 Loading Overlay，避免双层交接闪烁 */
   suppressLoadingOverlay?: boolean;
+  /**
+   * 渲染质量档位：性能 / 平衡 / 质量。
+   * 变更时通过 effect 依赖触发 unload + 按新 externalConfig reload（不整页刷新）。
+   * 手机端由调用方 clamp 为 performance。
+   */
+  renderQuality?: LccRenderQuality;
 }
 
 let lccSdkPromise: Promise<LccRenderApi> | null = null;
@@ -559,20 +572,16 @@ function isMobileViewerFromLocationSearch() {
   return new URLSearchParams(window.location.search).get("mobile") === "1";
 }
 
-function getLcc2LoadConfig({ isMobileViewer, saveDataEnabled }: Lcc2LoadConfigInput) {
-  if (isMobileViewer || saveDataEnabled) {
-    return {
-      maxConcurrentDownloads: 1,
-      workerPerFrameRequests: 1,
-      reason: isMobileViewer ? "mobile-viewer" : "save-data",
-    };
-  }
-
-  return {
-    maxConcurrentDownloads: 6,
-    workerPerFrameRequests: 3,
-    reason: "desktop-high-quality",
-  };
+function getLcc2LoadConfig({
+  isMobileViewer,
+  saveDataEnabled,
+  renderQuality,
+}: Lcc2LoadConfigInput) {
+  return getLccExternalConfigForRenderQuality({
+    renderQuality,
+    isMobileViewer,
+    saveDataEnabled,
+  });
 }
 
 function buildLccLoadParams({
@@ -585,20 +594,32 @@ function buildLccLoadParams({
   lcc2Config: Lcc2LoadConfigInput;
 }) {
   // LCC2 仍使用同一个 LCCRender，只在格式参数上做最小分支。
+  // LCC 与 LCC2 均按 renderQuality 注入并发/缓存（手机端强制保守）。
+  const externalConfig = getLcc2LoadConfig(lcc2Config);
+  const qualityParams = {
+    maxConcurrentDownloads: externalConfig.maxConcurrentDownloads,
+    workerPerFrameRequests: externalConfig.workerPerFrameRequests,
+    ...(externalConfig.maxHostCacheSize !== undefined
+      ? { maxHostCacheSize: externalConfig.maxHostCacheSize }
+      : {}),
+    ...(externalConfig.maxGpuCacheSize !== undefined
+      ? { maxGpuCacheSize: externalConfig.maxGpuCacheSize }
+      : {}),
+    enableLoadingLog: IS_DEV,
+  };
+
   if (useLcc2) {
-    const externalConfig = getLcc2LoadConfig(lcc2Config);
     return {
       ...baseParams,
       useLcc2: true,
-      maxConcurrentDownloads: externalConfig.maxConcurrentDownloads,
-      workerPerFrameRequests: externalConfig.workerPerFrameRequests,
-      enableLoadingLog: IS_DEV,
+      ...qualityParams,
     } satisfies LccLoadParams;
   }
 
   return {
     ...baseParams,
     useLcc2: false,
+    ...qualityParams,
   } satisfies LccLoadParams;
 }
 
@@ -610,6 +631,10 @@ function getFormatSpecificLoadLogFields(format: SupportedLccFormat, params: LccL
       params.maxConcurrentDownloads === undefined ? "default" : params.maxConcurrentDownloads,
     workerPerFrameRequests:
       params.workerPerFrameRequests === undefined ? "default" : params.workerPerFrameRequests,
+    maxHostCacheSize:
+      params.maxHostCacheSize === undefined ? "default" : params.maxHostCacheSize,
+    maxGpuCacheSize:
+      params.maxGpuCacheSize === undefined ? "default" : params.maxGpuCacheSize,
     enableLoadingLog:
       params.enableLoadingLog === undefined ? "default" : params.enableLoadingLog,
   };
@@ -617,6 +642,10 @@ function getFormatSpecificLoadLogFields(format: SupportedLccFormat, params: LccL
 
 function getExternalConfigLogFields(params: LccLoadParams) {
   return {
+    MaxCPUCacheSize:
+      params.maxHostCacheSize === undefined ? "default" : params.maxHostCacheSize,
+    MaxGPUCacheSize:
+      params.maxGpuCacheSize === undefined ? "default" : params.maxGpuCacheSize,
     MaxConcurrentDownloads:
       params.maxConcurrentDownloads === undefined ? "default" : params.maxConcurrentDownloads,
     WorkerPerFrameRequests:
@@ -2147,6 +2176,16 @@ function logLcc2QualityDiagnostics(payload: Record<string, unknown>) {
   console.info("[LCC Viewer] lcc2 quality diagnostics", payload);
 }
 
+function logLcc2CacheQualityConfig(payload: Record<string, unknown>) {
+  if (typeof console === "undefined") return;
+  console.info("[LCC Viewer] lcc2 cache/quality config", payload);
+}
+
+function logLccRenderQualityChanged(payload: Record<string, unknown>) {
+  if (typeof console === "undefined") return;
+  console.info("[LCC Viewer] render quality changed", payload);
+}
+
 function resolveLccRender() {
   return window.LCC?.LCCRender ?? null;
 }
@@ -2258,8 +2297,14 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
   controlMode = "walk",
   isHelpOpen = false,
   suppressLoadingOverlay = false,
+  renderQuality = "balanced",
 }, ref) {
   const isMobileViewerForLoad = isMobileViewer ?? isMobileViewerFromLocationSearch();
+  // 手机端强制 performance，避免高缓存/高并发卡死
+  const effectiveRenderQuality: LccRenderQuality = isMobileViewerForLoad
+    ? "performance"
+    : renderQuality;
+  const prevRenderQualityRef = useRef<LccRenderQuality | null>(null);
   const mountRef = useRef<HTMLDivElement | null>(null);
   const viewerRootRef = useRef<HTMLDivElement | null>(null);
   const isDisposedRef = useRef(false);
@@ -2417,6 +2462,48 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
     [fileFormat, resolvedSourceUrl],
   );
   const lccFormat = lccFormatDecision.format;
+
+  // 档位变化诊断：父组件切换「性能/平衡/质量」后，在 unload+reload 前打日志
+  useEffect(() => {
+    const previous = prevRenderQualityRef.current;
+    prevRenderQualityRef.current = effectiveRenderQuality;
+    if (previous === null || previous === effectiveRenderQuality) return;
+
+    const saveDataEnabled = isBrowserSaveDataEnabled();
+    const configSummary = getLcc2LoadConfig({
+      isMobileViewer: isMobileViewerForLoad,
+      saveDataEnabled,
+      renderQuality: effectiveRenderQuality,
+    });
+    logLccRenderQualityChanged({
+      modelId: modelId ?? null,
+      entryUrl,
+      from: previous,
+      to: effectiveRenderQuality,
+      renderQuality: effectiveRenderQuality,
+      isMobileViewer: isMobileViewerForLoad,
+      useLcc2: lccFormat === "lcc2",
+      saveDataEnabled,
+      externalConfig: {
+        maxConcurrentDownloads: configSummary.maxConcurrentDownloads,
+        workerPerFrameRequests: configSummary.workerPerFrameRequests,
+        maxHostCacheSize: configSummary.maxHostCacheSize ?? null,
+        maxGpuCacheSize: configSummary.maxGpuCacheSize ?? null,
+      },
+      maxConcurrentDownloads: configSummary.maxConcurrentDownloads,
+      workerPerFrameRequests: configSummary.workerPerFrameRequests,
+      maxHostCacheSize: configSummary.maxHostCacheSize ?? null,
+      maxGpuCacheSize: configSummary.maxGpuCacheSize ?? null,
+      reason: configSummary.reason,
+      reloadStrategy: "unload-and-reload",
+    });
+  }, [
+    effectiveRenderQuality,
+    entryUrl,
+    isMobileViewerForLoad,
+    lccFormat,
+    modelId,
+  ]);
 
   const resolveCurrentBounds = () => {
     const runtimeInstance = getRuntimeInstance(lccInstanceRef.current);
@@ -4190,8 +4277,9 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
         const lcc2ConfigInput = {
           isMobileViewer: isMobileViewerForLoad,
           saveDataEnabled,
+          renderQuality: effectiveRenderQuality,
         };
-        const lcc2ConfigSummary = useLcc2 ? getLcc2LoadConfig(lcc2ConfigInput) : null;
+        const lcc2ConfigSummary = getLcc2LoadConfig(lcc2ConfigInput);
         const finalLoadParams = buildLccLoadParams({
           baseParams: baseLoadParams,
           useLcc2,
@@ -4212,11 +4300,49 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
           isMobileViewer: isMobileViewerForLoad,
           saveDataEnabled,
           useLcc2,
+          renderQuality: effectiveRenderQuality,
           externalConfig: getExternalConfigLogFields(finalLoadParams),
-          externalConfigReason: lcc2ConfigSummary?.reason ?? "not-lcc2",
+          externalConfigReason: lcc2ConfigSummary.reason,
+          maxConcurrentDownloads: finalLoadParams.maxConcurrentDownloads ?? null,
+          workerPerFrameRequests: finalLoadParams.workerPerFrameRequests ?? null,
+          maxHostCacheSize: finalLoadParams.maxHostCacheSize ?? null,
+          maxGpuCacheSize: finalLoadParams.maxGpuCacheSize ?? null,
         };
 
         logLccLoadDiagnostics(loadDiagnostics);
+        logLcc2CacheQualityConfig({
+          loadId,
+          modelId: modelId ?? null,
+          entryUrl,
+          fileFormat: fileFormat ?? null,
+          viewerType: viewerType ?? null,
+          context: viewerContext ?? "unknown",
+          readonly: isReadonlyViewer,
+          isMobileViewer: isMobileViewerForLoad,
+          saveDataEnabled,
+          useLcc2,
+          renderQuality: effectiveRenderQuality,
+          externalConfig: getExternalConfigLogFields(finalLoadParams),
+          maxHostCacheSize: finalLoadParams.maxHostCacheSize ?? null,
+          maxGpuCacheSize: finalLoadParams.maxGpuCacheSize ?? null,
+          maxConcurrentDownloads: finalLoadParams.maxConcurrentDownloads ?? null,
+          workerPerFrameRequests: finalLoadParams.workerPerFrameRequests ?? null,
+          MaxCPUCacheSize: finalLoadParams.maxHostCacheSize ?? null,
+          MaxGPUCacheSize: finalLoadParams.maxGpuCacheSize ?? null,
+          MaxConcurrentDownloads: finalLoadParams.maxConcurrentDownloads ?? null,
+          WorkerPerFrameRequests: finalLoadParams.workerPerFrameRequests ?? null,
+        });
+        if (useLcc2) {
+          logLcc2QualityDiagnostics({
+            loadId,
+            modelId: modelId ?? null,
+            entryUrl,
+            useLcc2,
+            renderQuality: effectiveRenderQuality,
+            isMobileViewer: isMobileViewerForLoad,
+            externalConfig: getExternalConfigLogFields(finalLoadParams),
+          });
+        }
         logLccDebug("LCCRender.load 前参数", {
           loadId,
           modelUrl: normalizedModelUrl || null,
@@ -4235,6 +4361,8 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
           hasLcc2SpecificParams:
             finalLoadParams.maxConcurrentDownloads !== undefined ||
             finalLoadParams.workerPerFrameRequests !== undefined ||
+            finalLoadParams.maxHostCacheSize !== undefined ||
+            finalLoadParams.maxGpuCacheSize !== undefined ||
             finalLoadParams.enableLoadingLog !== undefined,
           ...getFormatSpecificLoadLogFields(currentFormat, finalLoadParams),
         });
@@ -4275,7 +4403,7 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
                   ...qualityDiagnostics,
                   note:
                     qualityDiagnostics.recommandMaxLodLevel === 6
-                      ? "SDK recommendation remains 6; this value is computed from SDK LOD metadata/device policy. External config only raises download/request throughput."
+                      ? "SDK recommendation remains 6; this value is computed from SDK LOD metadata/device policy. Cache/download external config does not explicitly override MaxLodUsed."
                       : null,
                 });
               }
@@ -5033,6 +5161,7 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
     entryUrl,
     fileFormat,
     isMobileViewerForLoad,
+    effectiveRenderQuality,
     isReadonlyViewer,
     isEntryFileDataPath,
     lccFormat,

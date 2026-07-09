@@ -66,6 +66,15 @@ import {
   writeCleanModePref,
   annotationCameraSnapshotToLaunchView,
 } from "@/components/models/annotations/model-annotation-types";
+import {
+  clampLccRenderQualityForDevice,
+  labelToLccRenderQuality,
+  lccRenderQualityToLabel,
+  persistLccRenderQuality,
+  resolveInitialLccRenderQuality,
+  type LccRenderQuality,
+  type LccRenderQualityLabel,
+} from "@/lib/lcc-render-quality";
 
 /* ---------- 类型定义 ---------- */
 
@@ -603,6 +612,46 @@ export default function LccViewerIframePage() {
   const [flyingAnnotationId, setFlyingAnnotationId] = useState<number | null>(null);
   // cleanMode：纯净模式，隐藏所有标注 overlay（仅查看者 UI 偏好，写 localStorage）
   const [cleanMode, setCleanMode] = useState<boolean>(() => readCleanModePref());
+  /** 渲染质量档位：桌面默认平衡；mobile=1 强制性能；用户选择写入 localStorage */
+  const [renderQuality, setRenderQuality] = useState<LccRenderQuality>(() =>
+    resolveInitialLccRenderQuality(isMobileViewer),
+  );
+
+  // mobile 切换或首次挂载时，确保手机端不会沿用桌面 quality 高缓存
+  useEffect(() => {
+    setRenderQuality((current) =>
+      clampLccRenderQualityForDevice(current, isMobileViewer),
+    );
+  }, [isMobileViewer]);
+
+  const handleRenderQualityChange = useCallback(
+    (label: LccRenderQualityLabel) => {
+      const next = clampLccRenderQualityForDevice(
+        labelToLccRenderQuality(label),
+        isMobileViewer,
+      );
+      setRenderQuality((prev) => {
+        if (prev === next) return prev;
+        persistLccRenderQuality(next);
+        if (typeof console !== "undefined") {
+          console.info("[LCC Viewer] render quality changed", {
+            modelId: numericId || null,
+            from: prev,
+            to: next,
+            label: lccRenderQualityToLabel(next),
+            isMobileViewer,
+            context: isDetailContext
+              ? "detail"
+              : isShareContext
+                ? "share"
+                : "standalone",
+          });
+        }
+        return next;
+      });
+    },
+    [isDetailContext, isMobileViewer, isShareContext, numericId],
+  );
   // manageMode：owner 标注管理模式（临时关闭纯净模式以显示标注层）
   const [manageMode, setManageMode] = useState(false);
   // 进入管理前保存的纯净模式状态，退出管理时恢复
@@ -2106,6 +2155,7 @@ export default function LccViewerIframePage() {
         controlMode={controlMode}
         isHelpOpen={isHelpOpen}
         suppressLoadingOverlay={isMobileShareViewer}
+        renderQuality={renderQuality}
       />
 
       <ModelMeasureOverlay
@@ -2252,6 +2302,8 @@ export default function LccViewerIframePage() {
               onToggleManageMode={handleToggleManageMode}
               canManageAnnotations={canManageAnnotations}
               onTakeScreenshot={handleOpenScreenshotDialog}
+              renderQuality={lccRenderQualityToLabel(renderQuality)}
+              onRenderQualityChange={handleRenderQualityChange}
             />
           </div>
         </div>

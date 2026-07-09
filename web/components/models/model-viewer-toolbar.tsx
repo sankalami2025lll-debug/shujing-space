@@ -28,6 +28,7 @@ import type {
   ModelViewerCapabilities,
   ModelViewerControlMode,
 } from "@/components/models/viewers/types";
+import type { LccRenderQualityLabel } from "@/lib/lcc-render-quality";
 
 interface ModelViewerToolbarProps {
   capabilities: ModelViewerCapabilities;
@@ -62,6 +63,12 @@ interface ModelViewerToolbarProps {
   manageMode?: boolean;
   onToggleManageMode?: () => void;
   canManageAnnotations?: boolean;
+  /**
+   * 渲染质量档位（性能 / 平衡 / 质量）。
+   * 受控：由 iframe 页 / Shell 持有，切换后写入 localStorage 并驱动 LccViewer reload。
+   */
+  renderQuality?: LccRenderQualityLabel;
+  onRenderQualityChange?: (renderQuality: LccRenderQualityLabel) => void;
 }
 
 type ActiveToolbarMenu = "none" | "operation" | "settings" | "section";
@@ -82,7 +89,7 @@ type ToolbarSettings = {
   collision: boolean;
   moveSpeed: number;
   environment: "无" | "环境" | "天空球";
-  renderQuality: "性能" | "平衡" | "质量";
+  renderQuality: LccRenderQualityLabel;
   unitSystem: "公制" | "英制";
   lengthUnit: "m" | "mm";
 };
@@ -229,12 +236,14 @@ function ToolbarSettingsPanel({
   onClose,
   onSetEnvironmentEnabled,
   canUseEnvironment,
+  onRenderQualityChange,
 }: {
   settings: ToolbarSettings;
   onChange: (updater: (settings: ToolbarSettings) => ToolbarSettings) => void;
   onClose: () => void;
   onSetEnvironmentEnabled?: (enabled: boolean) => boolean;
   canUseEnvironment: boolean;
+  onRenderQualityChange?: (renderQuality: LccRenderQualityLabel) => void;
 }) {
   const handleSelectEnvironment = (environment: ToolbarSettings["environment"]) => {
     if (environment === "天空球") {
@@ -253,6 +262,11 @@ function ToolbarSettingsPanel({
 
     onSetEnvironmentEnabled?.(false);
     onChange((current) => ({ ...current, environment }));
+  };
+
+  const handleSelectRenderQuality = (renderQuality: LccRenderQualityLabel) => {
+    onChange((current) => ({ ...current, renderQuality }));
+    onRenderQualityChange?.(renderQuality);
   };
 
   return (
@@ -330,9 +344,7 @@ function ToolbarSettingsPanel({
         label="渲染选项"
         options={["性能", "平衡", "质量"] as const}
         value={settings.renderQuality}
-        onSelect={(renderQuality) =>
-          onChange((current) => ({ ...current, renderQuality }))
-        }
+        onSelect={handleSelectRenderQuality}
       />
 
       <div className="mb-2 flex gap-3">
@@ -393,6 +405,8 @@ export function ModelViewerToolbar({
   onToggleManageMode,
   canManageAnnotations = false,
   onTakeScreenshot,
+  renderQuality: renderQualityProp,
+  onRenderQualityChange,
 }: ModelViewerToolbarProps) {
   const [isToolbarOpen, setIsToolbarOpen] = useState(true);
   const [activeMenu, setActiveMenu] = useState<ActiveToolbarMenu>("none");
@@ -400,10 +414,20 @@ export function ModelViewerToolbar({
     collision: true,
     moveSpeed: 1,
     environment: "无",
-    renderQuality: "平衡",
+    renderQuality: renderQualityProp ?? "平衡",
     unitSystem: "公制",
     lengthUnit: "m",
   });
+
+  // 受控同步：父组件 renderQuality 变化时回写设置面板选中态
+  useEffect(() => {
+    if (!renderQualityProp) return;
+    setSettings((current) =>
+      current.renderQuality === renderQualityProp
+        ? current
+        : { ...current, renderQuality: renderQualityProp },
+    );
+  }, [renderQualityProp]);
   const [sectionState, setSectionState] = useState<ToolbarSectionState>({
     enabled: false,
     horizontalPercent: SECTION_CENTER_PERCENT,
@@ -758,6 +782,7 @@ export function ModelViewerToolbar({
           onClose={() => setActiveMenu("none")}
           onSetEnvironmentEnabled={onSetEnvironmentEnabled}
           canUseEnvironment={canUseEnvironmentToggle}
+          onRenderQualityChange={onRenderQualityChange}
         />
       ) : null}
 

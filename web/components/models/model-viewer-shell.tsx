@@ -35,6 +35,15 @@ import {
   type ModelHeightClipOptions,
 } from "@/components/models/viewers/types";
 import { ApiError, http } from "@/lib/http";
+import {
+  clampLccRenderQualityForDevice,
+  labelToLccRenderQuality,
+  lccRenderQualityToLabel,
+  persistLccRenderQuality,
+  resolveInitialLccRenderQuality,
+  type LccRenderQuality,
+  type LccRenderQualityLabel,
+} from "@/lib/lcc-render-quality";
 import { getModelViewerKind } from "@/lib/model-viewer-kind";
 import type { ModelDetail, ModelLaunchView } from "@/lib/types";
 
@@ -340,6 +349,32 @@ export function ModelViewerShell({ model, onLaunchViewSaved }: ModelViewerShellP
   const isLccViewer = viewerKind === "lcc";
   const canShowSaveLaunchView =
     !processingBlocked && model.canSaveLaunchView && viewerCapabilities.saveView;
+  /** 渲染质量档位（兼容非详情页复用）；详情页正式路径在 /viewer/lcc/[id] iframe 内 */
+  const [renderQuality, setRenderQuality] = useState<LccRenderQuality>(() =>
+    resolveInitialLccRenderQuality(false),
+  );
+
+  const handleRenderQualityChange = useCallback((label: LccRenderQualityLabel) => {
+    const next = clampLccRenderQualityForDevice(
+      labelToLccRenderQuality(label),
+      false,
+    );
+    setRenderQuality((prev) => {
+      if (prev === next) return prev;
+      persistLccRenderQuality(next);
+      if (typeof console !== "undefined") {
+        console.info("[LCC Viewer] render quality changed", {
+          modelId: model.id,
+          from: prev,
+          to: next,
+          label: lccRenderQualityToLabel(next),
+          isMobileViewer: false,
+          context: "embedded-shell",
+        });
+      }
+      return next;
+    });
+  }, [model.id]);
 
   useEffect(() => {
     measurePointsRef.current = measurePoints;
@@ -1229,6 +1264,7 @@ export function ModelViewerShell({ model, onLaunchViewSaved }: ModelViewerShellP
             processingBlocked={processingBlocked}
             controlMode={controlMode}
             isHelpOpen={isHelpOpen}
+            renderQuality={renderQuality}
           />
         );
       case "glb":
@@ -1329,6 +1365,8 @@ export function ModelViewerShell({ model, onLaunchViewSaved }: ModelViewerShellP
               controlMode={controlMode}
               onToggleControlMode={isLccViewer ? handleToggleControlMode : undefined}
               canToggleControlMode={isLccViewer && !processingBlocked}
+              renderQuality={lccRenderQualityToLabel(renderQuality)}
+              onRenderQualityChange={isLccViewer ? handleRenderQualityChange : undefined}
             />
           </div>
         </div>
