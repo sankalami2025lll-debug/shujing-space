@@ -2092,10 +2092,14 @@ export default function LccViewerIframePage() {
       <LccViewer
         key={`${detail.id}-${detail.viewerUrl || ""}-${detail.fileFormat || "none"}`}
         ref={viewerHandleRef}
+        modelId={detail.id}
         modelUrl={detail.viewerUrl}
         viewerUrl={detail.viewerUrl}
         fileFormat={detail.fileFormat}
         viewerType={detail.viewerType}
+        viewerContext={isDetailContext ? "detail" : isShareContext ? "share" : "standalone"}
+        isReadonlyViewer={isReadonly}
+        isMobileViewer={isMobileViewer}
         launchView={detail.launchView}
         defaultCameraJson={detail.defaultCameraJson}
         processingBlocked={processingBlocked}

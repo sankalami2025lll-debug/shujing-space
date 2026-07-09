@@ -1218,10 +1218,12 @@ export function ModelViewerShell({ model, onLaunchViewSaved }: ModelViewerShellP
           <LccViewer
             key={`${model.id}-${model.viewerUrl || ""}-${model.fileFormat || "none"}-${viewerResetSeed}`}
             ref={viewerHandleRef}
+            modelId={model.id}
             modelUrl={model.viewerUrl}
             viewerUrl={model.viewerUrl}
             fileFormat={model.fileFormat}
             viewerType={model.viewerType}
+            viewerContext="embedded"
             launchView={model.launchView}
             defaultCameraJson={model.defaultCameraJson}
             processingBlocked={processingBlocked}

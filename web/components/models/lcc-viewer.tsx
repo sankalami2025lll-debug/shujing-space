@@ -60,6 +60,11 @@ interface LccLoadParams {
   enableLoadingLog?: boolean;
 }
 
+interface Lcc2LoadConfigInput {
+  isMobileViewer: boolean;
+  saveDataEnabled: boolean;
+}
+
 interface LccRenderApi {
   load: (
     params: LccLoadParams,
@@ -169,10 +174,14 @@ interface DefaultViewResolution {
 }
 
 interface LccViewerProps {
+  modelId?: string | number | null;
   modelUrl?: string | null;
   viewerUrl?: string | null;
   fileFormat?: string | null;
   viewerType?: string | null;
+  viewerContext?: "detail" | "share" | "standalone" | "embedded" | string | null;
+  isReadonlyViewer?: boolean;
+  isMobileViewer?: boolean;
   launchView?: ModelLaunchView | null;
   defaultCameraJson?: string | null;
   processingBlocked?: boolean;
@@ -530,20 +539,59 @@ function isEntryFileUrl(inputUrl?: string | null) {
   return extension === "lcc" || extension === "lcc2";
 }
 
+function isBrowserSaveDataEnabled() {
+  if (typeof navigator === "undefined") return false;
+  const connection = (navigator as Navigator & {
+    connection?: { saveData?: boolean };
+    mozConnection?: { saveData?: boolean };
+    webkitConnection?: { saveData?: boolean };
+  }).connection ?? (navigator as Navigator & {
+    mozConnection?: { saveData?: boolean };
+  }).mozConnection ?? (navigator as Navigator & {
+    webkitConnection?: { saveData?: boolean };
+  }).webkitConnection;
+
+  return Boolean(connection?.saveData);
+}
+
+function isMobileViewerFromLocationSearch() {
+  if (typeof window === "undefined") return false;
+  return new URLSearchParams(window.location.search).get("mobile") === "1";
+}
+
+function getLcc2LoadConfig({ isMobileViewer, saveDataEnabled }: Lcc2LoadConfigInput) {
+  if (isMobileViewer || saveDataEnabled) {
+    return {
+      maxConcurrentDownloads: 1,
+      workerPerFrameRequests: 1,
+      reason: isMobileViewer ? "mobile-viewer" : "save-data",
+    };
+  }
+
+  return {
+    maxConcurrentDownloads: 6,
+    workerPerFrameRequests: 3,
+    reason: "desktop-high-quality",
+  };
+}
+
 function buildLccLoadParams({
   baseParams,
   useLcc2,
+  lcc2Config,
 }: {
   baseParams: LccLoadParams;
   useLcc2: boolean;
+  lcc2Config: Lcc2LoadConfigInput;
 }) {
   // LCC2 仍使用同一个 LCCRender，只在格式参数上做最小分支。
   if (useLcc2) {
+    const externalConfig = getLcc2LoadConfig(lcc2Config);
     return {
       ...baseParams,
       useLcc2: true,
-      maxConcurrentDownloads: 1,
-      workerPerFrameRequests: 1,
+      maxConcurrentDownloads: externalConfig.maxConcurrentDownloads,
+      workerPerFrameRequests: externalConfig.workerPerFrameRequests,
       enableLoadingLog: IS_DEV,
     } satisfies LccLoadParams;
   }
@@ -563,6 +611,17 @@ function getFormatSpecificLoadLogFields(format: SupportedLccFormat, params: LccL
     workerPerFrameRequests:
       params.workerPerFrameRequests === undefined ? "default" : params.workerPerFrameRequests,
     enableLoadingLog:
+      params.enableLoadingLog === undefined ? "default" : params.enableLoadingLog,
+  };
+}
+
+function getExternalConfigLogFields(params: LccLoadParams) {
+  return {
+    MaxConcurrentDownloads:
+      params.maxConcurrentDownloads === undefined ? "default" : params.maxConcurrentDownloads,
+    WorkerPerFrameRequests:
+      params.workerPerFrameRequests === undefined ? "default" : params.workerPerFrameRequests,
+    EnableLoadingLog:
       params.enableLoadingLog === undefined ? "default" : params.enableLoadingLog,
   };
 }
@@ -2021,6 +2080,73 @@ function logLcc2RuntimeDiagnostics(args: {
   });
 }
 
+function findNumericField(value: unknown, targetKey: string, maxDepth = 5) {
+  const visited = new WeakSet<object>();
+  const stack: Array<{ value: unknown; depth: number }> = [{ value, depth: 0 }];
+
+  while (stack.length > 0) {
+    const current = stack.pop();
+    if (!current || current.depth > maxDepth) continue;
+    if (!current.value || typeof current.value !== "object") continue;
+    if (visited.has(current.value)) continue;
+    visited.add(current.value);
+
+    const record = current.value as Record<string, unknown>;
+    const directValue = record[targetKey];
+    if (typeof directValue === "number" && Number.isFinite(directValue)) {
+      return directValue;
+    }
+
+    for (const key of Object.keys(record)) {
+      const child = record[key];
+      if (child && typeof child === "object") {
+        stack.push({ value: child, depth: current.depth + 1 });
+      }
+    }
+  }
+
+  return null;
+}
+
+function getLcc2QualityDiagnostics(runtimeInstance: LccRuntimeInstance | null) {
+  let meta: unknown = null;
+  try {
+    meta = runtimeInstance?.getMeta?.() ?? null;
+  } catch {
+    meta = null;
+  }
+
+  return {
+    recommandMaxLodLevel:
+      findNumericField(runtimeInstance, "recommandMaxLodLevel", 5) ??
+      findNumericField(meta, "recommandMaxLodLevel", 5),
+    totalDepth:
+      findNumericField(runtimeInstance, "totalDepth", 5) ??
+      findNumericField(runtimeInstance, "depth", 5) ??
+      findNumericField(meta, "totalDepth", 5) ??
+      findNumericField(meta, "depth", 5),
+    totalLevel:
+      findNumericField(runtimeInstance, "totalLevel", 5) ??
+      findNumericField(runtimeInstance, "lodLevels", 5) ??
+      findNumericField(meta, "totalLevel", 5) ??
+      findNumericField(meta, "lodLevels", 5),
+    metaTopLevelKeys:
+      meta && typeof meta === "object"
+        ? Object.keys(meta as Record<string, unknown>).slice(0, 30)
+        : [],
+  };
+}
+
+function logLccLoadDiagnostics(payload: Record<string, unknown>) {
+  if (typeof console === "undefined") return;
+  console.info("[LCC Viewer] load diagnostics", payload);
+}
+
+function logLcc2QualityDiagnostics(payload: Record<string, unknown>) {
+  if (typeof console === "undefined") return;
+  console.info("[LCC Viewer] lcc2 quality diagnostics", payload);
+}
+
 function resolveLccRender() {
   return window.LCC?.LCCRender ?? null;
 }
@@ -2118,10 +2244,14 @@ function ensureLccRender() {
 }
 
 export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function LccViewer({
+  modelId,
   modelUrl,
   viewerUrl,
   fileFormat,
   viewerType,
+  viewerContext,
+  isReadonlyViewer = false,
+  isMobileViewer,
   launchView,
   defaultCameraJson,
   processingBlocked = false,
@@ -2129,6 +2259,7 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
   isHelpOpen = false,
   suppressLoadingOverlay = false,
 }, ref) {
+  const isMobileViewerForLoad = isMobileViewer ?? isMobileViewerFromLocationSearch();
   const mountRef = useRef<HTMLDivElement | null>(null);
   const viewerRootRef = useRef<HTMLDivElement | null>(null);
   const isDisposedRef = useRef(false);
@@ -4055,11 +4186,37 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
           modelMatrix: OFFICIAL_MODEL_MATRIX.clone(),
         };
 
+        const saveDataEnabled = isBrowserSaveDataEnabled();
+        const lcc2ConfigInput = {
+          isMobileViewer: isMobileViewerForLoad,
+          saveDataEnabled,
+        };
+        const lcc2ConfigSummary = useLcc2 ? getLcc2LoadConfig(lcc2ConfigInput) : null;
         const finalLoadParams = buildLccLoadParams({
           baseParams: baseLoadParams,
           useLcc2,
+          lcc2Config: lcc2ConfigInput,
         });
+        const loadDiagnostics = {
+          loadId,
+          modelId: modelId ?? null,
+          modelUrl: normalizedModelUrl || null,
+          viewerUrl: normalizedViewerUrl || null,
+          entryUrl,
+          dataPath: finalLoadParams.dataPath,
+          fileFormat: fileFormat ?? null,
+          formatSource: lccFormatDecision.source,
+          viewerType: viewerType ?? null,
+          context: viewerContext ?? "unknown",
+          readonly: isReadonlyViewer,
+          isMobileViewer: isMobileViewerForLoad,
+          saveDataEnabled,
+          useLcc2,
+          externalConfig: getExternalConfigLogFields(finalLoadParams),
+          externalConfigReason: lcc2ConfigSummary?.reason ?? "not-lcc2",
+        };
 
+        logLccLoadDiagnostics(loadDiagnostics);
         logLccDebug("LCCRender.load 前参数", {
           loadId,
           modelUrl: normalizedModelUrl || null,
@@ -4111,6 +4268,17 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
                 runtimeInstance,
                 currentFormat,
               });
+              if (currentFormat === "lcc2") {
+                const qualityDiagnostics = getLcc2QualityDiagnostics(runtimeInstance);
+                logLcc2QualityDiagnostics({
+                  ...loadDiagnostics,
+                  ...qualityDiagnostics,
+                  note:
+                    qualityDiagnostics.recommandMaxLodLevel === 6
+                      ? "SDK recommendation remains 6; this value is computed from SDK LOD metadata/device policy. External config only raises download/request throughput."
+                      : null,
+                });
+              }
               const rawSdkBounds = runtimeInstance?.getBounds?.() ?? null;
               const { bounds: activeBounds, source: boundsSource } = resolveBoundsForCameraFit({
                 loadedObject,
@@ -4864,9 +5032,12 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
     dataExtension,
     entryUrl,
     fileFormat,
+    isMobileViewerForLoad,
+    isReadonlyViewer,
     isEntryFileDataPath,
     lccFormat,
     lccFormatDecision.source,
+    modelId,
     normalizedModelUrl,
     normalizedDefaultCameraJson,
     normalizedViewerUrl,
@@ -4874,6 +5045,7 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
     completeViewerLoading,
     resolveRelevantResourceStability,
     resolvedSourceUrl,
+    viewerContext,
     viewerType,
     markDebugEvent,
     setDebugAttr,
