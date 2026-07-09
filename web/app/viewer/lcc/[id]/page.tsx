@@ -612,43 +612,37 @@ export default function LccViewerIframePage() {
   const [flyingAnnotationId, setFlyingAnnotationId] = useState<number | null>(null);
   // cleanMode：纯净模式，隐藏所有标注 overlay（仅查看者 UI 偏好，写 localStorage）
   const [cleanMode, setCleanMode] = useState<boolean>(() => readCleanModePref());
-  /** 渲染质量档位：桌面默认平衡；mobile=1 强制性能；用户选择写入 localStorage */
+  /** 渲染质量档位：桌面默认平衡；仅 mobile=1 强制性能；切换只写 localStorage，不热 reload */
   const [renderQuality, setRenderQuality] = useState<LccRenderQuality>(() =>
     resolveInitialLccRenderQuality(isMobileViewer),
   );
 
-  // mobile 切换或首次挂载时，确保手机端不会沿用桌面 quality 高缓存
-  useEffect(() => {
-    setRenderQuality((current) =>
-      clampLccRenderQualityForDevice(current, isMobileViewer),
-    );
-  }, [isMobileViewer]);
-
   const handleRenderQualityChange = useCallback(
     (label: LccRenderQualityLabel) => {
-      const next = clampLccRenderQualityForDevice(
-        labelToLccRenderQuality(label),
-        isMobileViewer,
-      );
-      setRenderQuality((prev) => {
-        if (prev === next) return prev;
-        persistLccRenderQuality(next);
-        if (typeof console !== "undefined") {
-          console.info("[LCC Viewer] render quality changed", {
-            modelId: numericId || null,
-            from: prev,
-            to: next,
-            label: lccRenderQualityToLabel(next),
-            isMobileViewer,
-            context: isDetailContext
-              ? "detail"
-              : isShareContext
-                ? "share"
-                : "standalone",
-          });
-        }
-        return next;
-      });
+      const requested = labelToLccRenderQuality(label);
+      const next = clampLccRenderQualityForDevice(requested, isMobileViewer);
+      setRenderQuality(next);
+      persistLccRenderQuality(next);
+      if (typeof console !== "undefined") {
+        console.info("[LCC Viewer] render quality saved", {
+          modelId: numericId || null,
+          renderQuality: next,
+          label: lccRenderQualityToLabel(next),
+          requested,
+          isMobileViewer,
+          appliesOn: "next-open",
+          context: isDetailContext
+            ? "detail"
+            : isShareContext
+              ? "share"
+              : "standalone",
+        });
+      }
+      if (isMobileViewer && requested !== "performance") {
+        toast.info("手机端仅支持性能模式，已保存为性能。重新打开模型后生效。");
+        return;
+      }
+      toast.success("渲染质量已保存，重新打开模型后生效。");
     },
     [isDetailContext, isMobileViewer, isShareContext, numericId],
   );

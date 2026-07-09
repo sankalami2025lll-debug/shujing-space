@@ -349,7 +349,7 @@ export function ModelViewerShell({ model, onLaunchViewSaved }: ModelViewerShellP
   const isLccViewer = viewerKind === "lcc";
   const canShowSaveLaunchView =
     !processingBlocked && model.canSaveLaunchView && viewerCapabilities.saveView;
-  /** 渲染质量档位（兼容非详情页复用）；详情页正式路径在 /viewer/lcc/[id] iframe 内 */
+  /** 渲染质量档位（兼容非详情页复用）；切换只保存，不触发 SDK 热 reload */
   const [renderQuality, setRenderQuality] = useState<LccRenderQuality>(() =>
     resolveInitialLccRenderQuality(false),
   );
@@ -359,21 +359,19 @@ export function ModelViewerShell({ model, onLaunchViewSaved }: ModelViewerShellP
       labelToLccRenderQuality(label),
       false,
     );
-    setRenderQuality((prev) => {
-      if (prev === next) return prev;
-      persistLccRenderQuality(next);
-      if (typeof console !== "undefined") {
-        console.info("[LCC Viewer] render quality changed", {
-          modelId: model.id,
-          from: prev,
-          to: next,
-          label: lccRenderQualityToLabel(next),
-          isMobileViewer: false,
-          context: "embedded-shell",
-        });
-      }
-      return next;
-    });
+    setRenderQuality(next);
+    persistLccRenderQuality(next);
+    if (typeof console !== "undefined") {
+      console.info("[LCC Viewer] render quality saved", {
+        modelId: model.id,
+        renderQuality: next,
+        label: lccRenderQualityToLabel(next),
+        isMobileViewer: false,
+        appliesOn: "next-open",
+        context: "embedded-shell",
+      });
+    }
+    toast.success("渲染质量已保存，重新打开模型后生效。");
   }, [model.id]);
 
   useEffect(() => {

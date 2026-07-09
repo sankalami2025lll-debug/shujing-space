@@ -200,7 +200,7 @@ interface LccViewerProps {
   suppressLoadingOverlay?: boolean;
   /**
    * 渲染质量档位：性能 / 平衡 / 质量。
-   * 变更时通过 effect 依赖触发 unload + 按新 externalConfig reload（不整页刷新）。
+   * 仅在首次 LCCRender.load 前生效；运行中切换不触发 SDK unload/reload（SDK 0.6.1 热切换不稳定）。
    * 手机端由调用方 clamp 为 performance。
    */
   renderQuality?: LccRenderQuality;
@@ -2181,11 +2181,6 @@ function logLcc2CacheQualityConfig(payload: Record<string, unknown>) {
   console.info("[LCC Viewer] lcc2 cache/quality config", payload);
 }
 
-function logLccRenderQualityChanged(payload: Record<string, unknown>) {
-  if (typeof console === "undefined") return;
-  console.info("[LCC Viewer] render quality changed", payload);
-}
-
 function resolveLccRender() {
   return window.LCC?.LCCRender ?? null;
 }
@@ -2299,12 +2294,21 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
   suppressLoadingOverlay = false,
   renderQuality = "balanced",
 }, ref) {
-  const isMobileViewerForLoad = isMobileViewer ?? isMobileViewerFromLocationSearch();
-  // 手机端强制 performance，避免高缓存/高并发卡死
-  const effectiveRenderQuality: LccRenderQuality = isMobileViewerForLoad
-    ? "performance"
-    : renderQuality;
-  const prevRenderQualityRef = useRef<LccRenderQuality | null>(null);
+  // 仅认显式 prop===true 或 URL ?mobile=1，避免把普通桌面误判成手机
+  const isMobileViewerForLoad =
+    isMobileViewer === true ||
+    (isMobileViewer === undefined && isMobileViewerFromLocationSearch());
+  /**
+   * 首次 load 锁定档位：挂载时用父组件传入的 renderQuality（已含 localStorage），
+   * 之后忽略 prop 变化，避免设置面板切换触发 SDK unload+reload 卡在 98%。
+   */
+  const loadRenderQualityRef = useRef<LccRenderQuality | null>(null);
+  if (loadRenderQualityRef.current === null) {
+    loadRenderQualityRef.current = isMobileViewerForLoad
+      ? "performance"
+      : renderQuality;
+  }
+  const effectiveRenderQuality = loadRenderQualityRef.current;
   const mountRef = useRef<HTMLDivElement | null>(null);
   const viewerRootRef = useRef<HTMLDivElement | null>(null);
   const isDisposedRef = useRef(false);
@@ -2462,48 +2466,6 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
     [fileFormat, resolvedSourceUrl],
   );
   const lccFormat = lccFormatDecision.format;
-
-  // 档位变化诊断：父组件切换「性能/平衡/质量」后，在 unload+reload 前打日志
-  useEffect(() => {
-    const previous = prevRenderQualityRef.current;
-    prevRenderQualityRef.current = effectiveRenderQuality;
-    if (previous === null || previous === effectiveRenderQuality) return;
-
-    const saveDataEnabled = isBrowserSaveDataEnabled();
-    const configSummary = getLcc2LoadConfig({
-      isMobileViewer: isMobileViewerForLoad,
-      saveDataEnabled,
-      renderQuality: effectiveRenderQuality,
-    });
-    logLccRenderQualityChanged({
-      modelId: modelId ?? null,
-      entryUrl,
-      from: previous,
-      to: effectiveRenderQuality,
-      renderQuality: effectiveRenderQuality,
-      isMobileViewer: isMobileViewerForLoad,
-      useLcc2: lccFormat === "lcc2",
-      saveDataEnabled,
-      externalConfig: {
-        maxConcurrentDownloads: configSummary.maxConcurrentDownloads,
-        workerPerFrameRequests: configSummary.workerPerFrameRequests,
-        maxHostCacheSize: configSummary.maxHostCacheSize ?? null,
-        maxGpuCacheSize: configSummary.maxGpuCacheSize ?? null,
-      },
-      maxConcurrentDownloads: configSummary.maxConcurrentDownloads,
-      workerPerFrameRequests: configSummary.workerPerFrameRequests,
-      maxHostCacheSize: configSummary.maxHostCacheSize ?? null,
-      maxGpuCacheSize: configSummary.maxGpuCacheSize ?? null,
-      reason: configSummary.reason,
-      reloadStrategy: "unload-and-reload",
-    });
-  }, [
-    effectiveRenderQuality,
-    entryUrl,
-    isMobileViewerForLoad,
-    lccFormat,
-    modelId,
-  ]);
 
   const resolveCurrentBounds = () => {
     const runtimeInstance = getRuntimeInstance(lccInstanceRef.current);
@@ -5161,7 +5123,8 @@ export const LccViewer = forwardRef<ModelViewerHandle, LccViewerProps>(function 
     entryUrl,
     fileFormat,
     isMobileViewerForLoad,
-    effectiveRenderQuality,
+    // 故意不依赖 renderQuality / effectiveRenderQuality：
+    // 档位仅首次 load 生效；运行中切换只写 localStorage，避免 SDK 热 reload 卡 98%。
     isReadonlyViewer,
     isEntryFileDataPath,
     lccFormat,

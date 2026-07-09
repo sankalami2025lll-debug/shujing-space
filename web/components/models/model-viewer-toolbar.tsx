@@ -65,7 +65,7 @@ interface ModelViewerToolbarProps {
   canManageAnnotations?: boolean;
   /**
    * 渲染质量档位（性能 / 平衡 / 质量）。
-   * 受控：由 iframe 页 / Shell 持有，切换后写入 localStorage 并驱动 LccViewer reload。
+   * 受控：由 iframe 页 / Shell 持有；切换后写入 localStorage，重新打开模型后生效（不热 reload SDK）。
    */
   renderQuality?: LccRenderQualityLabel;
   onRenderQualityChange?: (renderQuality: LccRenderQualityLabel) => void;
